@@ -182,7 +182,8 @@
   font-family: monospace;
 }
 
-.sfx-item button {
+.sfx-item button,
+.delete-btn {
   width: 28px;
   height: 28px;
   background: transparent;
@@ -190,11 +191,17 @@
   border-radius: 4px;
   font-size: 14px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
 }
 
-.sfx-item button:hover {
+.sfx-item button:hover,
+.delete-btn:hover {
   background: var(--bg-secondary);
+  color: var(--error);
 }
 
 .sfx-tip {

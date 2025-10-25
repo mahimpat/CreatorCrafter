@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { SFXTrack } from '../context/ProjectContext'
 import { translateSceneToAudioPrompt } from '../utils/promptTranslator'
+import { Trash2 } from 'lucide-react'
 import './SFXEditor.css'
 
 export default function SFXEditor() {
-  const { sfxTracks, addSFXTrack, deleteSFXTrack, currentTime, analysis } = useProject()
+  const { sfxTracks, addSFXTrack, deleteSFXTrack, currentTime, analysis, projectPath } = useProject()
 
   const [isGenerating, setIsGenerating] = useState(false)
   const [prompt, setPrompt] = useState('')
@@ -17,7 +18,23 @@ export default function SFXEditor() {
     try {
       setIsGenerating(true)
 
-      const sfxPath = await window.electronAPI.generateSFX(prompt, duration)
+      let sfxPath = await window.electronAPI.generateSFX(prompt, duration)
+
+      // Copy to project folder if project exists
+      if (projectPath) {
+        try {
+          const relativePath = await window.electronAPI.copyAssetToProject(
+            sfxPath,
+            projectPath,
+            'sfx'
+          )
+          // Resolve to absolute path for playback
+          sfxPath = await window.electronAPI.resolveProjectPath(projectPath, relativePath)
+        } catch (err) {
+          console.error('Failed to copy SFX to project folder:', err)
+          // Continue with temp path if copy fails
+        }
+      }
 
       const track: SFXTrack = {
         id: `sfx-${Date.now()}`,
@@ -42,9 +59,25 @@ export default function SFXEditor() {
 
   const handleImportSFX = async () => {
     try {
-      const filePath = await window.electronAPI.openFileDialog()
+      let filePath = await window.electronAPI.openFileDialog()
 
       if (filePath) {
+        // Copy to project folder if project exists
+        if (projectPath) {
+          try {
+            const relativePath = await window.electronAPI.copyAssetToProject(
+              filePath,
+              projectPath,
+              'sfx'
+            )
+            // Resolve to absolute path for playback
+            filePath = await window.electronAPI.resolveProjectPath(projectPath, relativePath)
+          } catch (err) {
+            console.error('Failed to copy imported SFX to project folder:', err)
+            // Continue with original path if copy fails
+          }
+        }
+
         const track: SFXTrack = {
           id: `sfx-${Date.now()}`,
           path: filePath,
@@ -91,7 +124,23 @@ export default function SFXEditor() {
       setPrompt(finalPrompt)
 
       // Generate the SFX using AudioCraft with the optimized prompt
-      const sfxPath = await window.electronAPI.generateSFX(finalPrompt, duration)
+      let sfxPath = await window.electronAPI.generateSFX(finalPrompt, duration)
+
+      // Copy to project folder if project exists
+      if (projectPath) {
+        try {
+          const relativePath = await window.electronAPI.copyAssetToProject(
+            sfxPath,
+            projectPath,
+            'sfx'
+          )
+          // Resolve to absolute path for playback
+          sfxPath = await window.electronAPI.resolveProjectPath(projectPath, relativePath)
+        } catch (err) {
+          console.error('Failed to copy suggested SFX to project folder:', err)
+          // Continue with temp path if copy fails
+        }
+      }
 
       // Add the SFX track at the suggested timestamp
       const track: SFXTrack = {
@@ -225,7 +274,9 @@ export default function SFXEditor() {
                 </span>
                 <small className="sfx-tip">Drag on timeline to adjust position</small>
               </div>
-              <button onClick={() => deleteSFXTrack(track.id)} title="Delete SFX">🗑️</button>
+              <button onClick={() => deleteSFXTrack(track.id)} title="Delete SFX" className="delete-btn">
+                <Trash2 size={16} />
+              </button>
             </div>
           ))
         )}

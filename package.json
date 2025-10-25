@@ -20,6 +20,7 @@
     "postinstall": "npm run download:models"
   },
   "dependencies": {
+    "lucide-react": "^0.548.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -50,18 +51,27 @@
     ],
     "mac": {
       "category": "public.app-category.video",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "build/icon.ico"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Video"
     }
   }

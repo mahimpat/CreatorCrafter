@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { Subtitle } from '../context/ProjectContext'
+import { Pencil, Trash2 } from 'lucide-react'
 import './SubtitleEditor.css'
 
 export default function SubtitleEditor() {
@@ -190,8 +191,12 @@ export default function SubtitleEditor() {
                   </span>
                 </div>
                 <div className="subtitle-actions">
-                  <button onClick={() => setEditingId(subtitle.id)}>✏️</button>
-                  <button onClick={() => deleteSubtitle(subtitle.id)}>🗑️</button>
+                  <button onClick={() => setEditingId(subtitle.id)} title="Edit subtitle">
+                    <Pencil size={16} />
+                  </button>
+                  <button onClick={() => deleteSubtitle(subtitle.id)} title="Delete subtitle">
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </>
             )}

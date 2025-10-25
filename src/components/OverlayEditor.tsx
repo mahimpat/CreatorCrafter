@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { TextOverlay } from '../context/ProjectContext'
+import { Pencil, Trash2 } from 'lucide-react'
 import './OverlayEditor.css'
 
 export default function OverlayEditor() {
@@ -199,8 +200,12 @@ export default function OverlayEditor() {
                   </span>
                 </div>
                 <div className="overlay-actions">
-                  <button onClick={() => setEditingId(overlay.id)}>✏️</button>
-                  <button onClick={() => deleteTextOverlay(overlay.id)}>🗑️</button>
+                  <button onClick={() => setEditingId(overlay.id)} title="Edit overlay">
+                    <Pencil size={16} />
+                  </button>
+                  <button onClick={() => deleteTextOverlay(overlay.id)} title="Delete overlay">
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </>
             )}

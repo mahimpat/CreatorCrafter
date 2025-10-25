@@ -74,10 +74,15 @@
   font-size: 14px;
   cursor: pointer;
   transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
 }
 
 .subtitle-actions button:hover {
   background: var(--bg-secondary);
+  color: var(--accent-primary);
 }
 
 .subtitle-edit {

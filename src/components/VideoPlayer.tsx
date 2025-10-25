@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from 'react'
 import { useProject } from '../context/ProjectContext'
+import { Play, Pause, Volume2, VolumeX } from 'lucide-react'
 import './VideoPlayer.css'
 
 export default function VideoPlayer() {
@@ -248,7 +249,7 @@ export default function VideoPlayer() {
             {/* SFX playing indicator */}
             {activeSfxTracks.length > 0 && (
               <div className="sfx-indicator">
-                <span className="sfx-icon">🔊</span>
+                <span className="sfx-icon"><Volume2 size={16} /></span>
                 <span className="sfx-count">{activeSfxTracks.length} SFX</span>
               </div>
             )}
@@ -257,13 +258,13 @@ export default function VideoPlayer() {
       </div>
 
       <div className="video-controls">
-        <button className="control-btn" onClick={togglePlayPause}>
-          {isPlaying ? '⏸' : '▶'}
+        <button className="control-btn" onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Play'}>
+          {isPlaying ? <Pause size={20} /> : <Play size={20} />}
         </button>
 
         <div className="volume-control">
-          <button className="control-btn" onClick={toggleMute}>
-            {isMuted ? '🔇' : '🔊'}
+          <button className="control-btn" onClick={toggleMute} title={isMuted ? 'Unmute' : 'Mute'}>
+            {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
           </button>
           <input
             type="range"

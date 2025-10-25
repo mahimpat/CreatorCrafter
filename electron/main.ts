@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, shell } from 'electron'
 import { join } from 'path'
 import { spawn } from 'child_process'
 import * as fs from 'fs/promises'
 import { readFile } from 'fs/promises'
+import * as projectManager from './projectManager'
 
 // Handle running as root (WSL/Linux) - MUST be before any app initialization
 if (process.getuid && process.getuid() === 0) {
@@ -393,6 +394,165 @@ function registerIpcHandlers() {
 
       ffmpeg.on('error', reject)
     })
+  })
+
+  // Project management handlers
+  ipcMain.handle('project:create', async (_, options: { projectName: string; projectPath: string; videoPath: string }) => {
+    try {
+      const { projectName, projectPath, videoPath } = options
+      const fullProjectPath = join(projectPath, projectName)
+
+      // Create project structure
+      await projectManager.createProjectStructure(fullProjectPath)
+
+      // Copy video to project
+      const videoRelativePath = await projectManager.copyAssetToProject(
+        videoPath,
+        fullProjectPath,
+        'source'
+      )
+
+      return {
+        projectPath: fullProjectPath,
+        videoRelativePath
+      }
+    } catch (error) {
+      console.error('Failed to create project:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('project:save', async (_, projectPath: string, projectData: any) => {
+    try {
+      await projectManager.saveProject(projectPath, projectData)
+      await projectManager.addToRecentProjects(projectPath, projectData.projectName)
+      return true
+    } catch (error) {
+      console.error('Failed to save project:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('project:load', async (_, projectPath: string) => {
+    try {
+      const projectData = await projectManager.loadProject(projectPath)
+      await projectManager.addToRecentProjects(projectPath, projectData.projectName)
+      return projectData
+    } catch (error) {
+      console.error('Failed to load project:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('project:openFolder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Select Project Location'
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('project:openFile', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Project Files', extensions: ['json'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      title: 'Open Project'
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null
+    }
+
+    const projectFilePath = result.filePaths[0]
+    // Return the directory containing the project.json file
+    return join(projectFilePath, '..')
+  })
+
+  ipcMain.handle('project:getRecent', async () => {
+    try {
+      return await projectManager.getRecentProjects()
+    } catch (error) {
+      console.error('Failed to get recent projects:', error)
+      return []
+    }
+  })
+
+  ipcMain.handle('project:removeRecent', async (_, projectPath: string) => {
+    try {
+      await projectManager.removeFromRecentProjects(projectPath)
+      return true
+    } catch (error) {
+      console.error('Failed to remove from recent:', error)
+      return false
+    }
+  })
+
+  ipcMain.handle('project:copyAsset', async (_, sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports') => {
+    try {
+      const relativePath = await projectManager.copyAssetToProject(sourcePath, projectPath, assetType)
+      return relativePath
+    } catch (error) {
+      console.error('Failed to copy asset:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('project:resolvePath', async (_, projectPath: string, relativePath: string) => {
+    return projectManager.resolveProjectPath(projectPath, relativePath)
+  })
+
+  ipcMain.handle('project:getSFXFiles', async (_, projectPath: string) => {
+    try {
+      return await projectManager.getProjectSFXFiles(projectPath)
+    } catch (error) {
+      console.error('Failed to get SFX files:', error)
+      return []
+    }
+  })
+
+  ipcMain.handle('project:getExports', async (_, projectPath: string) => {
+    try {
+      return await projectManager.getProjectExports(projectPath)
+    } catch (error) {
+      console.error('Failed to get exports:', error)
+      return []
+    }
+  })
+
+  ipcMain.handle('project:fileExists', async (_, filePath: string) => {
+    return await projectManager.fileExists(filePath)
+  })
+
+  ipcMain.handle('project:deleteFile', async (_, filePath: string) => {
+    try {
+      await projectManager.deleteFile(filePath)
+      return true
+    } catch (error) {
+      console.error('Failed to delete file:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('project:showInFolder', async (_, filePath: string) => {
+    try {
+      shell.showItemInFolder(filePath)
+      return true
+    } catch (error) {
+      console.error('Failed to show in folder:', error)
+      return false
+    }
+  })
+
+  ipcMain.handle('project:isValid', async (_, projectPath: string) => {
+    return await projectManager.isValidProject(projectPath)
   })
 }
 

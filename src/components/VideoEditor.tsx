@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
+import { useAutoSave } from '../hooks/useAutoSave'
 import VideoPlayer from './VideoPlayer'
 import Timeline from './Timeline'
 import SidePanel from './SidePanel'
@@ -8,8 +9,11 @@ import AnalysisPanel from './AnalysisPanel'
 import './VideoEditor.css'
 
 export default function VideoEditor() {
-  const { videoPath, isAnalyzing } = useProject()
-  const [selectedTool, setSelectedTool] = useState<'subtitles' | 'sfx' | 'overlays'>('subtitles')
+  const { isAnalyzing } = useProject()
+  const [selectedTool, setSelectedTool] = useState<'subtitles' | 'sfx' | 'overlays' | 'assets'>('subtitles')
+
+  // Enable auto-save
+  useAutoSave()
 
   return (
     <div className="video-editor">
@@ -45,6 +49,12 @@ export default function VideoEditor() {
               onClick={() => setSelectedTool('overlays')}
             >
               Overlays
+            </button>
+            <button
+              className={`tool-btn ${selectedTool === 'assets' ? 'active' : ''}`}
+              onClick={() => setSelectedTool('assets')}
+            >
+              Assets
             </button>
           </div>
 

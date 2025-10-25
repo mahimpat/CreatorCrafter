@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { useProject } from '../context/ProjectContext'
+import { Film, Volume2, MessageSquare, Type, Eye, Lock, Music } from 'lucide-react'
 import './Timeline.css'
 
 export default function Timeline() {
@@ -178,11 +179,11 @@ export default function Timeline() {
           {/* Video Track */}
           <div className="track video-track">
             <div className="track-header">
-              <span className="track-icon">🎬</span>
+              <span className="track-icon"><Film size={16} /></span>
               <span className="track-name">Video</span>
               <div className="track-controls">
-                <button className="track-btn">👁</button>
-                <button className="track-btn">🔒</button>
+                <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+                <button className="track-btn" title="Lock track"><Lock size={14} /></button>
               </div>
             </div>
             <div className="track-content">
@@ -202,11 +203,11 @@ export default function Timeline() {
           {/* Audio/SFX Track */}
           <div className="track audio-track">
             <div className="track-header">
-              <span className="track-icon">🔊</span>
+              <span className="track-icon"><Volume2 size={16} /></span>
               <span className="track-name">Audio</span>
               <div className="track-controls">
-                <button className="track-btn">👁</button>
-                <button className="track-btn">🔒</button>
+                <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+                <button className="track-btn" title="Lock track"><Lock size={14} /></button>
               </div>
             </div>
             <div className="track-content">
@@ -227,7 +228,7 @@ export default function Timeline() {
                     title={`${sfx.prompt || 'SFX'} - ${sfx.start.toFixed(2)}s`}
                   >
                     <div className="item-content">
-                      <span className="item-icon">🎵</span>
+                      <span className="item-icon"><Music size={14} /></span>
                       <span className="item-label">{sfx.prompt || 'SFX'}</span>
                     </div>
                     <div className="waveform"></div>
@@ -253,11 +254,11 @@ export default function Timeline() {
           {/* Subtitle Track */}
           <div className="track subtitle-track">
             <div className="track-header">
-              <span className="track-icon">💬</span>
+              <span className="track-icon"><MessageSquare size={16} /></span>
               <span className="track-name">Subtitles</span>
               <div className="track-controls">
-                <button className="track-btn">👁</button>
-                <button className="track-btn">🔒</button>
+                <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+                <button className="track-btn" title="Lock track"><Lock size={14} /></button>
               </div>
             </div>
             <div className="track-content">
@@ -277,7 +278,7 @@ export default function Timeline() {
                     title={subtitle.text}
                   >
                     <div className="item-content">
-                      <span className="item-icon">💬</span>
+                      <span className="item-icon"><MessageSquare size={14} /></span>
                       <span className="item-label">{subtitle.text.substring(0, 15)}...</span>
                     </div>
                   </div>
@@ -289,11 +290,11 @@ export default function Timeline() {
           {/* Text Overlay Track */}
           <div className="track overlay-track">
             <div className="track-header">
-              <span className="track-icon">📝</span>
+              <span className="track-icon"><Type size={16} /></span>
               <span className="track-name">Text</span>
               <div className="track-controls">
-                <button className="track-btn">👁</button>
-                <button className="track-btn">🔒</button>
+                <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+                <button className="track-btn" title="Lock track"><Lock size={14} /></button>
               </div>
             </div>
             <div className="track-content">
@@ -313,7 +314,7 @@ export default function Timeline() {
                     title={overlay.text}
                   >
                     <div className="item-content">
-                      <span className="item-icon">📝</span>
+                      <span className="item-icon"><Type size={14} /></span>
                       <span className="item-label">{overlay.text}</span>
                     </div>
                   </div>
