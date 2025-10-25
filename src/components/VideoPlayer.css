@@ -47,6 +47,41 @@
   bottom: 10%;
 }
 
+.sfx-indicator {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(16, 185, 129, 0.9);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 20;
+  animation: sfx-pulse 1.5s infinite;
+}
+
+.sfx-icon {
+  font-size: 14px;
+}
+
+.sfx-count {
+  font-size: 11px;
+}
+
+@keyframes sfx-pulse {
+  0%, 100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
 .text-overlay {
   position: absolute;
   padding: 8px 16px;

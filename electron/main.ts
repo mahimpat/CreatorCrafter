@@ -226,6 +226,8 @@ function registerIpcHandlers() {
       // Use venv python
       const pythonPath = join(appRoot, 'venv', 'bin', 'python')
 
+      console.log('Starting AudioCraft generation:', { prompt, duration, outputPath })
+
       const python = spawn(pythonPath, [
         pythonScript,
         '--prompt', prompt,
@@ -234,24 +236,67 @@ function registerIpcHandlers() {
       ])
 
       let errorOutput = ''
+      let isResolved = false
+
+      // Set a timeout for AudioGen model download/generation (5 minutes)
+      const timeout = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true
+          python.kill('SIGTERM')
+          reject(new Error('SFX generation timed out. AudioGen model may be downloading for the first time. Please try again in a few minutes.'))
+        }
+      }, 5 * 60 * 1000) // 5 minutes
 
       python.stderr.on('data', (data) => {
-        errorOutput += data.toString()
-        console.error('AudioCraft stderr:', data.toString())
+        const output = data.toString()
+        errorOutput += output
+        console.error('AudioCraft stderr:', output)
+
+        // Show progress for model loading
+        if (output.includes('Loading AudioGen model')) {
+          console.log('AudioGen model loading...')
+        }
+        if (output.includes('Model loaded successfully')) {
+          console.log('AudioGen model loaded successfully')
+        }
+        if (output.includes('Generating audio for')) {
+          console.log('Generating audio...')
+        }
       })
 
       python.on('close', (code) => {
+        clearTimeout(timeout)
+        if (isResolved) return
+        isResolved = true
+
         if (code === 0) {
+          console.log('AudioCraft generation completed successfully')
           resolve(outputPath)
         } else {
           console.error('AudioCraft generation failed:', errorOutput)
-          reject(new Error(`AudioCraft generation failed with code ${code}: ${errorOutput}`))
+          let errorMessage = `AudioCraft generation failed with code ${code}`
+
+          // Provide more helpful error messages
+          if (errorOutput.includes('Repository Not Found')) {
+            errorMessage = 'AudioGen model not found. Please check your internet connection.'
+          } else if (errorOutput.includes('401 Client Error')) {
+            errorMessage = 'Authentication error downloading AudioGen model. Please check your internet connection and try again.'
+          } else if (errorOutput.includes('torch.cuda')) {
+            errorMessage = 'GPU initialization warning (this is normal and won\'t affect generation)'
+          } else if (errorOutput.includes('No module named')) {
+            errorMessage = 'AudioCraft dependencies missing. Please reinstall dependencies.'
+          }
+
+          reject(new Error(errorMessage))
         }
       })
 
       python.on('error', (err) => {
+        clearTimeout(timeout)
+        if (isResolved) return
+        isResolved = true
         console.error('Failed to spawn python for AudioCraft:', err)
-        reject(err)
+        reject(new Error(`Failed to start AudioCraft: ${err.message}`))
       })
     })
   })

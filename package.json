@@ -13,7 +13,11 @@
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\"",
     "electron:build": "tsc && vite build && electron-builder",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "setup": "npm run setup:python && npm run download:models",
+    "setup:python": "python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
+    "download:models": "source venv/bin/activate && python python/download_models.py",
+    "postinstall": "npm run download:models"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -4,6 +4,7 @@ import './VideoPlayer.css'
 
 export default function VideoPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const sfxAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map())
   const {
     videoPath,
     currentTime,
@@ -12,7 +13,8 @@ export default function VideoPlayer() {
     isPlaying,
     setIsPlaying,
     subtitles,
-    textOverlays
+    textOverlays,
+    sfxTracks
   } = useProject()
 
   const [volume, setVolume] = useState(1)
@@ -90,6 +92,97 @@ export default function VideoPlayer() {
     setActiveOverlays(active)
   }, [currentTime, textOverlays])
 
+  // Create audio elements for SFX tracks
+  useEffect(() => {
+    const audioMap = sfxAudioRefs.current
+
+    // Remove audio elements for deleted SFX tracks
+    audioMap.forEach((audio, trackId) => {
+      if (!sfxTracks.find(track => track.id === trackId)) {
+        audio.pause()
+        audio.remove()
+        audioMap.delete(trackId)
+      }
+    })
+
+    // Create audio elements for new SFX tracks
+    sfxTracks.forEach(track => {
+      if (!audioMap.has(track.id)) {
+        const audio = new Audio()
+        audio.src = `localfile://${track.path}`
+        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+        audio.preload = 'auto'
+        audioMap.set(track.id, audio)
+      }
+    })
+  }, [sfxTracks, volume, isMuted])
+
+  // Handle SFX playback based on current time and video state
+  useEffect(() => {
+    const audioMap = sfxAudioRefs.current
+
+    sfxTracks.forEach(track => {
+      const audio = audioMap.get(track.id)
+      if (!audio) return
+
+      const trackEnd = track.start + track.duration
+      const shouldBePlaying = isPlaying && currentTime >= track.start && currentTime < trackEnd
+
+      if (shouldBePlaying && audio.paused) {
+        // Calculate the position within the SFX track
+        const audioTime = currentTime - track.start
+        audio.currentTime = Math.max(0, audioTime)
+        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+        audio.play().catch(console.error)
+      } else if (!shouldBePlaying && !audio.paused) {
+        audio.pause()
+      } else if (shouldBePlaying && !audio.paused) {
+        // Sync audio time with video time
+        const expectedAudioTime = currentTime - track.start
+        if (Math.abs(audio.currentTime - expectedAudioTime) > 0.1) {
+          audio.currentTime = Math.max(0, expectedAudioTime)
+        }
+      }
+    })
+  }, [currentTime, isPlaying, sfxTracks, volume, isMuted])
+
+  // Pause all SFX when video is paused
+  useEffect(() => {
+    const audioMap = sfxAudioRefs.current
+
+    if (!isPlaying) {
+      audioMap.forEach(audio => {
+        if (!audio.paused) {
+          audio.pause()
+        }
+      })
+    }
+  }, [isPlaying])
+
+  // Update SFX volume when main volume changes
+  useEffect(() => {
+    const audioMap = sfxAudioRefs.current
+
+    audioMap.forEach((audio, trackId) => {
+      const track = sfxTracks.find(t => t.id === trackId)
+      if (track) {
+        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+      }
+    })
+  }, [volume, isMuted, sfxTracks])
+
+  // Cleanup audio elements on unmount
+  useEffect(() => {
+    return () => {
+      const audioMap = sfxAudioRefs.current
+      audioMap.forEach(audio => {
+        audio.pause()
+        audio.remove()
+      })
+      audioMap.clear()
+    }
+  }, [])
+
   const togglePlayPause = () => {
     setIsPlaying(!isPlaying)
   }
@@ -108,6 +201,9 @@ export default function VideoPlayer() {
 
   const activeSubtitleData = subtitles.find(sub => sub.id === activeSubtitle)
   const activeOverlayData = textOverlays.filter(overlay => activeOverlays.includes(overlay.id))
+  const activeSfxTracks = sfxTracks.filter(track =>
+    currentTime >= track.start && currentTime < track.start + track.duration
+  )
 
   return (
     <div className="video-player-container">
@@ -148,6 +244,14 @@ export default function VideoPlayer() {
                 {overlay.text}
               </div>
             ))}
+
+            {/* SFX playing indicator */}
+            {activeSfxTracks.length > 0 && (
+              <div className="sfx-indicator">
+                <span className="sfx-icon">🔊</span>
+                <span className="sfx-count">{activeSfxTracks.length} SFX</span>
+              </div>
+            )}
           </>
         )}
       </div>

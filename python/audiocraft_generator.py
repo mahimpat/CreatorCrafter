@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AudioCraft SFX Generator
-Generates sound effects using Meta's AudioCraft MusicGen model.
+Generates sound effects using Meta's AudioCraft AudioGen model.
 """
 
 import argparse
@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 try:
-    from audiocraft.models import MusicGen
+    from audiocraft.models import AudioGen
     from audiocraft.data.audio import audio_write
     import torch
 except ImportError as e:
@@ -37,9 +37,10 @@ def generate_sfx(prompt: str, duration: float, output_path: str):
         output_path: Path to save the generated audio
     """
     try:
-        # Load the MusicGen model (small version for faster generation)
-        # Options: 'small', 'medium', 'large'
-        model = MusicGen.get_pretrained('small')
+        print("Loading AudioGen model...", file=sys.stderr)
+        # Load the AudioGen model (medium is the only available pretrained model)
+        model = AudioGen.get_pretrained('facebook/audiogen-medium')
+        print("Model loaded successfully.", file=sys.stderr)
 
         # Set generation parameters
         model.set_generation_params(
@@ -51,8 +52,10 @@ def generate_sfx(prompt: str, duration: float, output_path: str):
         )
 
         # Generate audio
+        print(f"Generating audio for: {prompt}", file=sys.stderr)
         descriptions = [prompt]
         wav = model.generate(descriptions)
+        print("Audio generation completed.", file=sys.stderr)
 
         # Save the audio file
         output_dir = Path(output_path).parent

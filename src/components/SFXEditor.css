@@ -127,3 +127,21 @@
 .sfx-item button:hover {
   background: var(--bg-secondary);
 }
+
+.sfx-tip {
+  display: block;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+.empty-message {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  margin: 0;
+}

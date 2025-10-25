@@ -60,9 +60,36 @@ export default function SFXEditor() {
     }
   }
 
-  const handleUseSuggestion = (suggestion: { timestamp: number; prompt: string }) => {
-    setPrompt(suggestion.prompt)
-    // You could also auto-set the current time to the suggestion timestamp
+  const handleUseSuggestion = async (suggestion: { timestamp: number; prompt: string }) => {
+    try {
+      setIsGenerating(true)
+      setPrompt(suggestion.prompt)
+
+      // Generate the SFX using AudioCraft
+      const sfxPath = await window.electronAPI.generateSFX(suggestion.prompt, duration)
+
+      // Add the SFX track at the suggested timestamp
+      const track: SFXTrack = {
+        id: `sfx-${Date.now()}`,
+        path: sfxPath,
+        start: suggestion.timestamp,
+        duration,
+        volume: 1,
+        prompt: suggestion.prompt
+      }
+
+      addSFXTrack(track)
+      setPrompt('')
+
+      alert(`SFX "${suggestion.prompt}" added to timeline at ${suggestion.timestamp.toFixed(2)}s`)
+    } catch (error) {
+      console.error('Error generating suggested SFX:', error)
+      alert(
+        'Failed to generate SFX. Make sure Python and AudioCraft are properly installed.'
+      )
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   return (
@@ -120,8 +147,9 @@ export default function SFXEditor() {
               <button
                 className="btn-small"
                 onClick={() => handleUseSuggestion(suggestion)}
+                disabled={isGenerating}
               >
-                Use
+                {isGenerating ? 'Generating...' : 'Use'}
               </button>
             </div>
           ))}
@@ -130,17 +158,22 @@ export default function SFXEditor() {
 
       <div className="sfx-list">
         <h4>SFX Tracks</h4>
-        {sfxTracks.map(track => (
-          <div key={track.id} className="sfx-item">
-            <div className="sfx-content">
-              <p>{track.prompt || 'Imported SFX'}</p>
-              <span className="sfx-time">
-                {track.start.toFixed(2)}s ({track.duration.toFixed(2)}s)
-              </span>
+        {sfxTracks.length === 0 ? (
+          <p className="empty-message">No SFX tracks added yet. Use AI suggestions or generate custom SFX above.</p>
+        ) : (
+          sfxTracks.map(track => (
+            <div key={track.id} className="sfx-item">
+              <div className="sfx-content">
+                <p><strong>{track.prompt || 'Imported SFX'}</strong></p>
+                <span className="sfx-time">
+                  Start: {track.start.toFixed(2)}s | Duration: {track.duration.toFixed(2)}s
+                </span>
+                <small className="sfx-tip">Drag on timeline to adjust position</small>
+              </div>
+              <button onClick={() => deleteSFXTrack(track.id)} title="Delete SFX">🗑️</button>
             </div>
-            <button onClick={() => deleteSFXTrack(track.id)}>🗑️</button>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   )
