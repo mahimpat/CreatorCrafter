@@ -10,14 +10,17 @@
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-height: 0;
 }
 
 .editor-content {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   padding: 16px;
   gap: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .video-section {
@@ -28,18 +31,22 @@
 }
 
 .timeline-section {
-  height: 200px;
+  height: 400px;
   background: var(--bg-secondary);
   border-radius: 8px;
-  padding: 16px;
+  overflow: hidden;
 }
 
 .editor-sidebar {
+  flex: 0 0 350px;
   width: 350px;
+  min-width: 350px;
+  max-width: 350px;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  height: 100%;
 }
 
 .tool-selector {
