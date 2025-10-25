@@ -218,6 +218,8 @@
 
 .sfx-track {
   background: linear-gradient(to bottom, transparent, rgba(16, 185, 129, 0.05));
+  border: 2px solid red !important;
+  min-height: 60px !important;
 }
 
 .overlay-track {

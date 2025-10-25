@@ -180,9 +180,32 @@ export default function Timeline() {
   const timelineWidth = Math.min(baseWidth * zoom, 10000) // Cap at 10000px
   const playheadPosition = safeDuration > 0 ? (currentTime / safeDuration) * timelineWidth : 0
 
+  // Debug: Check if we have SFX tracks and their positions
+  if (sfxTracks.length > 0) {
+    console.log('=== SFX DEBUG ===')
+    console.log('SFX tracks count:', sfxTracks.length)
+    console.log('Video duration:', duration)
+    console.log('Safe duration:', safeDuration)
+    console.log('Timeline width:', timelineWidth)
+
+    sfxTracks.forEach((sfx, index) => {
+      const startPos = (sfx.start / safeDuration) * timelineWidth
+      const width = (sfx.duration / safeDuration) * timelineWidth
+      console.log(`SFX ${index + 1}:`, {
+        id: sfx.id,
+        start: sfx.start,
+        duration: sfx.duration,
+        startPos: startPos,
+        width: width,
+        prompt: sfx.prompt
+      })
+    })
+    console.log('================')
+  }
+
 
   return (
-    <div className="timeline-container">
+    <div className="timeline-container" style={{border: '10px solid purple', backgroundColor: 'orange'}}>
       {/* Timeline Header with Controls */}
       <div className="timeline-header">
         <div className="timeline-controls">
@@ -202,29 +225,29 @@ export default function Timeline() {
       {/* Main Timeline Area */}
       <div className="timeline-workspace">
         {/* Track Headers */}
-        <div className="track-headers">
-          <div className="track-header video-header">
+        <div className="track-headers" style={{backgroundColor: 'yellow', border: '3px solid black'}}>
+          <div className="track-header video-header" style={{backgroundColor: 'red', color: 'white'}}>
             <span>Video</span>
             <div className="track-controls">
               <button className="track-toggle">👁</button>
               <button className="track-lock">🔒</button>
             </div>
           </div>
-          <div className="track-header subtitle-header">
+          <div className="track-header subtitle-header" style={{backgroundColor: 'blue', color: 'white'}}>
             <span>Subtitles</span>
             <div className="track-controls">
               <button className="track-toggle">👁</button>
               <button className="track-lock">🔒</button>
             </div>
           </div>
-          <div className="track-header sfx-header">
-            <span>Sound FX</span>
+          <div className="track-header sfx-header" style={{backgroundColor: 'green', color: 'white', border: '5px solid pink'}}>
+            <span>Sound FX ← LOOK HERE</span>
             <div className="track-controls">
               <button className="track-toggle">👁</button>
               <button className="track-lock">🔒</button>
             </div>
           </div>
-          <div className="track-header overlay-header">
+          <div className="track-header overlay-header" style={{backgroundColor: 'purple', color: 'white'}}>
             <span>Text Overlays</span>
             <div className="track-controls">
               <button className="track-toggle">👁</button>
@@ -234,7 +257,7 @@ export default function Timeline() {
         </div>
 
         {/* Timeline Content */}
-        <div className="timeline-content">
+        <div className="timeline-content" style={{backgroundColor: 'cyan', border: '5px solid magenta', minHeight: '300px'}}>
           {/* Time Ruler */}
           <div
             ref={timeRulerRef}
@@ -311,7 +334,30 @@ export default function Timeline() {
             </div>
 
             {/* SFX Track */}
-            <div className="track sfx-track">
+            <div className="track sfx-track" style={{position: 'relative', backgroundColor: 'blue !important'}}>
+              {/* Debug: Add a visible test block */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '50px',
+                  top: '10px',
+                  width: '200px',
+                  height: '40px',
+                  backgroundColor: 'red',
+                  color: 'white',
+                  zIndex: 9999,
+                  border: '3px solid yellow',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px',
+                  fontWeight: 'bold'
+                }}
+                title="TEST - Should always be visible"
+              >
+                TEST SFX BLOCK
+              </div>
+
               {sfxTracks.map(sfx => {
                 const startPos = (sfx.start / safeDuration) * timelineWidth
                 const width = (sfx.duration / safeDuration) * timelineWidth
