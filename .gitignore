@@ -1,0 +1,67 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Electron
+dist-electron/
+release/
+
+# Build outputs
+dist/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+.cache/
+tmp/
+temp/
+
+# Model cache (large files)
+.cache/huggingface/
+.cache/torch/
+
+# Local test files
+test_*.mp4
+test_*.mov
+test_*.wav
+
+# Environment
+.env
+.env.local

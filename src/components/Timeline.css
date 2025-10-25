@@ -1,0 +1,146 @@
+.timeline-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.time-display {
+  font-family: monospace;
+}
+
+.timeline {
+  flex: 1;
+  position: relative;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.timeline-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(59, 130, 246, 0.2);
+  pointer-events: none;
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--accent-primary);
+  pointer-events: none;
+  z-index: 20;
+}
+
+.scene-marker {
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 20px;
+  z-index: 5;
+}
+
+.scene-action {
+  background: #ef4444;
+}
+
+.scene-dialogue {
+  background: #3b82f6;
+}
+
+.scene-transition {
+  background: #10b981;
+}
+
+.scene-emotional {
+  background: #f59e0b;
+}
+
+.track {
+  position: absolute;
+  height: 40px;
+  width: 100%;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.subtitle-track {
+  top: 20px;
+}
+
+.sfx-track {
+  top: 60px;
+}
+
+.overlay-track {
+  top: 100px;
+}
+
+.track-item {
+  position: absolute;
+  height: 30px;
+  top: 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.track-item:hover {
+  opacity: 0.8;
+}
+
+.subtitle-item {
+  background: #3b82f6;
+  color: white;
+}
+
+.sfx-item {
+  background: #10b981;
+  color: white;
+}
+
+.overlay-item {
+  background: #f59e0b;
+  color: white;
+}
+
+.sfx-suggestion {
+  position: absolute;
+  width: 6px;
+  height: 30px;
+  top: 5px;
+  background: rgba(16, 185, 129, 0.5);
+  border: 1px dashed #10b981;
+  cursor: pointer;
+}
+
+.timeline-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.timeline-labels span {
+  height: 40px;
+  display: flex;
+  align-items: center;
+}

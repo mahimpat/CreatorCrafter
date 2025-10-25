@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(source venv/bin/activate)",
+      "Bash(pip install:*)",
+      "Read(//tmp/audiocraft/**)",
+      "Bash(sudo apt-get install:*)",
+      "Bash(killall:*)",
+      "Bash(npm run electron:dev:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
