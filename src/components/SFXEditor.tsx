@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { SFXTrack } from '../context/ProjectContext'
+import { translateSceneToAudioPrompt } from '../utils/promptTranslator'
 import './SFXEditor.css'
 
 export default function SFXEditor() {
@@ -60,13 +61,37 @@ export default function SFXEditor() {
     }
   }
 
-  const handleUseSuggestion = async (suggestion: { timestamp: number; prompt: string }) => {
+  const handleUseSuggestion = async (suggestion: {
+    timestamp: number;
+    prompt: string;
+    reason?: string;
+    visual_context?: string;
+    action_context?: string;
+  }) => {
     try {
       setIsGenerating(true)
-      setPrompt(suggestion.prompt)
 
-      // Generate the SFX using AudioCraft
-      const sfxPath = await window.electronAPI.generateSFX(suggestion.prompt, duration)
+      // Translate the scene description into an optimized AudioGen prompt
+      const translation = translateSceneToAudioPrompt(
+        suggestion.prompt,
+        suggestion.visual_context,
+        suggestion.action_context
+      )
+
+      console.log('Prompt Translation:', {
+        original: translation.originalPrompt,
+        translated: translation.translatedPrompt,
+        confidence: translation.confidence,
+        category: translation.category,
+        reasoning: translation.reasoning
+      })
+
+      // Use the translated prompt for generation
+      const finalPrompt = translation.translatedPrompt
+      setPrompt(finalPrompt)
+
+      // Generate the SFX using AudioCraft with the optimized prompt
+      const sfxPath = await window.electronAPI.generateSFX(finalPrompt, duration)
 
       // Add the SFX track at the suggested timestamp
       const track: SFXTrack = {
@@ -75,13 +100,18 @@ export default function SFXEditor() {
         start: suggestion.timestamp,
         duration,
         volume: 1,
-        prompt: suggestion.prompt
+        prompt: finalPrompt
       }
 
       addSFXTrack(track)
       setPrompt('')
 
-      alert(`SFX "${suggestion.prompt}" added to timeline at ${suggestion.timestamp.toFixed(2)}s`)
+      // Show success message with translation info
+      const message = translation.confidence > 0.7
+        ? `SFX "${finalPrompt}" generated and added to timeline at ${suggestion.timestamp.toFixed(2)}s`
+        : `SFX "${finalPrompt}" generated (translated from scene) and added at ${suggestion.timestamp.toFixed(2)}s`
+
+      alert(message)
     } catch (error) {
       console.error('Error generating suggested SFX:', error)
       alert(
@@ -135,24 +165,49 @@ export default function SFXEditor() {
       {analysis?.suggestedSFX && analysis.suggestedSFX.length > 0 && (
         <div className="sfx-suggestions">
           <h4>AI Suggestions</h4>
-          {analysis.suggestedSFX.map((suggestion, index) => (
-            <div key={index} className="suggestion-item">
-              <div className="suggestion-content">
-                <strong>{suggestion.prompt}</strong>
-                <span className="suggestion-time">
-                  at {suggestion.timestamp.toFixed(2)}s
-                </span>
-                <p className="suggestion-reason">{suggestion.reason}</p>
+          {analysis.suggestedSFX.map((suggestion, index) => {
+            // Generate preview of what the prompt would become
+            const translation = translateSceneToAudioPrompt(
+              suggestion.prompt,
+              suggestion.visual_context,
+              suggestion.action_context
+            )
+
+            return (
+              <div key={index} className="suggestion-item">
+                <div className="suggestion-content">
+                  <div className="suggestion-header">
+                    <strong className="suggestion-scene">{suggestion.reason}</strong>
+                    <span className="suggestion-time">
+                      at {suggestion.timestamp.toFixed(2)}s
+                    </span>
+                  </div>
+
+                  <div className="prompt-preview">
+                    <div className="original-prompt">
+                      <span className="prompt-label">Scene:</span>
+                      <span className="prompt-text">{suggestion.prompt}</span>
+                    </div>
+                    <div className="translated-prompt">
+                      <span className="prompt-label">Audio:</span>
+                      <span className="prompt-text">{translation.translatedPrompt}</span>
+                      <span className={`confidence ${translation.confidence > 0.7 ? 'high' : translation.confidence > 0.5 ? 'medium' : 'low'}`}>
+                        {Math.round(translation.confidence * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="btn-small"
+                  onClick={() => handleUseSuggestion(suggestion)}
+                  disabled={isGenerating}
+                  title={`Generate: ${translation.translatedPrompt}`}
+                >
+                  {isGenerating ? 'Generating...' : 'Use'}
+                </button>
               </div>
-              <button
-                className="btn-small"
-                onClick={() => handleUseSuggestion(suggestion)}
-                disabled={isGenerating}
-              >
-                {isGenerating ? 'Generating...' : 'Use'}
-              </button>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

@@ -49,6 +49,9 @@ export interface VideoAnalysisResult {
     timestamp: number
     prompt: string
     reason: string
+    visual_context?: string
+    action_context?: string
+    confidence?: number
   }>
   transcription: Array<{
     text: string
