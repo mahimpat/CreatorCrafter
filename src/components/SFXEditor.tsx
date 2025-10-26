@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { SFXTrack } from '../context/ProjectContext'
 import { translateSceneToAudioPrompt } from '../utils/promptTranslator'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Wand2, Library, Music } from 'lucide-react'
+import FreesoundLibrary from './FreesoundLibrary'
 import './SFXEditor.css'
 
 export default function SFXEditor() {
   const { sfxTracks, addSFXTrack, deleteSFXTrack, currentTime, analysis, projectPath } = useProject()
 
+  const [activeTab, setActiveTab] = useState<'generate' | 'library' | 'tracks'>('generate')
   const [isGenerating, setIsGenerating] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState(2)
@@ -180,7 +182,37 @@ export default function SFXEditor() {
         </button>
       </div>
 
-      <div className="generate-sfx">
+      {/* Tabs */}
+      <div className="sfx-tabs">
+        <button
+          className={`sfx-tab ${activeTab === 'generate' ? 'active' : ''}`}
+          onClick={() => setActiveTab('generate')}
+        >
+          <Wand2 size={16} />
+          Generate AI
+        </button>
+        <button
+          className={`sfx-tab ${activeTab === 'library' ? 'active' : ''}`}
+          onClick={() => setActiveTab('library')}
+        >
+          <Library size={16} />
+          FreeSound Library
+        </button>
+        <button
+          className={`sfx-tab ${activeTab === 'tracks' ? 'active' : ''}`}
+          onClick={() => setActiveTab('tracks')}
+        >
+          <Music size={16} />
+          My Sounds ({sfxTracks.length})
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      <div className="sfx-tab-content">
+        {activeTab === 'generate' && (
+          <div className="generate-tab">
+
+            <div className="generate-sfx">
         <h4>Generate with AI (AudioCraft)</h4>
 
         <textarea
@@ -211,8 +243,8 @@ export default function SFXEditor() {
         </button>
       </div>
 
-      {analysis?.suggestedSFX && analysis.suggestedSFX.length > 0 && (
-        <div className="sfx-suggestions">
+            {analysis?.suggestedSFX && analysis.suggestedSFX.length > 0 && (
+              <div className="sfx-suggestions">
           <h4>AI Suggestions</h4>
           {analysis.suggestedSFX.map((suggestion, index) => {
             // Generate preview of what the prompt would become
@@ -256,11 +288,21 @@ export default function SFXEditor() {
                 </button>
               </div>
             )
-          })}
-        </div>
-      )}
+            })}
+              </div>
+            )}
+          </div>
+        )}
 
-      <div className="sfx-list">
+        {activeTab === 'library' && (
+          <div className="library-tab">
+            <FreesoundLibrary />
+          </div>
+        )}
+
+        {activeTab === 'tracks' && (
+          <div className="tracks-tab">
+            <div className="sfx-list">
         <h4>SFX Tracks</h4>
         {sfxTracks.length === 0 ? (
           <p className="empty-message">No SFX tracks added yet. Use AI suggestions or generate custom SFX above.</p>
@@ -278,7 +320,10 @@ export default function SFXEditor() {
                 <Trash2 size={16} />
               </button>
             </div>
-          ))
+              ))
+            )}
+            </div>
+          </div>
         )}
       </div>
     </div>
