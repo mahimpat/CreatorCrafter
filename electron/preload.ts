@@ -53,7 +53,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showInFolder: (filePath: string) =>
     ipcRenderer.invoke('project:showInFolder', filePath),
   isValidProject: (projectPath: string) =>
-    ipcRenderer.invoke('project:isValid', projectPath)
+    ipcRenderer.invoke('project:isValid', projectPath),
+
+  // FreeSound APIs
+  freesoundAuthorize: () =>
+    ipcRenderer.invoke('freesound:authorize'),
+  freesoundIsAuthenticated: () =>
+    ipcRenderer.invoke('freesound:isAuthenticated'),
+  freesoundGetToken: () =>
+    ipcRenderer.invoke('freesound:getToken'),
+  freesoundGetMe: () =>
+    ipcRenderer.invoke('freesound:getMe'),
+  freesoundSearch: (params: any) =>
+    ipcRenderer.invoke('freesound:search', params),
+  freesoundGetSound: (soundId: number) =>
+    ipcRenderer.invoke('freesound:getSound', soundId),
+  freesoundDownloadSound: (soundId: number, outputPath: string) =>
+    ipcRenderer.invoke('freesound:downloadSound', soundId, outputPath),
+  freesoundDownloadPreview: (previewUrl: string, outputPath: string) =>
+    ipcRenderer.invoke('freesound:downloadPreview', previewUrl, outputPath),
+  freesoundClearToken: () =>
+    ipcRenderer.invoke('freesound:clearToken')
 })
 
 // Type definitions for window.electronAPI
@@ -84,6 +104,17 @@ export interface ElectronAPI {
   deleteFile: (filePath: string) => Promise<boolean>
   showInFolder: (filePath: string) => Promise<boolean>
   isValidProject: (projectPath: string) => Promise<boolean>
+
+  // FreeSound APIs
+  freesoundAuthorize: () => Promise<{ success: boolean; token?: any; error?: string }>
+  freesoundIsAuthenticated: () => Promise<boolean>
+  freesoundGetToken: () => Promise<any | null>
+  freesoundGetMe: () => Promise<{ success: boolean; user?: any; error?: string }>
+  freesoundSearch: (params: any) => Promise<{ success: boolean; results?: any; error?: string }>
+  freesoundGetSound: (soundId: number) => Promise<{ success: boolean; sound?: any; error?: string }>
+  freesoundDownloadSound: (soundId: number, outputPath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
+  freesoundDownloadPreview: (previewUrl: string, outputPath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
+  freesoundClearToken: () => Promise<{ success: boolean; error?: string }>
 }
 
 export interface VideoMetadata {

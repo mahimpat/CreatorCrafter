@@ -4,6 +4,11 @@ import { spawn } from 'child_process'
 import * as fs from 'fs/promises'
 import { readFile } from 'fs/promises'
 import * as projectManager from './projectManager'
+import { initializeFreesoundService, getFreesoundService } from './freesoundService'
+import * as dotenv from 'dotenv'
+
+// Load environment variables
+dotenv.config()
 
 // Handle running as root (WSL/Linux) - MUST be before any app initialization
 if (process.getuid && process.getuid() === 0) {
@@ -106,6 +111,18 @@ app.whenReady().then(() => {
 app.whenReady().then(() => {
   createWindow()
   registerIpcHandlers()
+
+  // Initialize FreeSound service
+  const clientId = process.env.FREESOUND_CLIENT_ID || ''
+  const clientSecret = process.env.FREESOUND_CLIENT_SECRET || ''
+  const redirectUri = process.env.FREESOUND_REDIRECT_URI || 'http://localhost:3000/freesound/callback'
+
+  if (clientId && clientSecret) {
+    initializeFreesoundService(clientId, clientSecret, redirectUri)
+    console.log('FreeSound service initialized')
+  } else {
+    console.warn('FreeSound API credentials not found in environment variables')
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -553,6 +570,102 @@ function registerIpcHandlers() {
 
   ipcMain.handle('project:isValid', async (_, projectPath: string) => {
     return await projectManager.isValidProject(projectPath)
+  })
+
+  // FreeSound API handlers
+  ipcMain.handle('freesound:authorize', async () => {
+    try {
+      const service = getFreesoundService()
+      const token = await service.authorize()
+      return { success: true, token }
+    } catch (error: any) {
+      console.error('FreeSound authorization error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('freesound:isAuthenticated', async () => {
+    try {
+      const service = getFreesoundService()
+      return service.isAuthenticated()
+    } catch (error) {
+      return false
+    }
+  })
+
+  ipcMain.handle('freesound:getToken', async () => {
+    try {
+      const service = getFreesoundService()
+      return service.getToken()
+    } catch (error) {
+      return null
+    }
+  })
+
+  ipcMain.handle('freesound:getMe', async () => {
+    try {
+      const service = getFreesoundService()
+      const user = await service.getMe()
+      return { success: true, user }
+    } catch (error: any) {
+      console.error('FreeSound getMe error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('freesound:search', async (_, params) => {
+    try {
+      const service = getFreesoundService()
+      const results = await service.search(params)
+      return { success: true, results }
+    } catch (error: any) {
+      console.error('FreeSound search error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('freesound:getSound', async (_, soundId: number) => {
+    try {
+      const service = getFreesoundService()
+      const sound = await service.getSound(soundId)
+      return { success: true, sound }
+    } catch (error: any) {
+      console.error('FreeSound getSound error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('freesound:downloadSound', async (_, soundId: number, outputPath: string) => {
+    try {
+      const service = getFreesoundService()
+      const filePath = await service.downloadSound(soundId, outputPath)
+      return { success: true, filePath }
+    } catch (error: any) {
+      console.error('FreeSound download error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('freesound:downloadPreview', async (_, previewUrl: string, outputPath: string) => {
+    try {
+      const service = getFreesoundService()
+      const filePath = await service.downloadPreview(previewUrl, outputPath)
+      return { success: true, filePath }
+    } catch (error: any) {
+      console.error('FreeSound preview download error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('freesound:clearToken', async () => {
+    try {
+      const service = getFreesoundService()
+      await service.clearToken()
+      return { success: true }
+    } catch (error: any) {
+      console.error('FreeSound clear token error:', error)
+      return { success: false, error: error.message }
+    }
   })
 }
 
