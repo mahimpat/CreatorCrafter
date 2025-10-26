@@ -7,6 +7,7 @@ identify actions, and suggest contextual sound effects.
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import List, Dict, Any
@@ -854,9 +855,13 @@ def analyze_video(video_path: str, audio_path: str):
     """
     print("Analyzing video...", file=sys.stderr)
 
-    # Transcribe audio
-    print("Transcribing audio...", file=sys.stderr)
-    transcription = transcribe_audio(audio_path)
+    # Transcribe audio (if available)
+    transcription = []
+    if audio_path and os.path.exists(audio_path):
+        print("Transcribing audio...", file=sys.stderr)
+        transcription = transcribe_audio(audio_path)
+    else:
+        print("No audio file provided - skipping transcription", file=sys.stderr)
 
     # Analyze scenes
     print("Analyzing scenes...", file=sys.stderr)

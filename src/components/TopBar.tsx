@@ -111,10 +111,24 @@ export default function TopBar() {
     try {
       setIsAnalyzing(true)
 
-      // Extract audio
-      const audioPath = await window.electronAPI.extractAudio(videoPath)
+      // Try to extract audio (may fail if video has no audio track)
+      let audioPath = ''
+      try {
+        audioPath = await window.electronAPI.extractAudio(videoPath)
+      } catch (audioError: any) {
+        console.warn('Audio extraction failed:', audioError?.message)
 
-      // Analyze video
+        // Check if it's specifically a "no audio track" error
+        if (audioError?.message?.includes('no audio track')) {
+          console.log('Video has no audio - proceeding with visual-only analysis')
+          // Continue without audio - visual analysis will still work
+        } else {
+          // Other FFmpeg errors should stop the process
+          throw audioError
+        }
+      }
+
+      // Analyze video (with or without audio)
       const analysis = await window.electronAPI.analyzeVideo(videoPath, audioPath)
 
       setAnalysis(analysis)
