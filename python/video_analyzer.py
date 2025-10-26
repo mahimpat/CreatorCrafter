@@ -198,6 +198,241 @@ def analyze_scenes(video_path: str):
         return []
 
 
+class MotionVerifier:
+    """
+    Verify action-based sounds by detecting actual motion in video.
+    Prevents false positives like "car engine" for parked cars.
+    """
+    def __init__(self):
+        # Motion thresholds for different action types (0.0 - 1.0 scale)
+        self.motion_thresholds = {
+            'walking': 0.10,      # Moderate motion
+            'running': 0.20,      # High motion
+            'driving': 0.15,      # Moderate-high motion (camera or objects moving)
+            'car': 0.15,          # Vehicle in motion
+            'typing': 0.05,       # Low but present motion
+            'opening': 0.08,      # Low-moderate motion (door/window)
+            'closing': 0.08,      # Low-moderate motion
+            'moving': 0.12,       # General movement
+            'jumping': 0.25,      # High motion
+            'default': 0.08       # Default threshold for other actions
+        }
+
+    def analyze_motion(self, video_path: str, timestamp: float, window: float = 1.0) -> float:
+        """
+        Analyze motion intensity around a specific timestamp.
+
+        Args:
+            video_path: Path to video file
+            timestamp: Time to analyze (seconds)
+            window: Time window before/after (seconds)
+
+        Returns:
+            Motion intensity (0.0 = no motion, 1.0 = maximum motion)
+        """
+        try:
+            cap = cv2.VideoCapture(video_path)
+            fps = cap.get(cv2.CAP_PROP_FPS)
+
+            # Get frames around timestamp
+            start_frame = int(max(0, (timestamp - window) * fps))
+            end_frame = int((timestamp + window) * fps)
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+            motion_scores = []
+            prev_gray = None
+
+            while cap.get(cv2.CAP_PROP_POS_FRAMES) < end_frame:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Convert to grayscale for motion detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                gray = cv2.GaussianBlur(gray, (5, 5), 0)  # Reduce noise
+
+                if prev_gray is not None:
+                    # Calculate frame difference
+                    diff = cv2.absdiff(gray, prev_gray)
+                    # Normalize to 0-1 range
+                    motion = diff.mean() / 255.0
+                    motion_scores.append(motion)
+
+                prev_gray = gray
+
+            cap.release()
+
+            if not motion_scores:
+                return 0.0
+
+            # Return average motion intensity
+            return float(np.mean(motion_scores))
+
+        except Exception as e:
+            print(f"Motion analysis error: {e}", file=sys.stderr)
+            return 0.5  # Default to neutral if analysis fails
+
+    def verify_action_sound(self, action_type: str, video_path: str, timestamp: float) -> Dict:
+        """
+        Verify that an action sound matches actual motion in video.
+
+        Args:
+            action_type: Type of action (walking, driving, typing, etc.)
+            video_path: Path to video file
+            timestamp: When action is supposed to occur
+
+        Returns:
+            Dict with verified, confidence, and motion_intensity
+        """
+        # Determine motion threshold for this action
+        threshold = self.motion_thresholds.get(action_type, self.motion_thresholds['default'])
+
+        # Analyze motion
+        motion_intensity = self.analyze_motion(video_path, timestamp)
+
+        if motion_intensity >= threshold:
+            # Motion confirmed
+            confidence = min(0.9, 0.5 + (motion_intensity / threshold) * 0.4)
+            return {
+                'verified': True,
+                'confidence': confidence,
+                'motion_intensity': motion_intensity,
+                'reason': f'Motion detected ({motion_intensity:.2f}, threshold: {threshold:.2f})'
+            }
+        else:
+            # Insufficient motion - likely false positive
+            return {
+                'verified': False,
+                'confidence': 0.25,
+                'motion_intensity': motion_intensity,
+                'reason': f'Insufficient motion ({motion_intensity:.2f}, need {threshold:.2f})',
+                'warning': f'No motion detected for {action_type}'
+            }
+
+
+class ContextDisambiguator:
+    """
+    Disambiguate generic sounds based on visual context.
+    Makes suggestions more specific (e.g., "door" → "car door" vs "house door").
+    """
+    def __init__(self):
+        # Environment indicators
+        self.environment_indicators = {
+            'car': ['car', 'vehicle', 'driving', 'dashboard', 'steering', 'windshield', 'traffic', 'road', 'highway'],
+            'office': ['office', 'desk', 'computer', 'cubicle', 'workspace', 'keyboard', 'monitor', 'meeting'],
+            'home': ['home', 'house', 'living room', 'kitchen', 'bedroom', 'couch', 'sofa', 'table'],
+            'outdoor': ['outdoor', 'outside', 'street', 'park', 'sidewalk', 'tree', 'sky', 'grass'],
+            'restaurant': ['restaurant', 'cafe', 'dining', 'table', 'menu', 'waiter', 'food'],
+            'store': ['store', 'shop', 'shopping', 'aisle', 'shelf', 'checkout', 'retail']
+        }
+
+        # Sound disambiguation rules: generic_sound → {environment: specific_sound}
+        self.disambiguation_rules = {
+            'door': {
+                'car': 'car door closing, metal latch',
+                'office': 'office door, commercial door closing',
+                'home': 'residential door, house door closing',
+                'store': 'automatic sliding door, store entrance'
+            },
+            'door opening': {
+                'car': 'car door opening, handle click',
+                'office': 'office door opening, commercial door',
+                'home': 'house door opening, residential entry',
+                'store': 'automatic door opening, whoosh'
+            },
+            'door closing': {
+                'car': 'car door slam, vehicle door closing',
+                'office': 'office door closing, commercial lock',
+                'home': 'house door closing, door latch',
+                'store': 'automatic door closing'
+            },
+            'footsteps': {
+                'car': 'footsteps on pavement near car',
+                'office': 'footsteps on carpet, office walking',
+                'home': 'footsteps on floor, indoor walking',
+                'outdoor': 'footsteps on concrete, outdoor walking'
+            },
+            'talking': {
+                'car': 'conversation in car, vehicle dialogue',
+                'office': 'office conversation, workplace discussion',
+                'home': 'home conversation, casual talking',
+                'restaurant': 'restaurant chatter, dining conversation',
+                'outdoor': 'outdoor conversation, street talking'
+            },
+            'background': {
+                'car': 'car interior ambience, road noise',
+                'office': 'office ambience, workplace sounds',
+                'home': 'home ambience, residential sounds',
+                'outdoor': 'outdoor ambience, nature and city sounds',
+                'restaurant': 'restaurant ambience, dining sounds'
+            },
+            'keyboard': {
+                'office': 'office keyboard typing, mechanical clicks',
+                'home': 'keyboard typing at home'
+            }
+        }
+
+    def detect_environment(self, visual_desc: str, action_desc: str = '') -> str:
+        """
+        Detect the environment/context from visual descriptions.
+
+        Returns: environment type or 'unknown'
+        """
+        combined = f"{visual_desc} {action_desc}".lower()
+
+        # Score each environment
+        scores = {}
+        for env, indicators in self.environment_indicators.items():
+            score = sum(1 for indicator in indicators if indicator in combined)
+            if score > 0:
+                scores[env] = score
+
+        # Return environment with highest score
+        if scores:
+            return max(scores.items(), key=lambda x: x[1])[0]
+
+        return 'unknown'
+
+    def disambiguate_sound(self, generic_sound: str, visual_desc: str, action_desc: str = '') -> str:
+        """
+        Convert generic sound to context-specific sound.
+
+        Args:
+            generic_sound: Generic sound description (e.g., "door sounds")
+            visual_desc: Visual scene description
+            action_desc: Action description
+
+        Returns:
+            Disambiguated, context-specific sound description
+        """
+        # Normalize the generic sound (remove extra words)
+        generic_sound_lower = generic_sound.lower()
+
+        # Find matching rule
+        matched_rule = None
+        for rule_key in self.disambiguation_rules.keys():
+            if rule_key in generic_sound_lower:
+                matched_rule = rule_key
+                break
+
+        if not matched_rule:
+            # No rule found, return original
+            return generic_sound
+
+        # Detect environment
+        environment = self.detect_environment(visual_desc, action_desc)
+
+        # Get specific sound for this environment
+        specific_sounds = self.disambiguation_rules[matched_rule]
+
+        if environment in specific_sounds:
+            return specific_sounds[environment]
+        else:
+            # No specific mapping, return original
+            return generic_sound
+
+
 class VisualAudioVerifier:
     """
     Verify that dialogue-mentioned sounds are actually visible in video.
@@ -382,23 +617,26 @@ def convert_visual_to_audio_description(visual_desc: str, action_desc: str, soun
     return base_prompt
 
 
-def suggest_sfx(scenes: List[Dict], transcription: List[Dict]) -> List[Dict]:
+def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str = None) -> List[Dict]:
     """
     DYNAMICALLY suggest sound effects based on natural language understanding.
     No static mappings - generates contextual SFX from visual descriptions.
-    NOW WITH VISUAL-AUDIO VERIFICATION to reduce false positives.
+    NOW WITH VISUAL-AUDIO VERIFICATION AND MOTION VERIFICATION to reduce false positives.
 
     Args:
         scenes: List of scenes with dynamic descriptions
         transcription: List of transcription segments
+        video_path: Path to video file (optional, needed for motion verification)
 
     Returns:
         List of dynamically generated SFX suggestions
     """
     suggestions = []
 
-    # Initialize visual-audio verifier
+    # Initialize verifiers and disambiguator
     verifier = VisualAudioVerifier()
+    motion_verifier = MotionVerifier() if video_path else None
+    disambiguator = ContextDisambiguator()
 
     # Process each scene with dynamic understanding
     for scene in scenes:
@@ -411,16 +649,77 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict]) -> List[Dict]:
             # Dynamically generate SFX prompt from visual understanding
             sfx_prompt = convert_visual_to_audio_description(visual_desc, action_desc, sound_desc)
 
+            # CONTEXT DISAMBIGUATION: Make sound more specific based on environment
+            sfx_prompt = disambiguator.disambiguate_sound(sfx_prompt, visual_desc, action_desc)
+
             # Only add if we generated something meaningful
             if sfx_prompt and len(sfx_prompt) > 5:
-                suggestions.append({
+                base_confidence = scene.get('confidence', 0.7)
+
+                # MOTION VERIFICATION: Check if action-based sounds have actual motion
+                motion_verified = True
+                motion_confidence_multiplier = 1.0
+
+                if motion_verifier and video_path:
+                    # Detect action type from descriptions
+                    combined_desc = f"{visual_desc} {action_desc}".lower()
+
+                    # Check for action keywords that require motion
+                    action_keywords = {
+                        'walking': 'walking',
+                        'running': 'running',
+                        'driving': 'driving',
+                        'car': 'car',
+                        'moving': 'moving',
+                        'typing': 'typing',
+                        'opening': 'opening',
+                        'closing': 'closing',
+                        'jumping': 'jumping'
+                    }
+
+                    detected_action = None
+                    for keyword, action_type in action_keywords.items():
+                        if keyword in combined_desc:
+                            detected_action = action_type
+                            break
+
+                    # If action detected, verify with motion analysis
+                    if detected_action:
+                        try:
+                            motion_result = motion_verifier.verify_action_sound(
+                                detected_action, video_path, timestamp
+                            )
+                            motion_verified = motion_result['verified']
+
+                            # Adjust confidence based on motion verification
+                            if motion_verified:
+                                # High motion detected - boost confidence slightly
+                                motion_confidence_multiplier = min(1.1, 1.0 + motion_result.get('motion_intensity', 0) * 0.2)
+                            else:
+                                # No motion detected - reduce confidence significantly
+                                motion_confidence_multiplier = 0.35  # Low confidence for unverified action
+                        except Exception as e:
+                            print(f"Motion verification error: {e}", file=sys.stderr)
+                            # If motion verification fails, don't penalize
+                            motion_verified = True
+
+                final_confidence = base_confidence * motion_confidence_multiplier
+
+                suggestion = {
                     'timestamp': timestamp,
                     'prompt': sfx_prompt,
                     'reason': f'Scene: {visual_desc[:60]}...' if len(visual_desc) > 60 else f'Scene: {visual_desc}',
-                    'confidence': scene.get('confidence', 0.7),
+                    'confidence': final_confidence,
                     'visual_context': visual_desc,
-                    'action_context': action_desc
-                })
+                    'action_context': action_desc,
+                    'motion_verified': motion_verified
+                }
+
+                # Add warning if motion verification failed
+                if not motion_verified:
+                    suggestion['warning'] = 'Action mentioned but no motion detected - possible false positive'
+
+                suggestions.append(suggestion)
 
     # Enhance with transcription - dynamic phrase detection
     for segment in transcription:
@@ -456,13 +755,18 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict]) -> List[Dict]:
                 # VISUAL-AUDIO VERIFICATION: Check if mentioned sound is actually visible
                 verification = verifier.verify_dialogue_mention(text, nearby_scenes, timestamp)
 
+                # CONTEXT DISAMBIGUATION: Make sound more specific
+                visual_context = nearby_scenes[0].get('description', '') if nearby_scenes else ''
+                action_context = nearby_scenes[0].get('action_description', '') if nearby_scenes else ''
+                disambiguated_sfx = disambiguator.disambiguate_sound(sfx, visual_context, action_context)
+
                 # Use verified confidence instead of static 0.9
                 confidence = verification['confidence']
 
                 # Add suggestion with verification info
                 suggestion = {
                     'timestamp': timestamp,
-                    'prompt': sfx,
+                    'prompt': disambiguated_sfx,
                     'reason': f'Mentioned "{word}" in dialogue: "{text[:50]}..." - {verification["reason"]}',
                     'confidence': confidence,
                     'dialogue_context': text,
@@ -558,9 +862,9 @@ def analyze_video(video_path: str, audio_path: str):
     print("Analyzing scenes...", file=sys.stderr)
     scenes = analyze_scenes(video_path)
 
-    # Generate SFX suggestions
+    # Generate SFX suggestions with motion verification
     print("Generating SFX suggestions...", file=sys.stderr)
-    sfx_suggestions = suggest_sfx(scenes, transcription)
+    sfx_suggestions = suggest_sfx(scenes, transcription, video_path)
 
     # Compile results
     analysis = {
