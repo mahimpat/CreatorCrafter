@@ -17,8 +17,15 @@
   border-bottom: 1px solid #3a3a3a;
   display: flex;
   align-items: center;
-  padding: 0 16px;
   flex-shrink: 0;
+}
+
+.timeline-header-spacer {
+  width: 200px;
+  min-width: 200px;
+  flex-shrink: 0;
+  background: #252525;
+  border-right: 1px solid #3a3a3a;
 }
 
 .timeline-controls {
@@ -26,6 +33,7 @@
   justify-content: space-between;
   align-items: center;
   width: 100%;
+  padding: 0 16px;
 }
 
 .time-display {
@@ -112,9 +120,54 @@
 .timeline-main {
   flex: 1;
   background: #1a1a1a;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Fixed Left Column - Track Labels */
+.timeline-labels {
+  width: 200px;
+  min-width: 200px;
+  flex-shrink: 0;
+  background: #252525;
+  border-right: 1px solid #3a3a3a;
+  display: flex;
+  flex-direction: column;
+}
+
+.track-label {
+  height: 80px;
+  border-bottom: 1px solid #2a2a2a;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  background: #2a2a2a;
+}
+
+.track-label:nth-child(1) {
+  background: linear-gradient(to right, #2a2a2a, rgba(255, 152, 0, 0.1));
+}
+
+.track-label:nth-child(2) {
+  background: linear-gradient(to right, #2a2a2a, rgba(76, 175, 80, 0.1));
+}
+
+.track-label:nth-child(3) {
+  background: linear-gradient(to right, #2a2a2a, rgba(33, 150, 243, 0.1));
+}
+
+.track-label:nth-child(4) {
+  background: linear-gradient(to right, #2a2a2a, rgba(156, 39, 176, 0.1));
+}
+
+/* Scrollable Right Column - Timeline Content */
+.timeline-scroll-area {
+  flex: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  position: relative;
+  background: #1a1a1a;
 }
 
 /* Time Ruler */
@@ -194,23 +247,9 @@
 
 /* Tracks */
 .track {
-  display: flex;
   border-bottom: 1px solid #2a2a2a;
   background: #1e1e1e;
   position: relative;
-}
-
-.track-header {
-  width: 200px;
-  min-width: 200px;
-  height: 80px;
-  background: #2a2a2a;
-  border-right: 1px solid #3a3a3a;
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  gap: 12px;
-  flex-shrink: 0;
 }
 
 .track-icon {
@@ -253,15 +292,9 @@
 }
 
 .track-content {
-  flex: 1;
   height: 80px;
   position: relative;
   overflow: visible;
-}
-
-/* Video Track Styling */
-.video-track .track-header {
-  background: linear-gradient(to right, #2a2a2a, rgba(255, 152, 0, 0.1));
 }
 
 .video-clip {
@@ -283,20 +316,6 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
-/* Audio Track Styling */
-.audio-track .track-header {
-  background: linear-gradient(to right, #2a2a2a, rgba(76, 175, 80, 0.1));
-}
-
-/* Subtitle Track Styling */
-.subtitle-track .track-header {
-  background: linear-gradient(to right, #2a2a2a, rgba(33, 150, 243, 0.1));
-}
-
-/* Overlay Track Styling */
-.overlay-track .track-header {
-  background: linear-gradient(to right, #2a2a2a, rgba(156, 39, 176, 0.1));
-}
 
 /* Track Items */
 .track-item {
@@ -432,29 +451,34 @@
 }
 
 /* Scrollbar Styling */
-.timeline-main::-webkit-scrollbar {
+.timeline-scroll-area::-webkit-scrollbar {
   height: 12px;
 }
 
-.timeline-main::-webkit-scrollbar-track {
+.timeline-scroll-area::-webkit-scrollbar-track {
   background: #2a2a2a;
 }
 
-.timeline-main::-webkit-scrollbar-thumb {
+.timeline-scroll-area::-webkit-scrollbar-thumb {
   background: #555;
   border-radius: 6px;
   border: 2px solid #2a2a2a;
 }
 
-.timeline-main::-webkit-scrollbar-thumb:hover {
+.timeline-scroll-area::-webkit-scrollbar-thumb:hover {
   background: #666;
 }
 
 /* Responsive */
 @media (max-width: 768px) {
-  .track-header {
+  .timeline-labels,
+  .timeline-header-spacer {
     width: 160px;
     min-width: 160px;
+  }
+
+  .track-label {
+    padding: 0 12px;
   }
 
   .track-name {

@@ -118,6 +118,7 @@ export default function Timeline() {
     <div className="capcut-timeline">
       {/* Timeline Header with CapCut-style controls */}
       <div className="timeline-header">
+        <div className="timeline-header-spacer" />
         <div className="timeline-controls">
           {/* Left side - Time display */}
           <div className="time-display">
@@ -150,176 +151,190 @@ export default function Timeline() {
 
       {/* Main Timeline Area */}
       <div className="timeline-main">
-        {/* Time Ruler */}
-        <div className="time-ruler" style={{ width: `${timelineWidth}px` }}>
-          {generateTimeMarkers()}
-          {/* Playhead in ruler */}
-          <div
-            className="playhead-ruler"
-            style={{ left: `${playheadPosition}px` }}
-          />
+        {/* Fixed Left Column - Track Labels */}
+        <div className="timeline-labels">
+          {/* Video Track Label */}
+          <div className="track-label">
+            <span className="track-icon"><Film size={16} /></span>
+            <span className="track-name">Video</span>
+            <div className="track-controls">
+              <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+              <button className="track-btn" title="Lock track"><Lock size={14} /></button>
+            </div>
+          </div>
+
+          {/* Audio Track Label */}
+          <div className="track-label">
+            <span className="track-icon"><Volume2 size={16} /></span>
+            <span className="track-name">Audio</span>
+            <div className="track-controls">
+              <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+              <button className="track-btn" title="Lock track"><Lock size={14} /></button>
+            </div>
+          </div>
+
+          {/* Subtitle Track Label */}
+          <div className="track-label">
+            <span className="track-icon"><MessageSquare size={16} /></span>
+            <span className="track-name">Subtitles</span>
+            <div className="track-controls">
+              <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+              <button className="track-btn" title="Lock track"><Lock size={14} /></button>
+            </div>
+          </div>
+
+          {/* Text Overlay Track Label */}
+          <div className="track-label">
+            <span className="track-icon"><Type size={16} /></span>
+            <span className="track-name">Text</span>
+            <div className="track-controls">
+              <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+              <button className="track-btn" title="Lock track"><Lock size={14} /></button>
+            </div>
+          </div>
         </div>
 
-        {/* Timeline Content with tracks */}
-        <div
-          ref={timelineRef}
-          className="timeline-content"
-          style={{ width: `${timelineWidth}px` }}
-          onClick={handleTimelineClick}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-        >
-          {/* Playhead line */}
+        {/* Scrollable Right Column - Timeline Content */}
+        <div className="timeline-scroll-area">
+          {/* Time Ruler */}
+          <div className="time-ruler" style={{ width: `${timelineWidth}px` }}>
+            {generateTimeMarkers()}
+            {/* Playhead in ruler */}
+            <div
+              className="playhead-ruler"
+              style={{ left: `${playheadPosition}px` }}
+            />
+          </div>
+
+          {/* Timeline Content with tracks */}
           <div
-            className="playhead-line"
-            style={{ left: `${playheadPosition}px` }}
-          />
+            ref={timelineRef}
+            className="timeline-content"
+            style={{ width: `${timelineWidth}px` }}
+            onClick={handleTimelineClick}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
+            {/* Playhead line */}
+            <div
+              className="playhead-line"
+              style={{ left: `${playheadPosition}px` }}
+            />
 
-          {/* Video Track */}
-          <div className="track video-track">
-            <div className="track-header">
-              <span className="track-icon"><Film size={16} /></span>
-              <span className="track-name">Video</span>
-              <div className="track-controls">
-                <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
-                <button className="track-btn" title="Lock track"><Lock size={14} /></button>
+            {/* Video Track */}
+            <div className="track video-track">
+              <div className="track-content">
+                {/* Video timeline representation */}
+                <div
+                  className="video-clip"
+                  style={{
+                    width: `${timelineWidth}px`,
+                    height: '60px'
+                  }}
+                >
+                  <span className="clip-label">Main Video</span>
+                </div>
               </div>
             </div>
-            <div className="track-content">
-              {/* Video timeline representation */}
-              <div
-                className="video-clip"
-                style={{
-                  width: `${timelineWidth}px`,
-                  height: '60px'
-                }}
-              >
-                <span className="clip-label">Main Video</span>
-              </div>
-            </div>
-          </div>
 
-          {/* Audio/SFX Track */}
-          <div className="track audio-track">
-            <div className="track-header">
-              <span className="track-icon"><Volume2 size={16} /></span>
-              <span className="track-name">Audio</span>
-              <div className="track-controls">
-                <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
-                <button className="track-btn" title="Lock track"><Lock size={14} /></button>
-              </div>
-            </div>
-            <div className="track-content">
-              {/* SFX items */}
-              {sfxTracks.map(sfx => {
-                const startPos = sfx.start * pixelsPerSecond
-                const width = sfx.duration * pixelsPerSecond
+            {/* Audio/SFX Track */}
+            <div className="track audio-track">
+              <div className="track-content">
+                {/* SFX items */}
+                {sfxTracks.map(sfx => {
+                  const startPos = sfx.start * pixelsPerSecond
+                  const width = sfx.duration * pixelsPerSecond
 
-                return (
-                  <div
-                    key={sfx.id}
-                    className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''}`}
-                    style={{
-                      left: `${startPos}px`,
-                      width: `${Math.max(width, 60)}px`
-                    }}
-                    onMouseDown={(e) => handleTrackItemMouseDown(e, sfx.id, 'sfx')}
-                    title={`${sfx.prompt || 'SFX'} - ${sfx.start.toFixed(2)}s`}
-                  >
-                    <div className="item-content">
-                      <span className="item-icon"><Music size={14} /></span>
-                      <span className="item-label">{sfx.prompt || 'SFX'}</span>
+                  return (
+                    <div
+                      key={sfx.id}
+                      className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''}`}
+                      style={{
+                        left: `${startPos}px`,
+                        width: `${Math.max(width, 60)}px`
+                      }}
+                      onMouseDown={(e) => handleTrackItemMouseDown(e, sfx.id, 'sfx')}
+                      title={`${sfx.prompt || 'SFX'} - ${sfx.start.toFixed(2)}s`}
+                    >
+                      <div className="item-content">
+                        <span className="item-icon"><Music size={14} /></span>
+                        <span className="item-label">{sfx.prompt || 'SFX'}</span>
+                      </div>
+                      <div className="waveform"></div>
                     </div>
-                    <div className="waveform"></div>
-                  </div>
-                )
-              })}
+                  )
+                })}
 
-              {/* AI Suggestions */}
-              {analysis?.suggestedSFX.map((suggestion, index) => {
-                const position = suggestion.timestamp * pixelsPerSecond
-                return (
-                  <div
-                    key={index}
-                    className="sfx-suggestion"
-                    style={{ left: `${position}px` }}
-                    title={`Suggested: ${suggestion.prompt}`}
-                  />
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Subtitle Track */}
-          <div className="track subtitle-track">
-            <div className="track-header">
-              <span className="track-icon"><MessageSquare size={16} /></span>
-              <span className="track-name">Subtitles</span>
-              <div className="track-controls">
-                <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
-                <button className="track-btn" title="Lock track"><Lock size={14} /></button>
+                {/* AI Suggestions */}
+                {analysis?.suggestedSFX.map((suggestion, index) => {
+                  const position = suggestion.timestamp * pixelsPerSecond
+                  return (
+                    <div
+                      key={index}
+                      className="sfx-suggestion"
+                      style={{ left: `${position}px` }}
+                      title={`Suggested: ${suggestion.prompt}`}
+                    />
+                  )
+                })}
               </div>
             </div>
-            <div className="track-content">
-              {subtitles.map(subtitle => {
-                const startPos = subtitle.start * pixelsPerSecond
-                const width = (subtitle.end - subtitle.start) * pixelsPerSecond
 
-                return (
-                  <div
-                    key={subtitle.id}
-                    className={`track-item subtitle-item ${draggedItem?.id === subtitle.id ? 'dragging' : ''}`}
-                    style={{
-                      left: `${startPos}px`,
-                      width: `${Math.max(width, 40)}px`
-                    }}
-                    onMouseDown={(e) => handleTrackItemMouseDown(e, subtitle.id, 'subtitle')}
-                    title={subtitle.text}
-                  >
-                    <div className="item-content">
-                      <span className="item-icon"><MessageSquare size={14} /></span>
-                      <span className="item-label">{subtitle.text.substring(0, 15)}...</span>
+            {/* Subtitle Track */}
+            <div className="track subtitle-track">
+              <div className="track-content">
+                {subtitles.map(subtitle => {
+                  const startPos = subtitle.start * pixelsPerSecond
+                  const width = (subtitle.end - subtitle.start) * pixelsPerSecond
+
+                  return (
+                    <div
+                      key={subtitle.id}
+                      className={`track-item subtitle-item ${draggedItem?.id === subtitle.id ? 'dragging' : ''}`}
+                      style={{
+                        left: `${startPos}px`,
+                        width: `${Math.max(width, 40)}px`
+                      }}
+                      onMouseDown={(e) => handleTrackItemMouseDown(e, subtitle.id, 'subtitle')}
+                      title={subtitle.text}
+                    >
+                      <div className="item-content">
+                        <span className="item-icon"><MessageSquare size={14} /></span>
+                        <span className="item-label">{subtitle.text.substring(0, 15)}...</span>
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Text Overlay Track */}
-          <div className="track overlay-track">
-            <div className="track-header">
-              <span className="track-icon"><Type size={16} /></span>
-              <span className="track-name">Text</span>
-              <div className="track-controls">
-                <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
-                <button className="track-btn" title="Lock track"><Lock size={14} /></button>
+                  )
+                })}
               </div>
             </div>
-            <div className="track-content">
-              {textOverlays.map(overlay => {
-                const startPos = overlay.start * pixelsPerSecond
-                const width = (overlay.end - overlay.start) * pixelsPerSecond
 
-                return (
-                  <div
-                    key={overlay.id}
-                    className={`track-item overlay-item ${draggedItem?.id === overlay.id ? 'dragging' : ''}`}
-                    style={{
-                      left: `${startPos}px`,
-                      width: `${Math.max(width, 40)}px`
-                    }}
-                    onMouseDown={(e) => handleTrackItemMouseDown(e, overlay.id, 'overlay')}
-                    title={overlay.text}
-                  >
-                    <div className="item-content">
-                      <span className="item-icon"><Type size={14} /></span>
-                      <span className="item-label">{overlay.text}</span>
+            {/* Text Overlay Track */}
+            <div className="track overlay-track">
+              <div className="track-content">
+                {textOverlays.map(overlay => {
+                  const startPos = overlay.start * pixelsPerSecond
+                  const width = (overlay.end - overlay.start) * pixelsPerSecond
+
+                  return (
+                    <div
+                      key={overlay.id}
+                      className={`track-item overlay-item ${draggedItem?.id === overlay.id ? 'dragging' : ''}`}
+                      style={{
+                        left: `${startPos}px`,
+                        width: `${Math.max(width, 40)}px`
+                      }}
+                      onMouseDown={(e) => handleTrackItemMouseDown(e, overlay.id, 'overlay')}
+                      title={overlay.text}
+                    >
+                      <div className="item-content">
+                        <span className="item-icon"><Type size={14} /></span>
+                        <span className="item-label">{overlay.text}</span>
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           </div>
         </div>
