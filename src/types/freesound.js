@@ -1,0 +1,2 @@
+// FreeSound API Types
+export {};

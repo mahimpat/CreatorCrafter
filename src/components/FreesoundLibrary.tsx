@@ -1,16 +1,11 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { useProject } from '../context/ProjectContext'
-import type { FreesoundSound, FreesoundSearchParams, FreesoundUser } from '../types/freesound'
-import { Search, Download, Play, Pause, User, LogIn, LogOut, Filter, Clock, Star, Tag } from 'lucide-react'
+import type { FreesoundSound, FreesoundSearchParams } from '../types/freesound'
+import { Search, Download, Play, Pause, Filter, Clock, Star } from 'lucide-react'
 import './FreesoundLibrary.css'
 
 export default function FreesoundLibrary() {
   const { addSFXTrack, currentTime, projectPath } = useProject()
-
-  // Auth state
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [user, setUser] = useState<FreesoundUser | null>(null)
-  const [isAuthenticating, setIsAuthenticating] = useState(false)
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -32,52 +27,6 @@ export default function FreesoundLibrary() {
 
   // Download state
   const [downloadingSound, setDownloadingSound] = useState<number | null>(null)
-
-  // Check authentication on mount
-  useEffect(() => {
-    checkAuthentication()
-  }, [])
-
-  const checkAuthentication = async () => {
-    const authenticated = await window.electronAPI.freesoundIsAuthenticated()
-    setIsAuthenticated(authenticated)
-
-    if (authenticated) {
-      const result = await window.electronAPI.freesoundGetMe()
-      if (result.success) {
-        setUser(result.user)
-      }
-    }
-  }
-
-  const handleLogin = async () => {
-    setIsAuthenticating(true)
-    try {
-      const result = await window.electronAPI.freesoundAuthorize()
-      if (result.success) {
-        setIsAuthenticated(true)
-        // Get user info
-        const userResult = await window.electronAPI.freesoundGetMe()
-        if (userResult.success) {
-          setUser(userResult.user)
-        }
-        alert('Successfully connected to FreeSound!')
-      } else {
-        alert(`Login failed: ${result.error || 'Unknown error'}`)
-      }
-    } catch (error: any) {
-      console.error('Login error:', error)
-      alert(`Login failed: ${error.message}`)
-    } finally {
-      setIsAuthenticating(false)
-    }
-  }
-
-  const handleLogout = async () => {
-    await window.electronAPI.freesoundClearToken()
-    setIsAuthenticated(false)
-    setUser(null)
-  }
 
   const handleSearch = async (page = 1) => {
     if (!searchQuery.trim() && page === 1) return
@@ -161,19 +110,15 @@ export default function FreesoundLibrary() {
       return
     }
 
-    if (!isAuthenticated) {
-      alert('Please login to FreeSound to download full quality sounds')
-      return
-    }
-
     setDownloadingSound(sound.id)
 
     try {
-      // Create temp file path
-      const tempPath = `/tmp/freesound-${sound.id}.${sound.type}`
+      // Create temp file path for preview MP3
+      const tempPath = `/tmp/freesound-preview-${sound.id}.mp3`
 
-      // Download sound
-      const downloadResult = await window.electronAPI.freesoundDownloadSound(sound.id, tempPath)
+      // Download preview (high-quality MP3)
+      const previewUrl = sound.previews['preview-hq-mp3']
+      const downloadResult = await window.electronAPI.freesoundDownloadPreview(previewUrl, tempPath)
 
       if (!downloadResult.success) {
         alert(`Download failed: ${downloadResult.error}`)
@@ -229,31 +174,6 @@ export default function FreesoundLibrary() {
 
   return (
     <div className="freesound-library">
-      {/* Auth Section */}
-      <div className="freesound-auth">
-        {!isAuthenticated ? (
-          <button
-            className="btn-primary"
-            onClick={handleLogin}
-            disabled={isAuthenticating}
-          >
-            <LogIn size={16} />
-            {isAuthenticating ? 'Connecting...' : 'Connect to FreeSound'}
-          </button>
-        ) : (
-          <div className="user-info">
-            <div className="user-details">
-              <User size={16} />
-              <span>{user?.username || 'User'}</span>
-              <span className="user-sounds">{user?.num_sounds || 0} sounds</span>
-            </div>
-            <button className="btn-icon" onClick={handleLogout} title="Logout">
-              <LogOut size={16} />
-            </button>
-          </div>
-        )}
-      </div>
-
       {/* Search Section */}
       <div className="freesound-search">
         <div className="search-bar">
@@ -317,8 +237,8 @@ export default function FreesoundLibrary() {
             <ul className="search-tips">
               <li>Try searching for: footsteps, explosion, rain, door, laugh, etc.</li>
               <li>Use filters to refine results by duration and rating</li>
-              <li>Preview sounds before downloading</li>
-              <li>Login to download full quality audio files</li>
+              <li>Preview sounds before adding to timeline</li>
+              <li>Downloads high-quality MP3 previews (perfect for video editing)</li>
             </ul>
           </div>
         ) : isSearching ? (

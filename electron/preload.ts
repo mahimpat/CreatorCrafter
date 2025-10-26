@@ -15,8 +15,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // AI/ML APIs
   analyzeVideo: (videoPath: string, audioPath: string) =>
     ipcRenderer.invoke('ai:analyzeVideo', videoPath, audioPath),
-  generateSFX: (prompt: string, duration: number) =>
-    ipcRenderer.invoke('audiocraft:generate', prompt, duration),
+  generateSFX: (prompt: string, duration: number, modelType?: string) =>
+    ipcRenderer.invoke('audiocraft:generate', prompt, duration, modelType || 'audiogen'),
 
   // File system APIs
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
@@ -55,25 +55,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isValidProject: (projectPath: string) =>
     ipcRenderer.invoke('project:isValid', projectPath),
 
-  // FreeSound APIs
-  freesoundAuthorize: () =>
-    ipcRenderer.invoke('freesound:authorize'),
-  freesoundIsAuthenticated: () =>
-    ipcRenderer.invoke('freesound:isAuthenticated'),
-  freesoundGetToken: () =>
-    ipcRenderer.invoke('freesound:getToken'),
-  freesoundGetMe: () =>
-    ipcRenderer.invoke('freesound:getMe'),
+  // FreeSound APIs (API key only - no OAuth)
   freesoundSearch: (params: any) =>
     ipcRenderer.invoke('freesound:search', params),
   freesoundGetSound: (soundId: number) =>
     ipcRenderer.invoke('freesound:getSound', soundId),
-  freesoundDownloadSound: (soundId: number, outputPath: string) =>
-    ipcRenderer.invoke('freesound:downloadSound', soundId, outputPath),
   freesoundDownloadPreview: (previewUrl: string, outputPath: string) =>
-    ipcRenderer.invoke('freesound:downloadPreview', previewUrl, outputPath),
-  freesoundClearToken: () =>
-    ipcRenderer.invoke('freesound:clearToken')
+    ipcRenderer.invoke('freesound:downloadPreview', previewUrl, outputPath)
 })
 
 // Type definitions for window.electronAPI
@@ -84,7 +72,7 @@ export interface ElectronAPI {
   getVideoMetadata: (videoPath: string) => Promise<VideoMetadata>
   renderVideo: (options: RenderOptions) => Promise<string>
   analyzeVideo: (videoPath: string, audioPath: string) => Promise<VideoAnalysis>
-  generateSFX: (prompt: string, duration: number) => Promise<string>
+  generateSFX: (prompt: string, duration: number, modelType?: 'audiogen' | 'musicgen') => Promise<string>
   readFile: (filePath: string) => Promise<string>
   writeFile: (filePath: string, content: string) => Promise<boolean>
 
@@ -105,16 +93,10 @@ export interface ElectronAPI {
   showInFolder: (filePath: string) => Promise<boolean>
   isValidProject: (projectPath: string) => Promise<boolean>
 
-  // FreeSound APIs
-  freesoundAuthorize: () => Promise<{ success: boolean; token?: any; error?: string }>
-  freesoundIsAuthenticated: () => Promise<boolean>
-  freesoundGetToken: () => Promise<any | null>
-  freesoundGetMe: () => Promise<{ success: boolean; user?: any; error?: string }>
+  // FreeSound APIs (API key only - no OAuth)
   freesoundSearch: (params: any) => Promise<{ success: boolean; results?: any; error?: string }>
   freesoundGetSound: (soundId: number) => Promise<{ success: boolean; sound?: any; error?: string }>
-  freesoundDownloadSound: (soundId: number, outputPath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
   freesoundDownloadPreview: (previewUrl: string, outputPath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
-  freesoundClearToken: () => Promise<{ success: boolean; error?: string }>
 }
 
 export interface VideoMetadata {

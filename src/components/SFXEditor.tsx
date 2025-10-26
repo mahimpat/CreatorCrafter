@@ -13,6 +13,7 @@ export default function SFXEditor() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState(2)
+  const [modelType, setModelType] = useState<'audiogen' | 'musicgen'>('audiogen')
 
   const handleGenerateSFX = async () => {
     if (!prompt) return
@@ -20,7 +21,7 @@ export default function SFXEditor() {
     try {
       setIsGenerating(true)
 
-      let sfxPath = await window.electronAPI.generateSFX(prompt, duration)
+      let sfxPath = await window.electronAPI.generateSFX(prompt, duration, modelType)
 
       // Copy to project folder if project exists
       if (projectPath) {
@@ -126,7 +127,7 @@ export default function SFXEditor() {
       setPrompt(finalPrompt)
 
       // Generate the SFX using AudioCraft with the optimized prompt
-      let sfxPath = await window.electronAPI.generateSFX(finalPrompt, duration)
+      let sfxPath = await window.electronAPI.generateSFX(finalPrompt, duration, modelType)
 
       // Copy to project folder if project exists
       if (projectPath) {
@@ -221,6 +222,22 @@ export default function SFXEditor() {
           onChange={e => setPrompt(e.target.value)}
           rows={3}
         />
+
+        <div className="input-group">
+          <label>Model Type</label>
+          <select
+            value={modelType}
+            onChange={e => setModelType(e.target.value as 'audiogen' | 'musicgen')}
+          >
+            <option value="audiogen">AudioGen (Sound Effects & Foley)</option>
+            <option value="musicgen">MusicGen (Background Music)</option>
+          </select>
+          <small className="help-text">
+            {modelType === 'audiogen'
+              ? 'Best for realistic sound effects, foley, impacts, and environmental sounds'
+              : 'Best for background music, melodies, and musical transitions'}
+          </small>
+        </div>
 
         <div className="input-group">
           <label>Duration (seconds)</label>
