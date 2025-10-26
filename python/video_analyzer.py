@@ -198,6 +198,107 @@ def analyze_scenes(video_path: str):
         return []
 
 
+class VisualAudioVerifier:
+    """
+    Verify that dialogue-mentioned sounds are actually visible in video.
+    Reduces false positives by checking visual evidence.
+    """
+    def __init__(self):
+        # Common objects and their related visual terms
+        self.object_relations = {
+            'door': ['door', 'doorway', 'entrance', 'exit'],
+            'phone': ['phone', 'smartphone', 'cellphone', 'mobile', 'device'],
+            'car': ['car', 'vehicle', 'automobile', 'sedan', 'suv'],
+            'window': ['window', 'glass'],
+            'computer': ['computer', 'laptop', 'desktop', 'screen', 'monitor'],
+            'keyboard': ['keyboard', 'typing', 'computer'],
+            'water': ['water', 'liquid', 'ocean', 'lake', 'river', 'pool'],
+            'rain': ['rain', 'raining', 'wet', 'water'],
+            'wind': ['wind', 'windy', 'breeze', 'air'],
+            'footsteps': ['walking', 'person', 'man', 'woman', 'people', 'pedestrian'],
+        }
+
+    def extract_mentioned_object(self, text: str) -> str:
+        """
+        Extract the main object from dialogue text.
+
+        Examples:
+        - "open the door" → "door"
+        - "answer the phone" → "phone"
+        - "start the car" → "car"
+        """
+        text_lower = text.lower()
+
+        # Check for known objects
+        for obj in self.object_relations.keys():
+            if obj in text_lower:
+                return obj
+
+        return None
+
+    def verify_dialogue_mention(self, dialogue_text: str, nearby_scenes: List[Dict], timestamp: float) -> Dict:
+        """
+        Verify if dialogue-mentioned sound is supported by visual evidence.
+
+        Args:
+            dialogue_text: The spoken text
+            nearby_scenes: Scenes within ±2 seconds
+            timestamp: When dialogue occurred
+
+        Returns:
+            Dict with verified, confidence, and reason
+        """
+        mentioned_object = self.extract_mentioned_object(dialogue_text)
+
+        if not mentioned_object:
+            # No recognizable object mentioned
+            return {
+                'verified': False,
+                'confidence': 0.5,
+                'reason': 'No specific object identified in dialogue'
+            }
+
+        # Check if object appears in nearby visual scenes
+        visual_evidence = False
+        matching_scene = None
+
+        for scene in nearby_scenes:
+            if abs(scene['timestamp'] - timestamp) > 2.0:
+                continue
+
+            scene_desc = scene.get('description', '').lower()
+            action_desc = scene.get('action_description', '').lower()
+            combined = f"{scene_desc} {action_desc}"
+
+            # Check for exact match
+            if mentioned_object in combined:
+                visual_evidence = True
+                matching_scene = scene
+                break
+
+            # Check for related terms
+            related_terms = self.object_relations.get(mentioned_object, [])
+            if any(term in combined for term in related_terms):
+                visual_evidence = True
+                matching_scene = scene
+                break
+
+        if visual_evidence:
+            return {
+                'verified': True,
+                'confidence': 0.9,
+                'reason': f'Visually confirmed: {matching_scene.get("description", "")[:50]}',
+                'matching_scene': matching_scene
+            }
+        else:
+            return {
+                'verified': False,
+                'confidence': 0.3,  # Low confidence - likely false positive
+                'reason': f'Mentioned "{mentioned_object}" in dialogue but not visible in scene',
+                'warning': 'Possible false positive'
+            }
+
+
 def convert_visual_to_audio_description(visual_desc: str, action_desc: str, sound_desc: str) -> str:
     """
     Dynamically convert visual descriptions into audio/SFX prompts.
@@ -285,6 +386,7 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict]) -> List[Dict]:
     """
     DYNAMICALLY suggest sound effects based on natural language understanding.
     No static mappings - generates contextual SFX from visual descriptions.
+    NOW WITH VISUAL-AUDIO VERIFICATION to reduce false positives.
 
     Args:
         scenes: List of scenes with dynamic descriptions
@@ -294,6 +396,9 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict]) -> List[Dict]:
         List of dynamically generated SFX suggestions
     """
     suggestions = []
+
+    # Initialize visual-audio verifier
+    verifier = VisualAudioVerifier()
 
     # Process each scene with dynamic understanding
     for scene in scenes:
@@ -342,23 +447,36 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict]) -> List[Dict]:
             'footsteps': 'footstep sounds',
         }
 
-        # Check for explicit sound mentions
+        # Check for explicit sound mentions with visual verification
         for word, sfx in sound_words.items():
             if word in text_lower:
-                # Find nearby scene for context
-                nearby_scene = next((s for s in scenes if abs(s['timestamp'] - timestamp) < 2.0), None)
-                context = nearby_scene.get('description', '') if nearby_scene else text
+                # Find nearby scenes for visual verification
+                nearby_scenes = [s for s in scenes if abs(s['timestamp'] - timestamp) < 2.0]
 
-                suggestions.append({
+                # VISUAL-AUDIO VERIFICATION: Check if mentioned sound is actually visible
+                verification = verifier.verify_dialogue_mention(text, nearby_scenes, timestamp)
+
+                # Use verified confidence instead of static 0.9
+                confidence = verification['confidence']
+
+                # Add suggestion with verification info
+                suggestion = {
                     'timestamp': timestamp,
                     'prompt': sfx,
-                    'reason': f'Mentioned "{word}" in dialogue: "{text[:50]}..."',
-                    'confidence': 0.9,
+                    'reason': f'Mentioned "{word}" in dialogue: "{text[:50]}..." - {verification["reason"]}',
+                    'confidence': confidence,
                     'dialogue_context': text,
-                    'visual_context': context
-                })
+                    'visual_context': nearby_scenes[0].get('description', text) if nearby_scenes else text,
+                    'verified': verification['verified']
+                }
 
-        # Dynamic action phrase detection (no hardcoded combos)
+                # Add warning if not verified (possible false positive)
+                if not verification['verified']:
+                    suggestion['warning'] = verification.get('warning', 'Not visually confirmed')
+
+                suggestions.append(suggestion)
+
+        # Dynamic action phrase detection with visual verification
         # Split into words and look for action patterns
         words = text_lower.split()
         for i, word in enumerate(words):
@@ -375,13 +493,25 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict]) -> List[Dict]:
                 if any(char.isalpha() for char in obj) and len(obj) > 2:
                     # Verify this isn't already covered
                     if not any(abs(s['timestamp'] - timestamp) < 0.5 for s in suggestions):
-                        suggestions.append({
+                        # Find nearby scenes for verification
+                        nearby_scenes = [s for s in scenes if abs(s['timestamp'] - timestamp) < 2.0]
+
+                        # Verify the object-action pair
+                        verification = verifier.verify_dialogue_mention(f"{obj} {action}", nearby_scenes, timestamp)
+
+                        suggestion = {
                             'timestamp': timestamp,
                             'prompt': sfx_prompt,
-                            'reason': f'Action mentioned: "{obj} {action}"',
-                            'confidence': 0.6,
-                            'dialogue_context': text
-                        })
+                            'reason': f'Action mentioned: "{obj} {action}" - {verification["reason"]}',
+                            'confidence': verification['confidence'] * 0.8,  # Slightly lower for inferred actions
+                            'dialogue_context': text,
+                            'verified': verification['verified']
+                        }
+
+                        if not verification['verified']:
+                            suggestion['warning'] = 'Inferred action not visually confirmed'
+
+                        suggestions.append(suggestion)
 
     # Sort and deduplicate
     suggestions.sort(key=lambda x: x['timestamp'])
