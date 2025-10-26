@@ -112,16 +112,14 @@ app.whenReady().then(() => {
   createWindow()
   registerIpcHandlers()
 
-  // Initialize FreeSound service
-  const clientId = process.env.FREESOUND_CLIENT_ID || ''
-  const clientSecret = process.env.FREESOUND_CLIENT_SECRET || ''
-  const redirectUri = process.env.FREESOUND_REDIRECT_URI || 'http://localhost:3000/freesound/callback'
+  // Initialize FreeSound service with API key only
+  const apiKey = process.env.FREESOUND_CLIENT_ID || ''
 
-  if (clientId && clientSecret) {
-    initializeFreesoundService(clientId, clientSecret, redirectUri)
-    console.log('FreeSound service initialized')
+  if (apiKey) {
+    initializeFreesoundService(apiKey)
+    console.log('FreeSound service initialized with API key')
   } else {
-    console.warn('FreeSound API credentials not found in environment variables')
+    console.warn('FREESOUND_CLIENT_ID not found in .env file')
   }
 
   app.on('activate', () => {
@@ -181,21 +179,33 @@ function registerIpcHandlers() {
     return new Promise((resolve, reject) => {
       const outputPath = join(app.getPath('temp'), `audio-${Date.now()}.wav`)
 
+      console.log('Extracting audio from:', videoPath)
+      console.log('Output path:', outputPath)
+
       // FFmpeg command to extract audio
       const ffmpeg = spawn('ffmpeg', [
         '-i', videoPath,
         '-vn',
         '-acodec', 'pcm_s16le',
-        '-ar', '44100',
-        '-ac', '2',
+        '-ar', '16000',  // 16kHz for Whisper compatibility
+        '-ac', '1',      // Mono for Whisper
+        '-y',            // Overwrite output file
         outputPath
       ])
 
+      let errorOutput = ''
+
+      ffmpeg.stderr.on('data', (data) => {
+        errorOutput += data.toString()
+      })
+
       ffmpeg.on('close', (code) => {
         if (code === 0) {
+          console.log('Audio extraction successful')
           resolve(outputPath)
         } else {
-          reject(new Error(`FFmpeg exited with code ${code}`))
+          console.error('FFmpeg error output:', errorOutput)
+          reject(new Error(`FFmpeg exited with code ${code}: ${errorOutput.substring(0, 500)}`))
         }
       })
 
@@ -237,20 +247,22 @@ function registerIpcHandlers() {
   })
 
   // AudioCraft integration (Python bridge)
-  ipcMain.handle('audiocraft:generate', async (_, prompt: string, duration: number) => {
+  ipcMain.handle('audiocraft:generate', async (_, prompt: string, duration: number, modelType: string = 'audiogen') => {
     return new Promise((resolve, reject) => {
       const pythonScript = join(appRoot, 'python', 'audiocraft_generator.py')
       const outputPath = join(app.getPath('temp'), `sfx-${Date.now()}.wav`)
       // Use venv python
       const pythonPath = join(appRoot, 'venv', 'bin', 'python')
 
-      console.log('Starting AudioCraft generation:', { prompt, duration, outputPath })
+      const modelName = modelType === 'musicgen' ? 'MusicGen' : 'AudioGen'
+      console.log(`Starting ${modelName} generation:`, { prompt, duration, outputPath, modelType })
 
       const python = spawn(pythonPath, [
         pythonScript,
         '--prompt', prompt,
         '--duration', duration.toString(),
-        '--output', outputPath
+        '--output', outputPath,
+        '--model', modelType
       ])
 
       let errorOutput = ''
@@ -270,15 +282,15 @@ function registerIpcHandlers() {
         errorOutput += output
         console.error('AudioCraft stderr:', output)
 
-        // Show progress for model loading
-        if (output.includes('Loading AudioGen model')) {
-          console.log('AudioGen model loading...')
+        // Show progress for model loading (both AudioGen and MusicGen)
+        if (output.includes('Loading AudioGen model') || output.includes('Loading MusicGen model')) {
+          console.log(`${modelName} model loading...`)
         }
-        if (output.includes('Model loaded successfully')) {
-          console.log('AudioGen model loaded successfully')
+        if (output.includes('Model loaded successfully') || output.includes('model loaded successfully')) {
+          console.log(`${modelName} model loaded successfully`)
         }
-        if (output.includes('Generating audio for')) {
-          console.log('Generating audio...')
+        if (output.includes('Generating')) {
+          console.log(`Generating ${modelType === 'musicgen' ? 'music' : 'sound effect'}...`)
         }
       })
 
@@ -296,9 +308,9 @@ function registerIpcHandlers() {
 
           // Provide more helpful error messages
           if (errorOutput.includes('Repository Not Found')) {
-            errorMessage = 'AudioGen model not found. Please check your internet connection.'
+            errorMessage = `${modelName} model not found. Please check your internet connection.`
           } else if (errorOutput.includes('401 Client Error')) {
-            errorMessage = 'Authentication error downloading AudioGen model. Please check your internet connection and try again.'
+            errorMessage = `Authentication error downloading ${modelName} model. Please check your internet connection and try again.`
           } else if (errorOutput.includes('torch.cuda')) {
             errorMessage = 'GPU initialization warning (this is normal and won\'t affect generation)'
           } else if (errorOutput.includes('No module named')) {
@@ -572,47 +584,7 @@ function registerIpcHandlers() {
     return await projectManager.isValidProject(projectPath)
   })
 
-  // FreeSound API handlers
-  ipcMain.handle('freesound:authorize', async () => {
-    try {
-      const service = getFreesoundService()
-      const token = await service.authorize()
-      return { success: true, token }
-    } catch (error: any) {
-      console.error('FreeSound authorization error:', error)
-      return { success: false, error: error.message }
-    }
-  })
-
-  ipcMain.handle('freesound:isAuthenticated', async () => {
-    try {
-      const service = getFreesoundService()
-      return service.isAuthenticated()
-    } catch (error) {
-      return false
-    }
-  })
-
-  ipcMain.handle('freesound:getToken', async () => {
-    try {
-      const service = getFreesoundService()
-      return service.getToken()
-    } catch (error) {
-      return null
-    }
-  })
-
-  ipcMain.handle('freesound:getMe', async () => {
-    try {
-      const service = getFreesoundService()
-      const user = await service.getMe()
-      return { success: true, user }
-    } catch (error: any) {
-      console.error('FreeSound getMe error:', error)
-      return { success: false, error: error.message }
-    }
-  })
-
+  // FreeSound API handlers (API key only - no OAuth)
   ipcMain.handle('freesound:search', async (_, params) => {
     try {
       const service = getFreesoundService()
@@ -635,17 +607,6 @@ function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('freesound:downloadSound', async (_, soundId: number, outputPath: string) => {
-    try {
-      const service = getFreesoundService()
-      const filePath = await service.downloadSound(soundId, outputPath)
-      return { success: true, filePath }
-    } catch (error: any) {
-      console.error('FreeSound download error:', error)
-      return { success: false, error: error.message }
-    }
-  })
-
   ipcMain.handle('freesound:downloadPreview', async (_, previewUrl: string, outputPath: string) => {
     try {
       const service = getFreesoundService()
@@ -653,17 +614,6 @@ function registerIpcHandlers() {
       return { success: true, filePath }
     } catch (error: any) {
       console.error('FreeSound preview download error:', error)
-      return { success: false, error: error.message }
-    }
-  })
-
-  ipcMain.handle('freesound:clearToken', async () => {
-    try {
-      const service = getFreesoundService()
-      await service.clearToken()
-      return { success: true }
-    } catch (error: any) {
-      console.error('FreeSound clear token error:', error)
       return { success: false, error: error.message }
     }
   })
