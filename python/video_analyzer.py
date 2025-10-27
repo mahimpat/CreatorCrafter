@@ -29,6 +29,11 @@ except ImportError as e:
     print("pip install openai-whisper opencv-python numpy torch transformers pillow", file=sys.stderr)
     sys.exit(1)
 
+# Suppress FFmpeg/OpenCV H.264 decoder warnings
+# These warnings spam the console during video frame analysis but don't affect functionality
+os.environ['OPENCV_FFMPEG_LOGLEVEL'] = '-8'  # Suppress all FFmpeg warnings
+cv2.setLogLevel(0)  # Suppress OpenCV warnings
+
 # Initialize vision-language model for dynamic understanding (lazy loading)
 _vlm_model = None
 _vlm_processor = None
