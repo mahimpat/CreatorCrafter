@@ -10,7 +10,13 @@ Detects precise moments where sounds should occur:
 import cv2
 import numpy as np
 import sys
+import os
 from typing import List, Dict, Tuple
+
+# Suppress FFmpeg/OpenCV H.264 decoder warnings
+# These warnings spam the console during frame-by-frame analysis but don't affect functionality
+os.environ['OPENCV_FFMPEG_LOGLEVEL'] = '-8'  # Suppress all FFmpeg warnings
+cv2.setLogLevel(0)  # Suppress OpenCV warnings
 
 
 class EventDetector:
