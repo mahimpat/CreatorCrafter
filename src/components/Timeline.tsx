@@ -25,6 +25,38 @@ export default function Timeline() {
   } | null>(null)
   const [zoom, setZoom] = useState(1)
 
+  // Assign SFX tracks to lanes to prevent visual overlap
+  const assignSfxToLanes = (tracks: typeof sfxTracks) => {
+    // Sort by start time
+    const sorted = [...tracks].sort((a, b) => a.start - b.start)
+
+    // Each lane tracks the end time of the last SFX in that lane
+    const lanes: Array<{ endTime: number; tracks: typeof sfxTracks }> = []
+
+    sorted.forEach(track => {
+      const trackEnd = track.start + track.duration
+
+      // Find first lane where this track fits (doesn't overlap)
+      let assignedLane = lanes.find(lane => track.start >= lane.endTime)
+
+      if (assignedLane) {
+        // Add to existing lane
+        assignedLane.tracks.push(track)
+        assignedLane.endTime = trackEnd
+      } else {
+        // Create new lane
+        lanes.push({
+          endTime: trackEnd,
+          tracks: [track]
+        })
+      }
+    })
+
+    return lanes.map(lane => lane.tracks)
+  }
+
+  const sfxLanes = assignSfxToLanes(sfxTracks)
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = Math.floor(seconds % 60)
@@ -238,48 +270,78 @@ export default function Timeline() {
               </div>
             </div>
 
-            {/* Audio/SFX Track */}
-            <div className="track audio-track">
-              <div className="track-content">
-                {/* SFX items */}
-                {sfxTracks.map(sfx => {
-                  const startPos = sfx.start * pixelsPerSecond
-                  const width = sfx.duration * pixelsPerSecond
+            {/* Audio/SFX Tracks - Multiple lanes for layering */}
+            {sfxLanes.length === 0 ? (
+              // Empty track when no SFX
+              <div className="track audio-track">
+                <div className="track-content">
+                  <div className="empty-track-message">
+                    Add SFX from suggestions or generate custom effects
+                  </div>
 
-                  return (
-                    <div
-                      key={sfx.id}
-                      className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''}`}
-                      style={{
-                        left: `${startPos}px`,
-                        width: `${Math.max(width, 60)}px`
-                      }}
-                      onMouseDown={(e) => handleTrackItemMouseDown(e, sfx.id, 'sfx')}
-                      title={`${sfx.prompt || 'SFX'} - ${sfx.start.toFixed(2)}s`}
-                    >
-                      <div className="item-content">
-                        <span className="item-icon"><Music size={14} /></span>
-                        <span className="item-label">{sfx.prompt || 'SFX'}</span>
-                      </div>
-                      <div className="waveform"></div>
-                    </div>
-                  )
-                })}
-
-                {/* AI Suggestions */}
-                {analysis?.suggestedSFX.map((suggestion, index) => {
-                  const position = suggestion.timestamp * pixelsPerSecond
-                  return (
-                    <div
-                      key={index}
-                      className="sfx-suggestion"
-                      style={{ left: `${position}px` }}
-                      title={`Suggested: ${suggestion.prompt}`}
-                    />
-                  )
-                })}
+                  {/* AI Suggestions */}
+                  {analysis?.suggestedSFX.map((suggestion, index) => {
+                    const position = suggestion.timestamp * pixelsPerSecond
+                    return (
+                      <div
+                        key={index}
+                        className="sfx-suggestion"
+                        style={{ left: `${position}px` }}
+                        title={`Suggested: ${suggestion.prompt}`}
+                      />
+                    )
+                  })}
+                </div>
               </div>
-            </div>
+            ) : (
+              // Render each lane as a separate track
+              sfxLanes.map((laneTracks, laneIndex) => (
+                <div key={laneIndex} className="track audio-track">
+                  <div className="track-header" style={{ fontSize: '0.85em', opacity: 0.6 }}>
+                    SFX {laneIndex + 1}
+                  </div>
+                  <div className="track-content">
+                    {/* SFX items in this lane */}
+                    {laneTracks.map(sfx => {
+                      const startPos = sfx.start * pixelsPerSecond
+                      const width = sfx.duration * pixelsPerSecond
+
+                      return (
+                        <div
+                          key={sfx.id}
+                          className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''}`}
+                          style={{
+                            left: `${startPos}px`,
+                            width: `${Math.max(width, 60)}px`
+                          }}
+                          onMouseDown={(e) => handleTrackItemMouseDown(e, sfx.id, 'sfx')}
+                          title={`${sfx.prompt || 'SFX'} - ${sfx.start.toFixed(2)}s`}
+                        >
+                          <div className="item-content">
+                            <span className="item-icon"><Music size={14} /></span>
+                            <span className="item-label">{sfx.prompt || 'SFX'}</span>
+                          </div>
+                          <div className="waveform"></div>
+                        </div>
+                      )
+                    })}
+
+                    {/* Show AI suggestions on first lane only */}
+                    {laneIndex === 0 && analysis?.suggestedSFX.map((suggestion, index) => {
+                      const position = suggestion.timestamp * pixelsPerSecond
+                      return (
+                        <div
+                          key={index}
+                          className="sfx-suggestion"
+                          style={{ left: `${position}px` }}
+                          title={`Suggested: ${suggestion.prompt}`}
+                        />
+                      )
+                    })}
+                  </div>
+                </div>
+              ))
+            )}
 
             {/* Subtitle Track */}
             <div className="track subtitle-track">
