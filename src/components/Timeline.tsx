@@ -12,6 +12,7 @@ export default function Timeline() {
     subtitles,
     updateSubtitle,
     sfxTracks,
+    addSFXTrack,
     updateSFXTrack,
     textOverlays,
     updateTextOverlay,
@@ -108,6 +109,41 @@ export default function Timeline() {
     e.stopPropagation()
     setDraggedItem({ id, type })
     setIsDragging(true)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    const sfxData = e.dataTransfer.getData('sfx-library-item')
+
+    if (sfxData) {
+      try {
+        const item = JSON.parse(sfxData)
+        const rect = timelineRef.current?.getBoundingClientRect()
+        if (rect) {
+          const x = e.clientX - rect.left
+          const dropTime = Math.max(0, x / pixelsPerSecond)
+
+          // Create new SFX track from library item
+          const track: import('../context/ProjectContext').SFXTrack = {
+            id: `sfx-${Date.now()}`,
+            path: item.path,
+            start: dropTime,
+            duration: item.duration,
+            volume: 1,
+            prompt: item.prompt
+          }
+
+          addSFXTrack(track)
+        }
+      } catch (err) {
+        console.error('Failed to parse dropped SFX:', err)
+      }
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
   }
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -247,6 +283,8 @@ export default function Timeline() {
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
           >
             {/* Playhead line */}
             <div
