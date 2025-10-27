@@ -153,12 +153,8 @@ export default function SFXEditor() {
       addSFXTrack(track)
       setPrompt('')
 
-      // Show success message with translation info
-      const message = translation.confidence > 0.7
-        ? `SFX "${finalPrompt}" generated and added to timeline at ${suggestion.timestamp.toFixed(2)}s`
-        : `SFX "${finalPrompt}" generated (translated from scene) and added at ${suggestion.timestamp.toFixed(2)}s`
-
-      alert(message)
+      // Show success message
+      alert(`SFX "${finalPrompt}" generated and added to timeline at ${suggestion.timestamp.toFixed(2)}s`)
     } catch (error) {
       console.error('Error generating suggested SFX:', error)
       alert(
@@ -348,26 +344,30 @@ export default function SFXEditor() {
                           if (projectPath) {
                             try {
                               const relativePath = await window.electronAPI.copyAssetToProject(musicPath, projectPath, 'audio')
+                              console.log('Music copied to project:', relativePath)
+
+                              // Resolve to absolute path for playback
+                              const absolutePath = await window.electronAPI.resolveProjectPath(projectPath, relativePath)
+
                               addSFXTrack({
                                 id: `sfx-${Date.now()}`,
-                                audioPath: relativePath,
-                                timestamp: music.timestamp,
+                                path: absolutePath,  // Use 'path' not 'audioPath'
+                                start: music.timestamp,  // Use 'start' not 'timestamp'
                                 duration: music.duration,
-                                volume: 0.5, // Lower volume for background music
-                                label: `Music: ${music.description}`
+                                volume: 0.5,  // Lower volume for background music
+                                prompt: `Music: ${music.description}`
                               })
                             } catch (err) {
                               console.error('Failed to copy music to project:', err)
+                              alert(`Failed to copy music to project: ${err}`)
+                              throw err
                             }
                           } else {
-                            addSFXTrack({
-                              id: `sfx-${Date.now()}`,
-                              audioPath: musicPath,
-                              timestamp: music.timestamp,
-                              duration: music.duration,
-                              volume: 0.5,
-                              label: `Music: ${music.description}`
-                            })
+                            // No project - warn user
+                            console.warn('No project open - music track will use temp file path:', musicPath)
+                            alert('Warning: No project is open. Please create or open a project to properly save generated music.')
+                            // Don't add the track if no project is open
+                            return
                           }
                         } catch (error: any) {
                           console.error('Music generation failed:', error)
