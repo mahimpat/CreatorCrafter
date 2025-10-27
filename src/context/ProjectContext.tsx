@@ -54,6 +54,18 @@ export interface VideoAnalysisResult {
     action_context?: string
     confidence?: number
   }>
+  suggestedMusic?: Array<{
+    timestamp: number
+    duration: number
+    scene_id: number
+    prompt: string
+    description: string
+    mood: string
+    energy_level: number
+    genre: string
+    tempo: string
+    confidence: number
+  }>
   transcription: Array<{
     text: string
     start: number

@@ -294,6 +294,98 @@ export default function SFXEditor() {
             })}
               </div>
             )}
+
+            {/* Music Suggestions Section (Week 3) */}
+            {analysis?.suggestedMusic && analysis.suggestedMusic.length > 0 && (
+              <div className="music-suggestions" style={{ marginTop: '2rem' }}>
+                <h4>🎵 Background Music Suggestions</h4>
+                <p style={{ fontSize: '0.9em', opacity: 0.8, marginBottom: '1rem' }}>
+                  Mood and energy-matched music for each scene
+                </p>
+                {analysis.suggestedMusic.map((music, index) => (
+                  <div key={index} className="suggestion-item" style={{ borderLeft: '3px solid #9333ea' }}>
+                    <div className="suggestion-content">
+                      <div className="suggestion-header">
+                        <strong className="suggestion-scene">
+                          Scene {music.scene_id} ({music.duration.toFixed(1)}s)
+                        </strong>
+                        <span className="suggestion-time">
+                          at {music.timestamp.toFixed(2)}s
+                        </span>
+                      </div>
+
+                      <div className="prompt-preview">
+                        <div className="translated-prompt">
+                          <span className="prompt-label">Music Prompt:</span>
+                          <span className="prompt-text">{music.prompt}</span>
+                          <span className={`confidence ${music.confidence > 0.7 ? 'high' : music.confidence > 0.5 ? 'medium' : 'low'}`}>
+                            {Math.round(music.confidence * 100)}%
+                          </span>
+                        </div>
+                        <div style={{ marginTop: '0.5rem', fontSize: '0.85em', opacity: 0.7 }}>
+                          <span style={{ marginRight: '1rem' }}>🎭 Mood: {music.mood}</span>
+                          <span style={{ marginRight: '1rem' }}>⚡ Energy: {music.energy_level}/10</span>
+                          <span style={{ marginRight: '1rem' }}>🎸 Genre: {music.genre}</span>
+                          <span>🥁 Tempo: {music.tempo}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      className="btn-small"
+                      onClick={async () => {
+                        try {
+                          setIsGenerating(true)
+                          setPrompt(music.prompt)
+
+                          // Use MusicGen for background music (not AudioGen)
+                          const musicPath = await window.electronAPI.generateSFX(
+                            music.prompt,
+                            music.duration,
+                            'musicgen' // Week 3: Always use MusicGen for background music
+                          )
+
+                          // Copy to project folder
+                          if (projectPath) {
+                            try {
+                              const relativePath = await window.electronAPI.copyAssetToProject(musicPath, projectPath, 'audio')
+                              addSFXTrack({
+                                id: `sfx-${Date.now()}`,
+                                audioPath: relativePath,
+                                timestamp: music.timestamp,
+                                duration: music.duration,
+                                volume: 0.5, // Lower volume for background music
+                                label: `Music: ${music.description}`
+                              })
+                            } catch (err) {
+                              console.error('Failed to copy music to project:', err)
+                            }
+                          } else {
+                            addSFXTrack({
+                              id: `sfx-${Date.now()}`,
+                              audioPath: musicPath,
+                              timestamp: music.timestamp,
+                              duration: music.duration,
+                              volume: 0.5,
+                              label: `Music: ${music.description}`
+                            })
+                          }
+                        } catch (error: any) {
+                          console.error('Music generation failed:', error)
+                          alert(`Failed to generate music: ${error?.message || 'Unknown error'}`)
+                        } finally {
+                          setIsGenerating(false)
+                        }
+                      }}
+                      disabled={isGenerating}
+                      title={`Generate with MusicGen: ${music.prompt}`}
+                      style={{ background: '#9333ea' }}
+                    >
+                      {isGenerating ? 'Generating...' : 'Use MusicGen'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
