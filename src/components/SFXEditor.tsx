@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { SFXTrack } from '../context/ProjectContext'
-import { translateSceneToAudioPrompt } from '../utils/promptTranslator'
 import { Trash2, Wand2, Library, Music } from 'lucide-react'
 import FreesoundLibrary from './FreesoundLibrary'
 import './SFXEditor.css'
@@ -107,24 +106,20 @@ export default function SFXEditor() {
     try {
       setIsGenerating(true)
 
-      // Translate the scene description into an optimized AudioGen prompt
-      const translation = translateSceneToAudioPrompt(
-        suggestion.prompt,
-        suggestion.visual_context,
-        suggestion.action_context
-      )
-
-      console.log('Prompt Translation:', {
-        original: translation.originalPrompt,
-        translated: translation.translatedPrompt,
-        confidence: translation.confidence,
-        category: translation.category,
-        reasoning: translation.reasoning
-      })
-
-      // Use the translated prompt for generation
-      const finalPrompt = translation.translatedPrompt
+      // Use the backend prompt directly (Week 1-3: Dynamic prompts from smart analysis)
+      // The backend now generates high-quality, context-aware prompts with:
+      // - Direct use of BLIP visual descriptions
+      // - Mood and energy context
+      // - No static keyword matching
+      const finalPrompt = suggestion.prompt
       setPrompt(finalPrompt)
+
+      console.log('Using backend prompt:', {
+        prompt: finalPrompt,
+        timestamp: suggestion.timestamp,
+        confidence: suggestion.confidence,
+        reason: suggestion.reason
+      })
 
       // Generate the SFX using AudioCraft with the optimized prompt
       let sfxPath = await window.electronAPI.generateSFX(finalPrompt, duration, modelType)
@@ -264,13 +259,8 @@ export default function SFXEditor() {
               <div className="sfx-suggestions">
           <h4>AI Suggestions</h4>
           {analysis.suggestedSFX.map((suggestion, index) => {
-            // Generate preview of what the prompt would become
-            const translation = translateSceneToAudioPrompt(
-              suggestion.prompt,
-              suggestion.visual_context,
-              suggestion.action_context
-            )
-
+            // Use backend prompt directly (no frontend translation needed)
+            // Backend now generates high-quality dynamic prompts
             return (
               <div key={index} className="suggestion-item">
                 <div className="suggestion-content">
@@ -282,15 +272,11 @@ export default function SFXEditor() {
                   </div>
 
                   <div className="prompt-preview">
-                    <div className="original-prompt">
-                      <span className="prompt-label">Scene:</span>
-                      <span className="prompt-text">{suggestion.prompt}</span>
-                    </div>
                     <div className="translated-prompt">
-                      <span className="prompt-label">Audio:</span>
-                      <span className="prompt-text">{translation.translatedPrompt}</span>
-                      <span className={`confidence ${translation.confidence > 0.7 ? 'high' : translation.confidence > 0.5 ? 'medium' : 'low'}`}>
-                        {Math.round(translation.confidence * 100)}%
+                      <span className="prompt-label">Audio Prompt:</span>
+                      <span className="prompt-text">{suggestion.prompt}</span>
+                      <span className={`confidence ${suggestion.confidence > 0.7 ? 'high' : suggestion.confidence > 0.5 ? 'medium' : 'low'}`}>
+                        {Math.round((suggestion.confidence || 0.7) * 100)}%
                       </span>
                     </div>
                   </div>
@@ -299,7 +285,7 @@ export default function SFXEditor() {
                   className="btn-small"
                   onClick={() => handleUseSuggestion(suggestion)}
                   disabled={isGenerating}
-                  title={`Generate: ${translation.translatedPrompt}`}
+                  title={`Generate: ${suggestion.prompt}`}
                 >
                   {isGenerating ? 'Generating...' : 'Use'}
                 </button>
