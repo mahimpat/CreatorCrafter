@@ -6,9 +6,9 @@ import FreesoundLibrary from './FreesoundLibrary'
 import './SFXEditor.css'
 
 export default function SFXEditor() {
-  const { sfxTracks, addSFXTrack, deleteSFXTrack, currentTime, analysis, projectPath } = useProject()
+  const { sfxTracks, addSFXTrack, deleteSFXTrack, sfxLibrary, addSFXToLibrary, removeSFXFromLibrary, currentTime, analysis, projectPath } = useProject()
 
-  const [activeTab, setActiveTab] = useState<'generate' | 'library' | 'tracks'>('generate')
+  const [activeTab, setActiveTab] = useState<'generate' | 'library' | 'freesound' | 'tracks'>('generate')
   const [isGenerating, setIsGenerating] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState(2)
@@ -38,17 +38,19 @@ export default function SFXEditor() {
         }
       }
 
-      const track: SFXTrack = {
+      // Add to library for drag-and-drop reuse
+      const libraryItem: import('../context/ProjectContext').SFXLibraryItem = {
         id: `sfx-${Date.now()}`,
         path: sfxPath,
-        start: currentTime,
+        prompt,
         duration,
-        volume: 1,
-        prompt
+        createdAt: Date.now()
       }
 
-      addSFXTrack(track)
+      addSFXToLibrary(libraryItem)
       setPrompt('')
+
+      alert(`SFX "${prompt}" generated! Drag from "Library" tab to timeline to use it.`)
     } catch (error) {
       console.error('Error generating SFX:', error)
       alert(
@@ -188,14 +190,21 @@ export default function SFXEditor() {
           onClick={() => setActiveTab('library')}
         >
           <Library size={16} />
-          FreeSound Library
+          My SFX ({sfxLibrary.length})
+        </button>
+        <button
+          className={`sfx-tab ${activeTab === 'freesound' ? 'active' : ''}`}
+          onClick={() => setActiveTab('freesound')}
+        >
+          <Library size={16} />
+          FreeSound
         </button>
         <button
           className={`sfx-tab ${activeTab === 'tracks' ? 'active' : ''}`}
           onClick={() => setActiveTab('tracks')}
         >
           <Music size={16} />
-          My Sounds ({sfxTracks.length})
+          Timeline ({sfxTracks.length})
         </button>
       </div>
 
@@ -390,6 +399,47 @@ export default function SFXEditor() {
         )}
 
         {activeTab === 'library' && (
+          <div className="library-tab">
+            <h4>My Generated SFX Library</h4>
+            <p style={{ fontSize: '0.9em', opacity: 0.7, marginBottom: '1rem' }}>
+              Drag any SFX to the timeline to use it
+            </p>
+            {sfxLibrary.length === 0 ? (
+              <p className="empty-message">No SFX generated yet. Generate custom SFX in the "Generate AI" tab.</p>
+            ) : (
+              <div className="sfx-library-grid">
+                {sfxLibrary.map(item => (
+                  <div
+                    key={item.id}
+                    className="library-item"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('sfx-library-item', JSON.stringify(item))
+                      e.dataTransfer.effectAllowed = 'copy'
+                    }}
+                  >
+                    <div className="library-item-content">
+                      <Music size={24} />
+                      <p><strong>{item.prompt}</strong></p>
+                      <span className="library-item-info">
+                        {item.duration.toFixed(1)}s
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => removeSFXFromLibrary(item.id)}
+                      title="Remove from library"
+                      className="delete-btn-small"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'freesound' && (
           <div className="library-tab">
             <FreesoundLibrary />
           </div>

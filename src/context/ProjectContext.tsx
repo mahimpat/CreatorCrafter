@@ -24,6 +24,14 @@ export interface SFXTrack {
   prompt?: string
 }
 
+export interface SFXLibraryItem {
+  id: string
+  path: string
+  prompt: string
+  duration: number
+  createdAt: number
+}
+
 export interface TextOverlay {
   id: string
   text: string
@@ -82,6 +90,7 @@ interface ProjectState {
   isPlaying: boolean
   subtitles: Subtitle[]
   sfxTracks: SFXTrack[]
+  sfxLibrary: SFXLibraryItem[]
   textOverlays: TextOverlay[]
   analysis: VideoAnalysisResult | null
   isAnalyzing: boolean
@@ -106,6 +115,8 @@ interface ProjectContextType extends ProjectState {
   addSFXTrack: (track: SFXTrack) => void
   updateSFXTrack: (id: string, track: Partial<SFXTrack>) => void
   deleteSFXTrack: (id: string) => void
+  addSFXToLibrary: (item: SFXLibraryItem) => void
+  removeSFXFromLibrary: (id: string) => void
   addTextOverlay: (overlay: TextOverlay) => void
   updateTextOverlay: (id: string, overlay: Partial<TextOverlay>) => void
   deleteTextOverlay: (id: string) => void
@@ -132,6 +143,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     isPlaying: false,
     subtitles: [],
     sfxTracks: [],
+    sfxLibrary: [],
     textOverlays: [],
     analysis: null,
     isAnalyzing: false,
@@ -207,6 +219,22 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setState(prev => ({
       ...prev,
       sfxTracks: prev.sfxTracks.filter(t => t.id !== id),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const addSFXToLibrary = (item: SFXLibraryItem) => {
+    setState(prev => ({
+      ...prev,
+      sfxLibrary: [...prev.sfxLibrary, item],
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const removeSFXFromLibrary = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      sfxLibrary: prev.sfxLibrary.filter(item => item.id !== id),
       hasUnsavedChanges: true
     }))
   }
@@ -449,6 +477,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         addSFXTrack,
         updateSFXTrack,
         deleteSFXTrack,
+        addSFXToLibrary,
+        removeSFXFromLibrary,
         addTextOverlay,
         updateTextOverlay,
         deleteTextOverlay,
