@@ -12,8 +12,10 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
-# Import smart scene analyzer
+# Import smart scene analyzer, event detector, and music generator
 from smart_scene_analyzer import SmartSceneAnalyzer
+from event_detector import EventDetector, EventClassifier
+from music_prompt_generator import suggest_music
 
 try:
     import whisper
@@ -669,16 +671,23 @@ def convert_visual_to_audio_description(visual_desc: str, action_desc: str, soun
     return base_prompt
 
 
-def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str = None) -> List[Dict]:
+def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str = None, events: List[Dict] = None) -> List[Dict]:
     """
     DYNAMICALLY suggest sound effects based on natural language understanding.
     No static mappings - generates contextual SFX from visual descriptions.
-    NOW WITH VISUAL-AUDIO VERIFICATION AND MOTION VERIFICATION to reduce false positives.
+    NOW WITH EVENT-BASED DETECTION for frame-accurate SFX timing.
+
+    Week 2 Improvements:
+    - Event-based detection for precise timing (motion peaks, transitions)
+    - Frame-accurate SFX suggestions
+    - Context-aware event classification
+    - Visual-audio verification and motion verification
 
     Args:
         scenes: List of scenes with dynamic descriptions
         transcription: List of transcription segments
         video_path: Path to video file (optional, needed for motion verification)
+        events: List of detected events (motion peaks, transitions) for precise SFX
 
     Returns:
         List of dynamically generated SFX suggestions
@@ -689,8 +698,52 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str =
     verifier = VisualAudioVerifier()
     motion_verifier = MotionVerifier() if video_path else None
     disambiguator = ContextDisambiguator()
+    event_classifier = EventClassifier()
 
-    # Process each scene with dynamic understanding
+    # WEEK 2: Process events for frame-accurate SFX suggestions
+    if events:
+        print(f"Processing {len(events)} detected events for precise SFX timing...", file=sys.stderr)
+
+        for event in events:
+            event_type = event.get('type')
+            timestamp = event.get('timestamp')
+
+            if event_type == 'motion_peak':
+                # Classify motion event with visual context
+                visual_context = event.get('scene_description', '')
+                classified = event_classifier.classify_motion_event(event, visual_context)
+
+                # Generate SFX suggestion from event
+                suggestion = {
+                    'timestamp': timestamp,
+                    'prompt': classified['sound_prompt'],
+                    'reason': f"Motion peak detected ({classified['category']}, intensity: {event.get('intensity', 5)}/10)",
+                    'confidence': 0.85,  # Events have high confidence (detected, not inferred)
+                    'event_type': event_type,
+                    'category': classified['category'],
+                    'intensity': event.get('intensity', 5),
+                    'frame': event.get('frame')
+                }
+                suggestions.append(suggestion)
+
+            elif event_type == 'scene_transition':
+                # Classify transition event
+                classified = event_classifier.classify_transition_event(event)
+
+                # Generate transition SFX
+                suggestion = {
+                    'timestamp': timestamp,
+                    'prompt': classified['sound_prompt'],
+                    'reason': f"Scene transition ({classified['category']})",
+                    'confidence': 0.75,
+                    'event_type': event_type,
+                    'category': classified['category'],
+                    'from_mood': event.get('from_mood', 'neutral'),
+                    'to_mood': event.get('to_mood', 'neutral')
+                }
+                suggestions.append(suggestion)
+
+    # Process each scene with dynamic understanding (for general ambience)
     for scene in scenes:
         scene_type = scene.get('type', 'basic_sample')
 
@@ -908,7 +961,10 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str =
 
 def analyze_video(video_path: str, audio_path: str):
     """
-    Perform complete video analysis.
+    Perform complete video analysis with smart scene detection and event-based SFX.
+
+    Week 1: Smart scene-based analysis
+    Week 2: Event detection for frame-accurate SFX timing
 
     Args:
         video_path: Path to video file
@@ -927,20 +983,48 @@ def analyze_video(video_path: str, audio_path: str):
     else:
         print("No audio file provided - skipping transcription", file=sys.stderr)
 
-    # Analyze scenes
+    # Analyze scenes (Week 1: Smart scene detection)
     print("Analyzing scenes...", file=sys.stderr)
     scenes = analyze_scenes(video_path)
 
-    # Generate SFX suggestions with motion verification
-    print("Generating SFX suggestions...", file=sys.stderr)
-    sfx_suggestions = suggest_sfx(scenes, transcription, video_path)
+    # Detect events (Week 2: Frame-accurate event detection)
+    print("🎯 Detecting events for precise SFX timing...", file=sys.stderr)
+    event_detector = EventDetector()
 
-    # Compile results
+    # Detect motion peaks within scenes
+    motion_events = event_detector.detect_motion_peaks(video_path, scenes)
+    print(f"✓ Detected {len(motion_events)} motion peaks", file=sys.stderr)
+
+    # Detect scene transitions
+    transitions = event_detector.detect_scene_transitions(scenes)
+    print(f"✓ Detected {len(transitions)} scene transitions", file=sys.stderr)
+
+    # Combine all events
+    all_events = motion_events + transitions
+
+    # Generate SFX suggestions with event-based detection (Week 2)
+    print("Generating SFX suggestions from events and scenes...", file=sys.stderr)
+    sfx_suggestions = suggest_sfx(scenes, transcription, video_path, events=all_events)
+
+    # Generate background music suggestions (Week 3)
+    print("🎵 Generating background music suggestions...", file=sys.stderr)
+    music_suggestions = suggest_music(scenes)
+    print(f"✓ Generated {len(music_suggestions)} music suggestions", file=sys.stderr)
+
+    # Compile results (Week 2 + 3: Separated SFX and Music)
     analysis = {
         'scenes': scenes,
-        'suggestedSFX': sfx_suggestions,
+        'events': all_events,  # Include events in output
+        'suggestedSFX': sfx_suggestions,  # Sound effects (precise, event-based)
+        'suggestedMusic': music_suggestions,  # Background music (mood/energy-based)
         'transcription': transcription
     }
+
+    print(f"\n✅ Analysis complete!", file=sys.stderr)
+    print(f"   📊 {len(scenes)} scenes analyzed", file=sys.stderr)
+    print(f"   🎯 {len(all_events)} events detected", file=sys.stderr)
+    print(f"   🔊 {len(sfx_suggestions)} SFX suggestions", file=sys.stderr)
+    print(f"   🎵 {len(music_suggestions)} music suggestions", file=sys.stderr)
 
     return analysis
 
