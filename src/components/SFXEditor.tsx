@@ -190,7 +190,7 @@ export default function SFXEditor() {
           onClick={() => setActiveTab('library')}
         >
           <Library size={16} />
-          My SFX ({sfxLibrary.length})
+          My SFX ({sfxLibrary?.length || 0})
         </button>
         <button
           className={`sfx-tab ${activeTab === 'freesound' ? 'active' : ''}`}
@@ -404,7 +404,7 @@ export default function SFXEditor() {
             <p style={{ fontSize: '0.9em', opacity: 0.7, marginBottom: '1rem' }}>
               Drag any SFX to the timeline to use it
             </p>
-            {sfxLibrary.length === 0 ? (
+            {!sfxLibrary || sfxLibrary.length === 0 ? (
               <p className="empty-message">No SFX generated yet. Generate custom SFX in the "Generate AI" tab.</p>
             ) : (
               <div className="sfx-library-grid">
