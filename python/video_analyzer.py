@@ -191,6 +191,8 @@ def analyze_scenes(video_path: str):
                     'duration': scene['duration'],
                     'start': scene['start'],
                     'end': scene['end'],
+                    'start_frame': scene['start_frame'],  # Needed for event detection
+                    'end_frame': scene['end_frame'],      # Needed for event detection
 
                     # Visual understanding (BLIP)
                     'description': visual_analysis['description'],
