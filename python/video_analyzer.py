@@ -12,6 +12,9 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
+# Import smart scene analyzer
+from smart_scene_analyzer import SmartSceneAnalyzer
+
 try:
     import whisper
     import cv2
@@ -136,31 +139,113 @@ def analyze_frame_content(frame: np.ndarray, model, processor) -> Dict[str, Any]
 
 def analyze_scenes(video_path: str):
     """
-    Dynamically analyze video using vision-language model for natural understanding.
+    SMART scene analysis using intelligent scene detection + visual understanding.
+
+    New approach:
+    1. Detect scene boundaries (cuts/transitions) using PySceneDetect
+    2. Analyze mood and energy for each scene (color, motion, cuts)
+    3. Get visual description with BLIP for ONE frame per scene (not every 3s!)
+    4. Combine smart analysis with visual understanding
 
     Args:
         video_path: Path to video file
 
     Returns:
-        List of scenes with dynamic natural language descriptions
+        List of scenes with smart analysis (mood, energy, visual description)
+    """
+    try:
+        print("🎬 Starting SMART scene analysis...", file=sys.stderr)
+
+        # Step 1: Smart scene detection (mood, energy, cuts)
+        smart_analyzer = SmartSceneAnalyzer()
+        smart_scenes = smart_analyzer.analyze_video(video_path)
+
+        print(f"✓ Detected {len(smart_scenes)} scenes with mood/energy analysis", file=sys.stderr)
+
+        # Step 2: Add visual descriptions using BLIP (1x per scene instead of every 3s!)
+        print(f"Adding visual descriptions to {len(smart_scenes)} scenes...", file=sys.stderr)
+
+        model, processor = get_vlm_model()
+        cap = cv2.VideoCapture(video_path)
+
+        enriched_scenes = []
+
+        for i, scene in enumerate(smart_scenes):
+            # Analyze middle frame of scene (most representative)
+            middle_frame_idx = int((scene['start_frame'] + scene['end_frame']) / 2)
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame_idx)
+            ret, frame = cap.read()
+
+            if ret:
+                # Get visual description with BLIP
+                visual_analysis = analyze_frame_content(frame, model, processor)
+
+                # Combine smart analysis with visual description
+                enriched_scene = {
+                    'timestamp': scene['start'],  # Scene start time
+                    'type': 'smart_scene',
+                    'scene_id': scene['scene_id'],
+                    'duration': scene['duration'],
+                    'start': scene['start'],
+                    'end': scene['end'],
+
+                    # Visual understanding (BLIP)
+                    'description': visual_analysis['description'],
+                    'action_description': visual_analysis['action_description'],
+                    'sound_description': visual_analysis['sound_description'],
+
+                    # Smart analysis (color, motion, energy)
+                    'mood': scene['mood'],
+                    'mood_confidence': scene['mood_confidence'],
+                    'energy_level': scene['energy_level'],
+                    'energy_label': scene['energy_label'],
+                    'motion_intensity': scene['motion_intensity'],
+                    'color_metrics': scene['color_metrics'],
+
+                    # Combined confidence
+                    'confidence': (visual_analysis['confidence'] + scene['mood_confidence']) / 2
+                }
+
+                enriched_scenes.append(enriched_scene)
+
+                # Progress
+                progress = int((i + 1) / len(smart_scenes) * 100)
+                print(f"  Scene {i+1}/{len(smart_scenes)}: {scene['mood']} mood, {enriched_scene['description'][:40]}... ({progress}%)", file=sys.stderr)
+
+        cap.release()
+
+        print(f"✓ SMART scene analysis complete! {len(enriched_scenes)} scenes analyzed", file=sys.stderr)
+        return enriched_scenes
+
+    except Exception as e:
+        print(f"Error in smart scene analysis: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+
+        # Fallback to old method if smart analysis fails
+        print("Falling back to basic analysis...", file=sys.stderr)
+        return basic_scene_analysis(video_path)
+
+
+def basic_scene_analysis(video_path: str):
+    """
+    Fallback: Basic scene analysis if smart analysis fails.
+    Samples frames every 5 seconds as a simple approach.
     """
     try:
         model, processor = get_vlm_model()
-
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration = frame_count / fps
 
         scenes = []
+        sample_rate = int(fps * 5)  # Every 5 seconds
+
+        print(f"Basic analysis: sampling every 5 seconds", file=sys.stderr)
+
         frame_idx = 0
-
-        # Analyze keyframes (every 3 seconds for VLM analysis - slower but more detailed)
-        sample_rate = int(fps * 3)
-        total_samples = int(duration / 3)
-
-        print(f"Analyzing {total_samples} keyframes with vision-language model...", file=sys.stderr)
-
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -168,24 +253,22 @@ def analyze_scenes(video_path: str):
 
             if frame_idx % sample_rate == 0:
                 timestamp = frame_idx / fps
-
-                # Dynamic analysis - generates descriptions
                 analysis = analyze_frame_content(frame, model, processor)
 
                 scene = {
                     'timestamp': timestamp,
-                    'type': 'dynamic_moment',
+                    'type': 'basic_sample',
                     'description': analysis['description'],
                     'action_description': analysis['action_description'],
                     'sound_description': analysis['sound_description'],
-                    'confidence': analysis['confidence']
+                    'confidence': analysis['confidence'],
+                    # Add default mood/energy
+                    'mood': 'neutral',
+                    'energy_level': 5,
+                    'energy_label': 'medium'
                 }
 
                 scenes.append(scene)
-
-                progress = int((frame_idx / frame_count) * 100)
-                # Show what the model actually sees
-                print(f"Progress: {progress}% - Scene: {analysis['description'][:50]}...", file=sys.stderr)
 
             frame_idx += 1
 
@@ -193,9 +276,7 @@ def analyze_scenes(video_path: str):
         return scenes
 
     except Exception as e:
-        print(f"Error analyzing scenes: {str(e)}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+        print(f"Basic analysis also failed: {e}", file=sys.stderr)
         return []
 
 
@@ -535,85 +616,55 @@ class VisualAudioVerifier:
             }
 
 
-def convert_visual_to_audio_description(visual_desc: str, action_desc: str, sound_desc: str) -> str:
+def convert_visual_to_audio_description(visual_desc: str, action_desc: str, sound_desc: str, mood: str = None, energy_level: int = None) -> str:
     """
-    Dynamically convert visual descriptions into audio/SFX prompts.
-    Uses natural language processing to infer appropriate sounds.
+    TRULY DYNAMIC audio prompt generation - NO static lists!
+    Directly translates visual description into natural audio prompts.
 
     Args:
-        visual_desc: What the model sees
+        visual_desc: What the model sees (e.g., "a river flowing through a lush green forest")
         action_desc: What's happening
-        sound_desc: Direct sound description from model
+        sound_desc: Direct sound description (from BLIP)
+        mood: Scene mood (cheerful, tense, calm, etc.)
+        energy_level: Energy level 1-10
 
     Returns:
-        SFX prompt for AudioCraft
+        Natural language audio prompt for AudioCraft
+
+    Example:
+        Input: "a river flowing through a lush green forest", mood="calm", energy=2
+        Output: "ambient sounds of a river flowing through a lush green forest, peaceful and calming ambience, subtle and gentle"
     """
-    # Start with the model's sound description if available
-    if sound_desc and sound_desc.lower() not in ['none', 'unknown', 'unclear']:
-        base_prompt = sound_desc
-    else:
-        # Fallback: intelligently construct from visual description
-        base_prompt = ""
 
-        # Extract key elements from descriptions
-        combined = f"{visual_desc} {action_desc}".lower()
+    # Use the visual description DIRECTLY as the basis for audio
+    # The visual description already tells us what's there!
 
-        # Dynamic sound inference rules
-        sound_mappings = [
-            # Movement sounds
-            (['walking', 'person walking', 'man walking', 'woman walking'], 'footsteps'),
-            (['running', 'person running'], 'running footsteps, heavy breathing'),
-            (['jumping', 'leaping'], 'jumping impact, landing sound'),
-            (['dancing', 'moving'], 'shuffling feet, movement'),
+    # Start with: "ambient sounds of [what we see]"
+    base_prompt = f"ambient sounds of {visual_desc.strip()}"
 
-            # Transportation
-            (['car', 'vehicle', 'automobile'], 'car engine, vehicle sounds'),
-            (['driving', 'car driving'], 'car engine rumble, road noise'),
-            (['bicycle', 'bike'], 'bicycle pedaling, chain sounds'),
-            (['train'], 'train sounds, railway ambience'),
-            (['airplane', 'plane'], 'airplane engine, flight sounds'),
+    # Add mood context if available
+    if mood and mood != 'neutral':
+        mood_descriptors = {
+            'cheerful': ', bright and uplifting atmosphere',
+            'energetic': ', dynamic and energetic feel',
+            'tense': ', tense and suspenseful mood',
+            'dark': ', dark and ominous atmosphere',
+            'calm': ', peaceful and calming ambience',
+            'melancholic': ', somber and melancholic tone'
+        }
 
-            # Nature
-            (['tree', 'forest', 'woods'], 'rustling leaves, forest ambience'),
-            (['water', 'lake', 'ocean', 'sea'], 'water sounds, waves'),
-            (['rain', 'raining'], 'rain falling, raindrops'),
-            (['wind', 'windy'], 'wind blowing, air whooshing'),
-            (['bird', 'birds'], 'birds chirping, nature sounds'),
+        mood_suffix = mood_descriptors.get(mood, '')
+        if mood_suffix:
+            base_prompt += mood_suffix
 
-            # Indoor/Objects
-            (['door'], 'door sounds'),
-            (['opening door'], 'door opening, creaking'),
-            (['closing door'], 'door closing, latch'),
-            (['phone', 'smartphone'], 'phone sounds, notification'),
-            (['computer', 'laptop'], 'typing, keyboard clicks'),
-            (['typing'], 'keyboard typing, mechanical clicks'),
-
-            # People
-            (['talking', 'speaking', 'conversation'], 'conversation, people talking'),
-            (['crowd', 'people', 'group'], 'crowd ambience, multiple voices'),
-            (['sitting'], 'subtle movement, chair creak'),
-            (['standing'], 'shuffling, quiet presence'),
-
-            # Environments
-            (['street', 'road'], 'traffic sounds, urban ambience'),
-            (['city', 'urban'], 'city sounds, distant traffic'),
-            (['office'], 'office ambience, computer hum'),
-            (['kitchen'], 'kitchen sounds, utensils'),
-            (['outdoor', 'outside'], 'outdoor ambience, nature'),
-        ]
-
-        # Find matching sound descriptions
-        matched_sounds = []
-        for keywords, sound in sound_mappings:
-            if any(keyword in combined for keyword in keywords):
-                matched_sounds.append(sound)
-
-        # Combine matched sounds or use visual description as fallback
-        if matched_sounds:
-            base_prompt = ", ".join(matched_sounds[:3])  # Max 3 combined sounds
-        else:
-            # Generic fallback based on visual description
-            base_prompt = f"ambient sounds for {visual_desc}"
+    # Add energy/intensity context
+    if energy_level:
+        if energy_level >= 8:
+            base_prompt += ', high intensity'
+        elif energy_level >= 6:
+            base_prompt += ', medium intensity'
+        elif energy_level <= 3:
+            base_prompt += ', subtle and gentle'
 
     return base_prompt
 
@@ -641,14 +692,27 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str =
 
     # Process each scene with dynamic understanding
     for scene in scenes:
-        if scene.get('type') == 'dynamic_moment':
+        scene_type = scene.get('type', 'basic_sample')
+
+        # Handle both old format (dynamic_moment) and new format (smart_scene)
+        if scene_type in ['dynamic_moment', 'smart_scene', 'basic_sample']:
             timestamp = scene['timestamp']
             visual_desc = scene.get('description', '')
             action_desc = scene.get('action_description', '')
             sound_desc = scene.get('sound_description', '')
 
-            # Dynamically generate SFX prompt from visual understanding
-            sfx_prompt = convert_visual_to_audio_description(visual_desc, action_desc, sound_desc)
+            # Get mood and energy from scene
+            mood = scene.get('mood', 'neutral')
+            energy_level = scene.get('energy_level', 5)
+
+            # TRULY DYNAMIC prompt generation - uses visual description + mood + energy
+            sfx_prompt = convert_visual_to_audio_description(
+                visual_desc,
+                action_desc,
+                sound_desc,
+                mood=mood,
+                energy_level=energy_level
+            )
 
             # CONTEXT DISAMBIGUATION: Make sound more specific based on environment
             sfx_prompt = disambiguator.disambiguate_sound(sfx_prompt, visual_desc, action_desc)

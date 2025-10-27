@@ -1,0 +1,201 @@
+{
+  "version": "1.0.0",
+  "projectName": "test4",
+  "createdAt": "2025-10-27T18:14:15.070Z",
+  "lastModified": "2025-10-27T18:42:49.501Z",
+  "video": {
+    "originalPath": "/home/mahim/CreatorCrafter/test2/test4/assets/source/7685155-hd_1920_1080_30fps.mp4",
+    "relativePath": "assets/source/7685155-hd_1920_1080_30fps.mp4",
+    "metadata": {
+      "streams": [
+        {
+          "index": 0,
+          "codec_name": "h264",
+          "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+          "profile": "High",
+          "codec_type": "video",
+          "codec_tag_string": "avc1",
+          "codec_tag": "0x31637661",
+          "width": 1920,
+          "height": 1080,
+          "coded_width": 1920,
+          "coded_height": 1080,
+          "closed_captions": 0,
+          "film_grain": 0,
+          "has_b_frames": 2,
+          "pix_fmt": "yuv420p",
+          "level": 40,
+          "color_range": "tv",
+          "color_space": "bt709",
+          "color_transfer": "bt709",
+          "color_primaries": "bt709",
+          "chroma_location": "left",
+          "field_order": "progressive",
+          "refs": 1,
+          "is_avc": "true",
+          "nal_length_size": "4",
+          "id": "0x1",
+          "r_frame_rate": "30/1",
+          "avg_frame_rate": "30/1",
+          "time_base": "1/30",
+          "start_pts": 0,
+          "start_time": "0.000000",
+          "duration_ts": 296,
+          "duration": "9.866667",
+          "bit_rate": "4922776",
+          "bits_per_raw_sample": "8",
+          "nb_frames": "296",
+          "extradata_size": 49,
+          "disposition": {
+            "default": 1,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0
+          },
+          "tags": {
+            "creation_time": "2021-04-28T00:45:00.000000Z",
+            "language": "und",
+            "handler_name": "L-SMASH Video Handler",
+            "vendor_id": "[0][0][0][0]",
+            "encoder": "AVC Coding"
+          }
+        }
+      ],
+      "format": {
+        "filename": "/home/mahim/Downloads/7685155-hd_1920_1080_30fps.mp4",
+        "nb_streams": 1,
+        "nb_programs": 0,
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        "format_long_name": "QuickTime / MOV",
+        "start_time": "0.000000",
+        "duration": "9.866667",
+        "size": "6076157",
+        "bit_rate": "4926613",
+        "probe_score": 100,
+        "tags": {
+          "major_brand": "mp42",
+          "minor_version": "0",
+          "compatible_brands": "mp42mp41isomavc1",
+          "creation_time": "2021-04-28T00:45:00.000000Z"
+        }
+      }
+    }
+  },
+  "subtitles": [],
+  "sfxTracks": [
+    {
+      "id": "sfx-1761589059701",
+      "path": "assets/sfx/sfx-1761588977108.wav",
+      "start": 0,
+      "duration": 2,
+      "volume": 1,
+      "prompt": "environmental sound with natural acoustic characteristics"
+    },
+    {
+      "id": "sfx-1761589182467",
+      "path": "assets/sfx/sfx-1761589120813.wav",
+      "start": 9.866667,
+      "duration": 10,
+      "volume": 1,
+      "prompt": "sitar music "
+    },
+    {
+      "id": "sfx-1761590516394",
+      "path": "assets/sfx/sfx-1761590432114.wav",
+      "start": 2.02,
+      "duration": 10,
+      "volume": 1,
+      "prompt": "\nPop dance track with catchy melodies, tropical percussion, and upbeat rhythms, perfect for the beach"
+    }
+  ],
+  "textOverlays": [],
+  "analysis": {
+    "scenes": [
+      {
+        "timestamp": 0,
+        "type": "dynamic_moment",
+        "description": "a woman in a blue sari holding a bottle",
+        "action_description": "what is happening in this image? | video | vi vi vi | image | vi vi | vi vi vi | vi | vi vi vi",
+        "sound_description": "what sounds would you hear in this scene? | video",
+        "confidence": 0.85
+      },
+      {
+        "timestamp": 3,
+        "type": "dynamic_moment",
+        "description": "a woman in a blue sari holding a small bird",
+        "action_description": "what is happening in this image? | | video | vi vi | vi | vi | vi | vi | vi | vi | vi |",
+        "sound_description": "what sounds would you hear in this scene? | video",
+        "confidence": 0.85
+      },
+      {
+        "timestamp": 6,
+        "type": "dynamic_moment",
+        "description": "a woman in a blue sari holding a small bird",
+        "action_description": "what is happening in this image?",
+        "sound_description": "what sounds would you hear in this scene?",
+        "confidence": 0.85
+      },
+      {
+        "timestamp": 9,
+        "type": "dynamic_moment",
+        "description": "a woman in a blue sari holding a gold statue",
+        "action_description": "what is happening in this image? | video | vi vi vi | vi vi | vi vi | vi vi | vi vi | vi vi",
+        "sound_description": "what sounds would you hear in this scene?",
+        "confidence": 0.85
+      }
+    ],
+    "suggestedSFX": [
+      {
+        "timestamp": 0,
+        "prompt": "what sounds would you hear in this scene? | video",
+        "reason": "Scene: a woman in a blue sari holding a bottle",
+        "confidence": 0.85,
+        "visual_context": "a woman in a blue sari holding a bottle",
+        "action_context": "what is happening in this image? | video | vi vi vi | image | vi vi | vi vi vi | vi | vi vi vi",
+        "motion_verified": true
+      },
+      {
+        "timestamp": 3,
+        "prompt": "what sounds would you hear in this scene? | video",
+        "reason": "Scene: a woman in a blue sari holding a small bird",
+        "confidence": 0.85,
+        "visual_context": "a woman in a blue sari holding a small bird",
+        "action_context": "what is happening in this image? | | video | vi vi | vi | vi | vi | vi | vi | vi | vi |",
+        "motion_verified": true
+      },
+      {
+        "timestamp": 6,
+        "prompt": "what sounds would you hear in this scene?",
+        "reason": "Scene: a woman in a blue sari holding a small bird",
+        "confidence": 0.85,
+        "visual_context": "a woman in a blue sari holding a small bird",
+        "action_context": "what is happening in this image?",
+        "motion_verified": true
+      },
+      {
+        "timestamp": 9,
+        "prompt": "what sounds would you hear in this scene?",
+        "reason": "Scene: a woman in a blue sari holding a gold statue",
+        "confidence": 0.85,
+        "visual_context": "a woman in a blue sari holding a gold statue",
+        "action_context": "what is happening in this image? | video | vi vi vi | vi vi | vi vi | vi vi | vi vi | vi vi",
+        "motion_verified": true
+      }
+    ],
+    "transcription": []
+  }
+}
