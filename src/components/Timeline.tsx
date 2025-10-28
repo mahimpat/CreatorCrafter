@@ -28,6 +28,14 @@ export default function Timeline() {
     id: string
     type: 'subtitle' | 'sfx' | 'overlay'
   } | null>(null)
+  const [resizingItem, setResizingItem] = useState<{
+    id: string
+    type: 'subtitle' | 'sfx' | 'overlay'
+    edge: 'left' | 'right'
+    originalStart: number
+    originalEnd: number
+    originalDuration: number
+  } | null>(null)
   const [zoom, setZoom] = useState(1)
 
   // Assign SFX tracks to lanes to prevent visual overlap
@@ -111,9 +119,60 @@ export default function Timeline() {
   const handleTrackItemMouseDown = (
     e: React.MouseEvent,
     id: string,
-    type: 'subtitle' | 'sfx' | 'overlay'
+    type: 'subtitle' | 'sfx' | 'overlay',
+    itemWidth: number
   ) => {
     e.stopPropagation()
+
+    // Detect if clicking on edge (8px from left or right)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const clickX = e.clientX - rect.left
+    const edgeThreshold = 8
+
+    const isLeftEdge = clickX <= edgeThreshold
+    const isRightEdge = clickX >= itemWidth - edgeThreshold
+
+    // Handle edge resizing
+    if (isLeftEdge || isRightEdge) {
+      // Get original clip data
+      let originalStart = 0
+      let originalEnd = 0
+      let originalDuration = 0
+
+      if (type === 'sfx') {
+        const track = sfxTracks.find(t => t.id === id)
+        if (track) {
+          originalStart = track.start
+          originalDuration = track.duration
+          originalEnd = originalStart + originalDuration
+        }
+      } else if (type === 'subtitle') {
+        const subtitle = subtitles.find(s => s.id === id)
+        if (subtitle) {
+          originalStart = subtitle.start
+          originalEnd = subtitle.end
+          originalDuration = originalEnd - originalStart
+        }
+      } else if (type === 'overlay') {
+        const overlay = textOverlays.find(o => o.id === id)
+        if (overlay) {
+          originalStart = overlay.start
+          originalEnd = overlay.end
+          originalDuration = originalEnd - originalStart
+        }
+      }
+
+      setResizingItem({
+        id,
+        type,
+        edge: isLeftEdge ? 'left' : 'right',
+        originalStart,
+        originalEnd,
+        originalDuration
+      })
+      selectClip(id, false) // Select the clip being resized
+      return
+    }
 
     // Handle selection: Cmd/Ctrl+click for multi-select, regular click for single select
     const isMultiSelect = e.metaKey || e.ctrlKey
@@ -162,32 +221,84 @@ export default function Timeline() {
   }
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!timelineRef.current || !draggedItem) return
+    if (!timelineRef.current) return
 
     const rect = timelineRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const newTime = Math.max(0, Math.min(safeDuration, x / pixelsPerSecond))
 
-    // Update the position based on item type
-    if (draggedItem.type === 'sfx') {
-      updateSFXTrack(draggedItem.id, { start: newTime })
-    } else if (draggedItem.type === 'subtitle') {
-      const subtitle = subtitles.find(s => s.id === draggedItem.id)
-      if (subtitle) {
-        const duration = subtitle.end - subtitle.start
-        updateSubtitle(draggedItem.id, {
-          start: newTime,
-          end: newTime + duration
-        })
+    // Handle resizing
+    if (resizingItem) {
+      const minDuration = 0.1 // Minimum 0.1 second clip duration
+
+      if (resizingItem.edge === 'left') {
+        // Trim from start - adjust start time while keeping end fixed
+        const maxStart = resizingItem.originalEnd - minDuration
+        const newStart = Math.max(0, Math.min(newTime, maxStart))
+        const newDuration = resizingItem.originalEnd - newStart
+
+        if (resizingItem.type === 'sfx') {
+          updateSFXTrack(resizingItem.id, {
+            start: newStart,
+            duration: newDuration
+          })
+        } else if (resizingItem.type === 'subtitle') {
+          updateSubtitle(resizingItem.id, {
+            start: newStart,
+            end: resizingItem.originalEnd
+          })
+        } else if (resizingItem.type === 'overlay') {
+          updateTextOverlay(resizingItem.id, {
+            start: newStart,
+            end: resizingItem.originalEnd
+          })
+        }
+      } else if (resizingItem.edge === 'right') {
+        // Trim from end - adjust end time while keeping start fixed
+        const minEnd = resizingItem.originalStart + minDuration
+        const newEnd = Math.max(minEnd, Math.min(newTime, safeDuration))
+        const newDuration = newEnd - resizingItem.originalStart
+
+        if (resizingItem.type === 'sfx') {
+          updateSFXTrack(resizingItem.id, {
+            duration: newDuration
+          })
+        } else if (resizingItem.type === 'subtitle') {
+          updateSubtitle(resizingItem.id, {
+            end: newEnd
+          })
+        } else if (resizingItem.type === 'overlay') {
+          updateTextOverlay(resizingItem.id, {
+            end: newEnd
+          })
+        }
       }
-    } else if (draggedItem.type === 'overlay') {
-      const overlay = textOverlays.find(o => o.id === draggedItem.id)
-      if (overlay) {
-        const duration = overlay.end - overlay.start
-        updateTextOverlay(draggedItem.id, {
-          start: newTime,
-          end: newTime + duration
-        })
+      return
+    }
+
+    // Handle dragging
+    if (draggedItem) {
+      // Update the position based on item type
+      if (draggedItem.type === 'sfx') {
+        updateSFXTrack(draggedItem.id, { start: newTime })
+      } else if (draggedItem.type === 'subtitle') {
+        const subtitle = subtitles.find(s => s.id === draggedItem.id)
+        if (subtitle) {
+          const duration = subtitle.end - subtitle.start
+          updateSubtitle(draggedItem.id, {
+            start: newTime,
+            end: newTime + duration
+          })
+        }
+      } else if (draggedItem.type === 'overlay') {
+        const overlay = textOverlays.find(o => o.id === draggedItem.id)
+        if (overlay) {
+          const duration = overlay.end - overlay.start
+          updateTextOverlay(draggedItem.id, {
+            start: newTime,
+            end: newTime + duration
+          })
+        }
       }
     }
   }
@@ -195,6 +306,7 @@ export default function Timeline() {
   const handleMouseUp = () => {
     setDraggedItem(null)
     setIsDragging(false)
+    setResizingItem(null)
   }
 
   return (
@@ -383,16 +495,19 @@ export default function Timeline() {
                     {laneTracks.map(sfx => {
                       const startPos = sfx.start * pixelsPerSecond
                       const width = sfx.duration * pixelsPerSecond
+                      const displayWidth = Math.max(width, 60)
+                      const isResizing = resizingItem?.id === sfx.id
+                      const resizingClass = isResizing ? `resizing-${resizingItem.edge}` : ''
 
                       return (
                         <div
                           key={sfx.id}
-                          className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''} ${selectedClipIds.includes(sfx.id) ? 'selected' : ''}`}
+                          className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''} ${selectedClipIds.includes(sfx.id) ? 'selected' : ''} ${resizingClass}`}
                           style={{
                             left: `${startPos}px`,
-                            width: `${Math.max(width, 60)}px`
+                            width: `${displayWidth}px`
                           }}
-                          onMouseDown={(e) => handleTrackItemMouseDown(e, sfx.id, 'sfx')}
+                          onMouseDown={(e) => handleTrackItemMouseDown(e, sfx.id, 'sfx', displayWidth)}
                           title={`${sfx.prompt || 'SFX'} - ${sfx.start.toFixed(2)}s`}
                         >
                           <div className="item-content">
@@ -427,16 +542,19 @@ export default function Timeline() {
                 {subtitles.map(subtitle => {
                   const startPos = subtitle.start * pixelsPerSecond
                   const width = (subtitle.end - subtitle.start) * pixelsPerSecond
+                  const displayWidth = Math.max(width, 40)
+                  const isResizing = resizingItem?.id === subtitle.id
+                  const resizingClass = isResizing ? `resizing-${resizingItem.edge}` : ''
 
                   return (
                     <div
                       key={subtitle.id}
-                      className={`track-item subtitle-item ${draggedItem?.id === subtitle.id ? 'dragging' : ''} ${selectedClipIds.includes(subtitle.id) ? 'selected' : ''}`}
+                      className={`track-item subtitle-item ${draggedItem?.id === subtitle.id ? 'dragging' : ''} ${selectedClipIds.includes(subtitle.id) ? 'selected' : ''} ${resizingClass}`}
                       style={{
                         left: `${startPos}px`,
-                        width: `${Math.max(width, 40)}px`
+                        width: `${displayWidth}px`
                       }}
-                      onMouseDown={(e) => handleTrackItemMouseDown(e, subtitle.id, 'subtitle')}
+                      onMouseDown={(e) => handleTrackItemMouseDown(e, subtitle.id, 'subtitle', displayWidth)}
                       title={subtitle.text}
                     >
                       <div className="item-content">
@@ -455,16 +573,19 @@ export default function Timeline() {
                 {textOverlays.map(overlay => {
                   const startPos = overlay.start * pixelsPerSecond
                   const width = (overlay.end - overlay.start) * pixelsPerSecond
+                  const displayWidth = Math.max(width, 40)
+                  const isResizing = resizingItem?.id === overlay.id
+                  const resizingClass = isResizing ? `resizing-${resizingItem.edge}` : ''
 
                   return (
                     <div
                       key={overlay.id}
-                      className={`track-item overlay-item ${draggedItem?.id === overlay.id ? 'dragging' : ''} ${selectedClipIds.includes(overlay.id) ? 'selected' : ''}`}
+                      className={`track-item overlay-item ${draggedItem?.id === overlay.id ? 'dragging' : ''} ${selectedClipIds.includes(overlay.id) ? 'selected' : ''} ${resizingClass}`}
                       style={{
                         left: `${startPos}px`,
-                        width: `${Math.max(width, 40)}px`
+                        width: `${displayWidth}px`
                       }}
-                      onMouseDown={(e) => handleTrackItemMouseDown(e, overlay.id, 'overlay')}
+                      onMouseDown={(e) => handleTrackItemMouseDown(e, overlay.id, 'overlay', displayWidth)}
                       title={overlay.text}
                     >
                       <div className="item-content">
