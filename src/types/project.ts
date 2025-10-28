@@ -13,6 +13,10 @@ export interface ProjectFile {
     relativePath: string // Relative path within project folder
     metadata: any // FFprobe metadata
   }
+  audio?: {
+    originalPath?: string // Original absolute path to extracted audio
+    relativePath?: string // Relative path within project folder
+  }
   subtitles: Subtitle[]
   sfxTracks: ProjectSFXTrack[] // SFX tracks with relative paths
   textOverlays: TextOverlay[]

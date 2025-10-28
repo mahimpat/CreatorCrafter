@@ -39,6 +39,7 @@ export function serializeProject(
   state: {
     videoPath: string | null
     videoMetadata: any | null
+    originalAudioPath?: string | null
     duration: number
     subtitles: Subtitle[]
     sfxTracks: SFXTrack[]
@@ -71,6 +72,11 @@ export function serializeProject(
     ? getRelativePath(projectPath, state.videoPath).replace(/\\/g, '/')
     : state.videoPath || ''
 
+  // Get audio relative path
+  const audioRelativePath = state.originalAudioPath && state.originalAudioPath.startsWith(projectPath)
+    ? getRelativePath(projectPath, state.originalAudioPath).replace(/\\/g, '/')
+    : state.originalAudioPath || ''
+
   return {
     version: PROJECT_VERSION,
     projectName,
@@ -81,6 +87,10 @@ export function serializeProject(
       relativePath: videoRelativePath,
       metadata: state.videoMetadata
     },
+    audio: state.originalAudioPath ? {
+      originalPath: state.originalAudioPath,
+      relativePath: audioRelativePath
+    } : undefined,
     subtitles: state.subtitles,
     sfxTracks: projectSFXTracks,
     textOverlays: state.textOverlays,
@@ -98,9 +108,11 @@ export function deserializeProject(
   projectName: string
   videoPath: string
   videoMetadata: any
+  originalAudioPath: string | null
   duration: number
   subtitles: Subtitle[]
   sfxTracks: SFXTrack[]
+  sfxLibrary?: any[]
   textOverlays: TextOverlay[]
   analysis: VideoAnalysisResult | null
   createdAt: string
@@ -112,6 +124,14 @@ export function deserializeProject(
     videoPath = joinPaths(projectPath, projectFile.video.relativePath)
   } else {
     videoPath = projectFile.video.originalPath
+  }
+
+  // Resolve audio path - prefer relative path within project
+  let originalAudioPath: string | null = null
+  if (projectFile.audio?.relativePath) {
+    originalAudioPath = joinPaths(projectPath, projectFile.audio.relativePath)
+  } else if (projectFile.audio?.originalPath) {
+    originalAudioPath = projectFile.audio.originalPath
   }
 
   // Resolve SFX paths to absolute
@@ -139,6 +159,7 @@ export function deserializeProject(
     projectName: projectFile.projectName,
     videoPath,
     videoMetadata: projectFile.video.metadata,
+    originalAudioPath,
     duration,
     subtitles: projectFile.subtitles,
     sfxTracks,

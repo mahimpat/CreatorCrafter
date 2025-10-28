@@ -85,6 +85,7 @@ export interface VideoAnalysisResult {
 interface ProjectState {
   videoPath: string | null
   videoMetadata: any | null
+  originalAudioPath: string | null
   currentTime: number
   duration: number
   isPlaying: boolean
@@ -106,6 +107,7 @@ interface ProjectState {
 interface ProjectContextType extends ProjectState {
   setVideoPath: (path: string | null) => void
   setVideoMetadata: (metadata: any) => void
+  setOriginalAudioPath: (path: string | null) => void
   setCurrentTime: (time: number) => void
   setDuration: (duration: number) => void
   setIsPlaying: (playing: boolean) => void
@@ -138,6 +140,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ProjectState>({
     videoPath: null,
     videoMetadata: null,
+    originalAudioPath: null,
     currentTime: 0,
     duration: 0,
     isPlaying: false,
@@ -161,6 +164,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const setVideoMetadata = (metadata: any) => {
     setState(prev => ({ ...prev, videoMetadata: metadata }))
+  }
+
+  const setOriginalAudioPath = (path: string | null) => {
+    setState(prev => ({ ...prev, originalAudioPath: path }))
   }
 
   const setCurrentTime = (time: number) => {
@@ -291,15 +298,36 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         result.videoRelativePath
       )
 
+      // Extract audio from video and save to project
+      let originalAudioPath: string | null = null
+      try {
+        const audioPath = await window.electronAPI.extractAudio(videoPath)
+        // Copy audio to project assets/sfx folder
+        const audioRelativePath = await window.electronAPI.copyAssetToProject(
+          audioPath,
+          result.projectPath,
+          'sfx'
+        )
+        originalAudioPath = await window.electronAPI.resolveProjectPath(
+          result.projectPath,
+          audioRelativePath
+        )
+      } catch (error) {
+        console.warn('Could not extract audio from video:', error)
+        // Continue without audio - some videos may not have audio
+      }
+
       // Initialize project state
       setState({
         videoPath: resolvedVideoPath,
         videoMetadata: metadata,
+        originalAudioPath,
         currentTime: 0,
         duration,
         isPlaying: false,
         subtitles: [],
         sfxTracks: [],
+        sfxLibrary: [],
         textOverlays: [],
         analysis: null,
         isAnalyzing: false,
@@ -329,6 +357,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         {
           videoPath: state.videoPath,
           videoMetadata: state.videoMetadata,
+          originalAudioPath: state.originalAudioPath,
           duration: state.duration,
           subtitles: state.subtitles,
           sfxTracks: state.sfxTracks,
@@ -412,11 +441,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setState({
         videoPath: deserialized.videoPath,
         videoMetadata: deserialized.videoMetadata,
+        originalAudioPath: deserialized.originalAudioPath || null,
         currentTime: 0,
         duration: deserialized.duration,
         isPlaying: false,
         subtitles: deserialized.subtitles,
         sfxTracks: deserialized.sfxTracks,
+        sfxLibrary: deserialized.sfxLibrary || [],
         textOverlays: deserialized.textOverlays,
         analysis: deserialized.analysis,
         isAnalyzing: false,
@@ -437,11 +468,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setState({
       videoPath: null,
       videoMetadata: null,
+      originalAudioPath: null,
       currentTime: 0,
       duration: 0,
       isPlaying: false,
       subtitles: [],
       sfxTracks: [],
+      sfxLibrary: [],
       textOverlays: [],
       analysis: null,
       isAnalyzing: false,
@@ -468,6 +501,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         ...state,
         setVideoPath,
         setVideoMetadata,
+        setOriginalAudioPath,
         setCurrentTime,
         setDuration,
         setIsPlaying,
