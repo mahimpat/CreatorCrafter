@@ -339,6 +339,51 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
+.audio-clip {
+  background: linear-gradient(135deg, #00bcd4, #0097a7);
+  border: 1px solid #00838f;
+  border-radius: 4px;
+  margin: 8px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.audio-clip .item-content {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+
+.audio-clip .clip-label {
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.audio-clip .waveform {
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  right: 12px;
+  height: 20px;
+  background: repeating-linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.1) 0px,
+    rgba(255, 255, 255, 0.2) 2px,
+    rgba(255, 255, 255, 0.4) 4px,
+    rgba(255, 255, 255, 0.3) 6px,
+    rgba(255, 255, 255, 0.5) 8px,
+    rgba(255, 255, 255, 0.2) 10px,
+    rgba(255, 255, 255, 0.1) 12px
+  );
+  border-radius: 2px;
+  opacity: 0.6;
+}
 
 /* Track Items */
 .track-item {

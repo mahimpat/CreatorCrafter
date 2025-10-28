@@ -9,6 +9,7 @@ export default function Timeline() {
     currentTime,
     duration,
     setCurrentTime,
+    originalAudioPath,
     subtitles,
     updateSubtitle,
     sfxTracks,
@@ -305,6 +306,31 @@ export default function Timeline() {
                 >
                   <span className="clip-label">Main Video</span>
                 </div>
+              </div>
+            </div>
+
+            {/* Original Audio Track */}
+            <div className="track audio-track">
+              <div className="track-content">
+                {originalAudioPath ? (
+                  <div
+                    className="audio-clip"
+                    style={{
+                      width: `${timelineWidth}px`,
+                      height: '60px'
+                    }}
+                  >
+                    <div className="item-content">
+                      <span className="item-icon"><Volume2 size={14} /></span>
+                      <span className="clip-label">Original Audio</span>
+                    </div>
+                    <div className="waveform"></div>
+                  </div>
+                ) : (
+                  <div className="empty-track-message">
+                    No audio track (video may be silent)
+                  </div>
+                )}
               </div>
             </div>
 
