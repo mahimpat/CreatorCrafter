@@ -95,6 +95,9 @@ interface ProjectState {
   textOverlays: TextOverlay[]
   analysis: VideoAnalysisResult | null
   isAnalyzing: boolean
+  // Timeline editing
+  selectedClipIds: string[]
+  snappingEnabled: boolean
   // Project management
   projectPath: string | null
   projectName: string | null
@@ -124,6 +127,13 @@ interface ProjectContextType extends ProjectState {
   deleteTextOverlay: (id: string) => void
   setAnalysis: (analysis: VideoAnalysisResult | null) => void
   setIsAnalyzing: (analyzing: boolean) => void
+  // Timeline editing methods
+  selectClip: (id: string, multiSelect?: boolean) => void
+  deselectClip: (id: string) => void
+  clearSelection: () => void
+  selectAll: () => void
+  deleteSelectedClips: () => void
+  toggleSnapping: () => void
   // Project management methods
   createNewProject: (name: string, location: string, videoPath: string) => Promise<void>
   saveProject: () => Promise<void>
@@ -150,6 +160,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     textOverlays: [],
     analysis: null,
     isAnalyzing: false,
+    selectedClipIds: [],
+    snappingEnabled: true,
     projectPath: null,
     projectName: null,
     hasUnsavedChanges: false,
@@ -278,6 +290,110 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setState(prev => ({ ...prev, isAnalyzing: analyzing }))
   }
 
+  // Timeline editing methods
+  const selectClip = (id: string, multiSelect: boolean = false) => {
+    setState(prev => {
+      if (multiSelect) {
+        // Toggle selection with multi-select
+        const isSelected = prev.selectedClipIds.includes(id)
+        return {
+          ...prev,
+          selectedClipIds: isSelected
+            ? prev.selectedClipIds.filter(clipId => clipId !== id)
+            : [...prev.selectedClipIds, id]
+        }
+      } else {
+        // Single selection - replace current selection
+        return {
+          ...prev,
+          selectedClipIds: [id]
+        }
+      }
+    })
+  }
+
+  const deselectClip = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      selectedClipIds: prev.selectedClipIds.filter(clipId => clipId !== id)
+    }))
+  }
+
+  const clearSelection = () => {
+    setState(prev => ({
+      ...prev,
+      selectedClipIds: []
+    }))
+  }
+
+  const selectAll = () => {
+    setState(prev => {
+      // Collect all clip IDs from all tracks
+      const allClipIds = [
+        ...prev.subtitles.map(s => s.id),
+        ...prev.sfxTracks.map(t => t.id),
+        ...prev.textOverlays.map(o => o.id)
+      ]
+      return {
+        ...prev,
+        selectedClipIds: allClipIds
+      }
+    })
+  }
+
+  const deleteSelectedClips = () => {
+    setState(prev => {
+      if (prev.selectedClipIds.length === 0) return prev
+
+      // Separate selections by type
+      const selectedSFXIds = new Set(prev.selectedClipIds)
+      const selectedSubtitleIds = new Set(prev.selectedClipIds)
+      const selectedOverlayIds = new Set(prev.selectedClipIds)
+
+      // Delete from all tracks
+      const newSFXTracks = prev.sfxTracks.filter(t => !selectedSFXIds.has(t.id))
+      const newSubtitles = prev.subtitles.filter(s => !selectedSubtitleIds.has(s.id))
+      const newTextOverlays = prev.textOverlays.filter(o => !selectedOverlayIds.has(o.id))
+
+      // Ripple delete: close gaps by shifting clips left
+      // For SFX tracks, we need to identify gaps and shift clips
+      const sortedDeletedSFX = prev.sfxTracks
+        .filter(t => selectedSFXIds.has(t.id))
+        .sort((a, b) => a.start - b.start)
+
+      let rippledSFXTracks = [...newSFXTracks]
+      sortedDeletedSFX.forEach(deletedTrack => {
+        const deletedEnd = deletedTrack.start + deletedTrack.duration
+        // Shift all clips that start after this deleted clip
+        rippledSFXTracks = rippledSFXTracks.map(track => {
+          if (track.start >= deletedEnd) {
+            return {
+              ...track,
+              start: track.start - deletedTrack.duration
+            }
+          }
+          return track
+        })
+      })
+
+      return {
+        ...prev,
+        sfxTracks: rippledSFXTracks,
+        subtitles: newSubtitles,
+        textOverlays: newTextOverlays,
+        selectedClipIds: [],
+        hasUnsavedChanges: true
+      }
+    })
+  }
+
+  const toggleSnapping = () => {
+    setState(prev => ({
+      ...prev,
+      snappingEnabled: !prev.snappingEnabled
+    }))
+  }
+
   // Project management methods
   const createNewProject = async (name: string, location: string, videoPath: string) => {
     try {
@@ -331,6 +447,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         textOverlays: [],
         analysis: null,
         isAnalyzing: false,
+        selectedClipIds: [],
+        snappingEnabled: true,
         projectPath: result.projectPath,
         projectName: name,
         hasUnsavedChanges: false,
@@ -451,6 +569,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         textOverlays: deserialized.textOverlays,
         analysis: deserialized.analysis,
         isAnalyzing: false,
+        selectedClipIds: [],
+        snappingEnabled: true,
         projectPath,
         projectName: deserialized.projectName,
         hasUnsavedChanges: false,
@@ -478,6 +598,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       textOverlays: [],
       analysis: null,
       isAnalyzing: false,
+      selectedClipIds: [],
+      snappingEnabled: true,
       projectPath: null,
       projectName: null,
       hasUnsavedChanges: false,
@@ -518,6 +640,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         deleteTextOverlay,
         setAnalysis,
         setIsAnalyzing,
+        selectClip,
+        deselectClip,
+        clearSelection,
+        selectAll,
+        deleteSelectedClips,
+        toggleSnapping,
         createNewProject,
         saveProject,
         saveProjectAs,
