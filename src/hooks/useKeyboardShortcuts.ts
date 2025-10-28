@@ -22,6 +22,10 @@ export function useKeyboardShortcuts() {
     updateSFXTrack,
     updateSubtitle,
     updateTextOverlay,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useProject()
 
   useEffect(() => {
@@ -53,6 +57,20 @@ export function useKeyboardShortcuts() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
         e.preventDefault()
         selectAll()
+        return
+      }
+
+      // Cmd/Ctrl+Z - Undo
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey && canUndo) {
+        e.preventDefault()
+        undo()
+        return
+      }
+
+      // Cmd/Ctrl+Shift+Z - Redo
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey && canRedo) {
+        e.preventDefault()
+        redo()
         return
       }
 
@@ -142,5 +160,9 @@ export function useKeyboardShortcuts() {
     updateSFXTrack,
     updateSubtitle,
     updateTextOverlay,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   ])
 }

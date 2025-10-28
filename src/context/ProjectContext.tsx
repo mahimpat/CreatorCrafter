@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
+import { createContext, useContext, useState, useRef, ReactNode } from 'react'
 import { serializeProject, deserializeProject } from '../utils/projectSerializer'
+import { CommandHistory } from '../utils/commandHistory'
 
 export interface Subtitle {
   id: string
@@ -98,6 +99,8 @@ interface ProjectState {
   // Timeline editing
   selectedClipIds: string[]
   snappingEnabled: boolean
+  canUndo: boolean
+  canRedo: boolean
   // Project management
   projectPath: string | null
   projectName: string | null
@@ -134,6 +137,8 @@ interface ProjectContextType extends ProjectState {
   selectAll: () => void
   deleteSelectedClips: () => void
   toggleSnapping: () => void
+  undo: () => void
+  redo: () => void
   // Project management methods
   createNewProject: (name: string, location: string, videoPath: string) => Promise<void>
   saveProject: () => Promise<void>
@@ -162,6 +167,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     isAnalyzing: false,
     selectedClipIds: [],
     snappingEnabled: true,
+    canUndo: false,
+    canRedo: false,
     projectPath: null,
     projectName: null,
     hasUnsavedChanges: false,
@@ -169,6 +176,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     isSaving: false,
     createdAt: null
   })
+
+  // Command history for undo/redo (persists across renders)
+  const commandHistory = useRef(new CommandHistory())
+
+  // Helper to update undo/redo state after command history changes
+  const updateUndoRedoState = () => {
+    setState(prev => ({
+      ...prev,
+      canUndo: commandHistory.current.canUndo(),
+      canRedo: commandHistory.current.canRedo()
+    }))
+  }
 
   const setVideoPath = (path: string | null) => {
     setState(prev => ({ ...prev, videoPath: path }))
@@ -394,6 +413,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
+  const undo = () => {
+    if (commandHistory.current.undo()) {
+      updateUndoRedoState()
+    }
+  }
+
+  const redo = () => {
+    if (commandHistory.current.redo()) {
+      updateUndoRedoState()
+    }
+  }
+
   // Project management methods
   const createNewProject = async (name: string, location: string, videoPath: string) => {
     try {
@@ -449,6 +480,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         isAnalyzing: false,
         selectedClipIds: [],
         snappingEnabled: true,
+        canUndo: false,
+        canRedo: false,
         projectPath: result.projectPath,
         projectName: name,
         hasUnsavedChanges: false,
@@ -571,6 +604,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         isAnalyzing: false,
         selectedClipIds: [],
         snappingEnabled: true,
+        canUndo: false,
+        canRedo: false,
         projectPath,
         projectName: deserialized.projectName,
         hasUnsavedChanges: false,
@@ -585,6 +620,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }
 
   const closeProject = () => {
+    // Clear command history when closing project
+    commandHistory.current.clear()
+
     setState({
       videoPath: null,
       videoMetadata: null,
@@ -600,6 +638,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       isAnalyzing: false,
       selectedClipIds: [],
       snappingEnabled: true,
+      canUndo: false,
+      canRedo: false,
       projectPath: null,
       projectName: null,
       hasUnsavedChanges: false,
@@ -646,6 +686,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         selectAll,
         deleteSelectedClips,
         toggleSnapping,
+        undo,
+        redo,
         createNewProject,
         saveProject,
         saveProjectAs,
