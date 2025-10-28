@@ -142,6 +142,16 @@ export default function SFXEditor() {
         }
       }
 
+      // Add to library for reuse
+      const libraryItem: import('../context/ProjectContext').SFXLibraryItem = {
+        id: `sfx-lib-${Date.now()}`,
+        path: sfxPath,
+        prompt: finalPrompt,
+        duration,
+        createdAt: Date.now()
+      }
+      addSFXToLibrary(libraryItem)
+
       // Add the SFX track at the suggested timestamp
       const track: SFXTrack = {
         id: `sfx-${Date.now()}`,
@@ -156,7 +166,7 @@ export default function SFXEditor() {
       setPrompt('')
 
       // Show success message
-      alert(`SFX "${finalPrompt}" generated and added to timeline at ${suggestion.timestamp.toFixed(2)}s`)
+      alert(`SFX "${finalPrompt}" generated and added to timeline at ${suggestion.timestamp.toFixed(2)}s. Also saved to "My SFX" library for reuse!`)
     } catch (error) {
       console.error('Error generating suggested SFX:', error)
       alert(
