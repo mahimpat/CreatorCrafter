@@ -392,10 +392,59 @@
   height: 64px;
   border-radius: 6px;
   cursor: grab;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   transition: all 0.2s ease;
   border: 2px solid transparent;
+}
+
+/* Edge handles for trimming */
+.track-item::before,
+.track-item::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: transparent;
+  z-index: 10;
+  cursor: ew-resize;
+  transition: background 0.2s;
+}
+
+.track-item::before {
+  left: 0;
+  border-left: 2px solid transparent;
+}
+
+.track-item::after {
+  right: 0;
+  border-right: 2px solid transparent;
+}
+
+.track-item:hover::before,
+.track-item:hover::after {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.track-item:hover::before {
+  border-left-color: rgba(255, 255, 255, 0.4);
+}
+
+.track-item:hover::after {
+  border-right-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Cursor states for different interactions */
+.track-item.resizing-left,
+.track-item.resizing-right {
+  cursor: ew-resize;
+}
+
+.track-item.resizing-left::before,
+.track-item.resizing-right::after {
+  background: rgba(79, 195, 247, 0.3);
+  border-color: #4fc3f7;
 }
 
 .track-item:hover {
@@ -430,6 +479,8 @@
   justify-content: center;
   gap: 4px;
   position: relative;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .item-icon {
