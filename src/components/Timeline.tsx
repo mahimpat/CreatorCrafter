@@ -18,6 +18,9 @@ export default function Timeline() {
     textOverlays,
     updateTextOverlay,
     analysis,
+    selectedClipIds,
+    selectClip,
+    clearSelection,
   } = useProject()
 
   const [isDragging, setIsDragging] = useState(false)
@@ -100,6 +103,9 @@ export default function Timeline() {
     const x = e.clientX - rect.left
     const newTime = Math.max(0, Math.min(safeDuration, x / pixelsPerSecond))
     setCurrentTime(newTime)
+
+    // Clear selection when clicking on empty timeline
+    clearSelection()
   }
 
   const handleTrackItemMouseDown = (
@@ -108,8 +114,16 @@ export default function Timeline() {
     type: 'subtitle' | 'sfx' | 'overlay'
   ) => {
     e.stopPropagation()
-    setDraggedItem({ id, type })
-    setIsDragging(true)
+
+    // Handle selection: Cmd/Ctrl+click for multi-select, regular click for single select
+    const isMultiSelect = e.metaKey || e.ctrlKey
+    selectClip(id, isMultiSelect)
+
+    // Only start dragging if not multi-selecting
+    if (!isMultiSelect) {
+      setDraggedItem({ id, type })
+      setIsDragging(true)
+    }
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -373,7 +387,7 @@ export default function Timeline() {
                       return (
                         <div
                           key={sfx.id}
-                          className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''}`}
+                          className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''} ${selectedClipIds.includes(sfx.id) ? 'selected' : ''}`}
                           style={{
                             left: `${startPos}px`,
                             width: `${Math.max(width, 60)}px`
@@ -417,7 +431,7 @@ export default function Timeline() {
                   return (
                     <div
                       key={subtitle.id}
-                      className={`track-item subtitle-item ${draggedItem?.id === subtitle.id ? 'dragging' : ''}`}
+                      className={`track-item subtitle-item ${draggedItem?.id === subtitle.id ? 'dragging' : ''} ${selectedClipIds.includes(subtitle.id) ? 'selected' : ''}`}
                       style={{
                         left: `${startPos}px`,
                         width: `${Math.max(width, 40)}px`
@@ -445,7 +459,7 @@ export default function Timeline() {
                   return (
                     <div
                       key={overlay.id}
-                      className={`track-item overlay-item ${draggedItem?.id === overlay.id ? 'dragging' : ''}`}
+                      className={`track-item overlay-item ${draggedItem?.id === overlay.id ? 'dragging' : ''} ${selectedClipIds.includes(overlay.id) ? 'selected' : ''}`}
                       style={{
                         left: `${startPos}px`,
                         width: `${Math.max(width, 40)}px`
