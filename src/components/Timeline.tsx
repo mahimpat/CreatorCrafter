@@ -21,6 +21,7 @@ export default function Timeline() {
     selectedClipIds,
     selectClip,
     clearSelection,
+    snappingEnabled,
   } = useProject()
 
   const [isDragging, setIsDragging] = useState(false)
@@ -36,7 +37,66 @@ export default function Timeline() {
     originalEnd: number
     originalDuration: number
   } | null>(null)
+  const [snapGuide, setSnapGuide] = useState<number | null>(null)
   const [zoom, setZoom] = useState(1)
+
+  // Snapping helper function
+  const applySnapping = (time: number, excludeId?: string): number => {
+    if (!snappingEnabled) {
+      setSnapGuide(null)
+      return time
+    }
+
+    const snapThreshold = 0.2 // 0.2 seconds snap distance
+    let closestSnapPoint: number | null = null
+    let minDistance = snapThreshold
+
+    // Snap points to check
+    const snapPoints: number[] = [
+      0, // Timeline start
+      currentTime, // Playhead
+      duration, // Timeline end
+    ]
+
+    // Add all clip edges as snap points (excluding current clip)
+    sfxTracks.forEach(track => {
+      if (track.id !== excludeId) {
+        snapPoints.push(track.start)
+        snapPoints.push(track.start + track.duration)
+      }
+    })
+
+    subtitles.forEach(subtitle => {
+      if (subtitle.id !== excludeId) {
+        snapPoints.push(subtitle.start)
+        snapPoints.push(subtitle.end)
+      }
+    })
+
+    textOverlays.forEach(overlay => {
+      if (overlay.id !== excludeId) {
+        snapPoints.push(overlay.start)
+        snapPoints.push(overlay.end)
+      }
+    })
+
+    // Find closest snap point
+    snapPoints.forEach(snapPoint => {
+      const distance = Math.abs(time - snapPoint)
+      if (distance < minDistance) {
+        minDistance = distance
+        closestSnapPoint = snapPoint
+      }
+    })
+
+    if (closestSnapPoint !== null) {
+      setSnapGuide(closestSnapPoint)
+      return closestSnapPoint
+    } else {
+      setSnapGuide(null)
+      return time
+    }
+  }
 
   // Assign SFX tracks to lanes to prevent visual overlap
   const assignSfxToLanes = (tracks: typeof sfxTracks) => {
@@ -234,7 +294,11 @@ export default function Timeline() {
       if (resizingItem.edge === 'left') {
         // Trim from start - adjust start time while keeping end fixed
         const maxStart = resizingItem.originalEnd - minDuration
-        const newStart = Math.max(0, Math.min(newTime, maxStart))
+        let newStart = Math.max(0, Math.min(newTime, maxStart))
+
+        // Apply snapping
+        newStart = applySnapping(newStart, resizingItem.id)
+
         const newDuration = resizingItem.originalEnd - newStart
 
         if (resizingItem.type === 'sfx') {
@@ -256,7 +320,11 @@ export default function Timeline() {
       } else if (resizingItem.edge === 'right') {
         // Trim from end - adjust end time while keeping start fixed
         const minEnd = resizingItem.originalStart + minDuration
-        const newEnd = Math.max(minEnd, Math.min(newTime, safeDuration))
+        let newEnd = Math.max(minEnd, Math.min(newTime, safeDuration))
+
+        // Apply snapping
+        newEnd = applySnapping(newEnd, resizingItem.id)
+
         const newDuration = newEnd - resizingItem.originalStart
 
         if (resizingItem.type === 'sfx') {
@@ -278,16 +346,19 @@ export default function Timeline() {
 
     // Handle dragging
     if (draggedItem) {
+      // Apply snapping to drag position
+      const snappedTime = applySnapping(newTime, draggedItem.id)
+
       // Update the position based on item type
       if (draggedItem.type === 'sfx') {
-        updateSFXTrack(draggedItem.id, { start: newTime })
+        updateSFXTrack(draggedItem.id, { start: snappedTime })
       } else if (draggedItem.type === 'subtitle') {
         const subtitle = subtitles.find(s => s.id === draggedItem.id)
         if (subtitle) {
           const duration = subtitle.end - subtitle.start
           updateSubtitle(draggedItem.id, {
-            start: newTime,
-            end: newTime + duration
+            start: snappedTime,
+            end: snappedTime + duration
           })
         }
       } else if (draggedItem.type === 'overlay') {
@@ -295,8 +366,8 @@ export default function Timeline() {
         if (overlay) {
           const duration = overlay.end - overlay.start
           updateTextOverlay(draggedItem.id, {
-            start: newTime,
-            end: newTime + duration
+            start: snappedTime,
+            end: snappedTime + duration
           })
         }
       }
@@ -307,6 +378,7 @@ export default function Timeline() {
     setDraggedItem(null)
     setIsDragging(false)
     setResizingItem(null)
+    setSnapGuide(null)
   }
 
   return (
@@ -418,6 +490,14 @@ export default function Timeline() {
               className="playhead-line"
               style={{ left: `${playheadPosition}px` }}
             />
+
+            {/* Snap guide line */}
+            {snapGuide !== null && (
+              <div
+                className="snap-guide-line"
+                style={{ left: `${snapGuide * pixelsPerSecond}px` }}
+              />
+            )}
 
             {/* Video Track */}
             <div className="track video-track">

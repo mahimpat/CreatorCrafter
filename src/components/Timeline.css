@@ -238,6 +238,34 @@
   box-shadow: 0 0 4px rgba(79, 195, 247, 0.5);
 }
 
+/* Snap guide line */
+.snap-guide-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #ffd700;
+  z-index: 49;
+  pointer-events: none;
+  box-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+  animation: snap-pulse 0.5s ease-in-out;
+}
+
+@keyframes snap-pulse {
+  0% {
+    opacity: 0.3;
+    transform: scaleX(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1.5);
+  }
+  100% {
+    opacity: 0.9;
+    transform: scaleX(1);
+  }
+}
+
 /* Timeline Content */
 .timeline-content {
   min-height: 400px;
