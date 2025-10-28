@@ -26,6 +26,7 @@ export function useKeyboardShortcuts() {
     redo,
     canUndo,
     canRedo,
+    toggleSnapping,
   } = useProject()
 
   useEffect(() => {
@@ -92,6 +93,13 @@ export function useKeyboardShortcuts() {
       if (e.key === 'ArrowRight' && selectedClipIds.length > 0) {
         e.preventDefault()
         nudgeSelectedClips(0.1)
+        return
+      }
+
+      // S - Toggle snapping
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault()
+        toggleSnapping()
         return
       }
 
@@ -164,5 +172,6 @@ export function useKeyboardShortcuts() {
     redo,
     canUndo,
     canRedo,
+    toggleSnapping,
   ])
 }
