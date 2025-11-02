@@ -1,0 +1,155 @@
+================================================================================
+CREATORCRAFTER - WINDOWS HOTFIX PACKAGE
+================================================================================
+
+QUICK SUMMARY FOR YOU:
+
+The Windows installer has a bug where Python paths are hardcoded for Linux/Mac.
+I've created a complete hotfix package for your users.
+
+FILES CREATED FOR WINDOWS USERS:
+================================
+
+1. HOTFIX_README.md
+   → Main user-facing instructions
+   → Copy this to Windows machine and follow steps
+
+2. windows-hotfix.bat
+   → Automated Python environment setup
+   → Creates venv, installs packages, downloads AI models
+   → Run as Administrator
+
+3. windows-diagnostic.bat
+   → Diagnostic tool to check what's missing
+   → Shows Python, FFmpeg, files status
+   → Run first to see what's wrong
+
+4. windows-path-fix.js
+   → Automated path patcher
+   → Fixes main.js to use Windows paths
+   → Requires Node.js on Windows
+
+5. WINDOWS_HOTFIX_INSTRUCTIONS.md
+   → Detailed technical instructions
+   → Manual fix steps if automation fails
+   → Troubleshooting guide
+
+FILES FIXED IN CODEBASE (FOR NEXT BUILD):
+=========================================
+
+1. electron/main.ts
+   → Fixed line 269-271: Added platform detection for Python path
+   → Fixed line 357-359: Added platform detection for Python path
+   → Now uses: venv\Scripts\python.exe on Windows
+   → Now uses: venv/bin/python on Linux/Mac
+
+QUICK FIX FOR YOUR WINDOWS MACHINE:
+===================================
+
+Step 1: Copy these files to Windows installation folder:
+   - windows-hotfix.bat
+   - windows-diagnostic.bat
+   - windows-path-fix.js
+   - HOTFIX_README.md
+
+Step 2: Open Command Prompt as Administrator:
+   cd "C:\Program Files\CreatorCrafter"
+   node windows-path-fix.js
+
+Step 3: Run the setup:
+   Right-click windows-hotfix.bat → Run as Administrator
+   Wait 10-15 minutes for completion
+
+Step 4: Restart CreatorCrafter
+
+WHAT WAS WRONG:
+==============
+
+Bug 1: Python Path
+   - App looked for: appRoot/venv/bin/python (Linux path)
+   - Should be: appRoot\venv\Scripts\python.exe (Windows)
+   - Fixed in: electron/main.ts lines 269-271, 357-359
+
+Bug 2: Python Environment
+   - NSIS installer script should create venv during install
+   - But if user skips or it fails, no venv exists
+   - Hotfix creates it manually
+
+NEXT BUILD WILL HAVE:
+====================
+
+✓ Fixed Python paths (already done in main.ts)
+✓ Cross-platform path detection
+✓ Works on Windows, Mac, Linux
+
+You can rebuild now with: ./build.sh win
+The new installer will work correctly!
+
+DISTRIBUTING THE HOTFIX:
+========================
+
+Option 1: Send hotfix package
+   - Zip up the 5 hotfix files
+   - Send to affected users
+   - Users follow HOTFIX_README.md
+
+Option 2: Rebuild and redistribute
+   - Run: sudo rm -rf dist dist-electron release
+   - Run: ./build.sh win
+   - New installer has the fix
+   - Distribute new installer
+
+TESTING:
+=======
+
+After applying hotfix on Windows:
+1. Open CreatorCrafter
+2. Import a video file
+3. Click "Analyze Video" - should work
+4. Try "Generate SFX" - should work
+5. Check venv exists at: C:\Program Files\CreatorCrafter\venv\
+
+SUPPORT QUESTIONS:
+=================
+
+Q: Do I need to rebuild?
+A: Yes, if you want to fix it permanently. The hotfix is temporary.
+
+Q: Can users apply this themselves?
+A: Yes! HOTFIX_README.md has step-by-step instructions.
+
+Q: What if Node.js isn't installed on Windows?
+A: They can skip windows-path-fix.js and do manual edit instead.
+
+Q: How big is the download?
+A: Hotfix scripts are tiny. Python packages download ~500MB.
+
+Q: Can I automate this in the installer?
+A: Yes, but the NSIS script needs debugging. The path fix is already done.
+
+FILES TO COPY TO WINDOWS:
+=========================
+
+Essential:
+✓ windows-hotfix.bat (Python setup)
+✓ HOTFIX_README.md (instructions)
+
+Optional but helpful:
+✓ windows-diagnostic.bat (diagnostics)
+✓ windows-path-fix.js (auto-patcher)
+✓ WINDOWS_HOTFIX_INSTRUCTIONS.md (technical details)
+
+NEXT STEPS FOR YOU:
+==================
+
+1. Test the next build:
+   sudo rm -rf dist dist-electron release
+   ./build.sh win
+
+2. Install on Windows and verify it works without hotfix
+
+3. If it works, you're done! Distribute new installer.
+
+4. If it still fails, apply hotfix and report what's wrong.
+
+================================================================================

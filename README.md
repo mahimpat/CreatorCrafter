@@ -1,6 +1,15 @@
-# AI Content Creator Assistant
+# CreatorCrafter
 
-A powerful Electron-based desktop application that helps video content creators automate secondary content creation tasks using AI. The application analyzes videos, generates captions/subtitles, suggests and creates sound effects using Meta AudioCraft, and enables custom text overlays.
+**AI-Powered Video Editing for Content Creators**
+
+A powerful Electron-based desktop application that helps video content creators automate secondary content creation tasks using AI. The application analyzes videos, generates captions/subtitles, creates sound effects using Meta AudioCraft, and enables media overlays with advanced transform controls.
+
+## 📚 Documentation
+
+- **For End Users**: See [README_USER.md](README_USER.md) - Installation and usage guide
+- **For Builders**: See [BUILD_GUIDE.md](BUILD_GUIDE.md) - How to build installers
+- **For Developers**: See [INSTALLATION.md](INSTALLATION.md) - Detailed developer documentation
+- **Packaging Overview**: See [PACKAGING_SUMMARY.md](PACKAGING_SUMMARY.md) - Complete packaging setup
 
 ## Features
 

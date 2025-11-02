@@ -10,12 +10,13 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Import smart scene analyzer, event detector, and music generator
 from smart_scene_analyzer import SmartSceneAnalyzer
 from event_detector import EventDetector, EventClassifier
 from music_prompt_generator import suggest_music
+from sound_extractor import SoundExtractor
 
 try:
     import whisper
@@ -24,9 +25,11 @@ try:
     import torch
     from transformers import BlipProcessor, BlipForConditionalGeneration
     from PIL import Image
+    import librosa
+    import soundfile as sf
 except ImportError as e:
     print(f"Error: Required packages not installed: {e}", file=sys.stderr)
-    print("pip install openai-whisper opencv-python numpy torch transformers pillow", file=sys.stderr)
+    print("pip install openai-whisper opencv-python numpy torch transformers pillow librosa soundfile", file=sys.stderr)
     sys.exit(1)
 
 # Suppress FFmpeg/OpenCV H.264 decoder warnings
@@ -89,6 +92,72 @@ def transcribe_audio(audio_path: str):
     except Exception as e:
         print(f"Error transcribing audio: {str(e)}", file=sys.stderr)
         return []
+
+
+def analyze_audio_energy(audio_path: str, timestamp: float, window: float = 2.0) -> float:
+    """
+    Analyze audio energy/presence around a specific timestamp.
+    Used to detect if audio already exists (to avoid redundant SFX suggestions).
+
+    Args:
+        audio_path: Path to audio file
+        timestamp: Time in seconds to analyze
+        window: Time window in seconds (±window/2 around timestamp)
+
+    Returns:
+        Audio energy level (0.0 = silence, 1.0 = very loud)
+    """
+    try:
+        # Load audio file
+        y, sr = librosa.load(audio_path, sr=None)
+
+        # Calculate time range
+        start_sample = int(max(0, (timestamp - window/2)) * sr)
+        end_sample = int(min(len(y), (timestamp + window/2) * sr))
+
+        # Extract audio segment
+        audio_segment = y[start_sample:end_sample]
+
+        if len(audio_segment) == 0:
+            return 0.0
+
+        # Calculate RMS (Root Mean Square) energy
+        rms = np.sqrt(np.mean(audio_segment ** 2))
+
+        # Normalize to 0-1 range (typical speech is around 0.1-0.3 RMS)
+        # Using logarithmic scale for better perception
+        if rms > 0:
+            # Convert to dB scale and normalize
+            db = 20 * np.log10(rms + 1e-10)  # Add small value to avoid log(0)
+            # Normalize: -60dB = 0.0 (silence), -10dB = 1.0 (very loud)
+            normalized = (db + 60) / 50
+            return float(np.clip(normalized, 0.0, 1.0))
+        else:
+            return 0.0
+
+    except Exception as e:
+        print(f"Warning: Audio energy analysis failed: {e}", file=sys.stderr)
+        # Return neutral value if analysis fails
+        return 0.5
+
+
+def has_significant_audio(audio_path: str, timestamp: float, threshold: float = 0.15) -> bool:
+    """
+    Check if significant audio is present at a timestamp.
+
+    Args:
+        audio_path: Path to audio file
+        timestamp: Time in seconds
+        threshold: Energy threshold (default 0.15 = quiet speech level)
+
+    Returns:
+        True if audio energy exceeds threshold
+    """
+    if not audio_path or not os.path.exists(audio_path):
+        return False
+
+    energy = analyze_audio_energy(audio_path, timestamp)
+    return energy >= threshold
 
 
 def analyze_frame_content(frame: np.ndarray, model, processor) -> Dict[str, Any]:
@@ -625,64 +694,67 @@ class VisualAudioVerifier:
             }
 
 
-def convert_visual_to_audio_description(visual_desc: str, action_desc: str, sound_desc: str, mood: str = None, energy_level: int = None) -> str:
+def convert_visual_to_audio_description(visual_desc: str, action_desc: str, sound_desc: str, mood: str = None, energy_level: int = None) -> Optional[str]:
     """
-    TRULY DYNAMIC audio prompt generation - NO static lists!
-    Directly translates visual description into natural audio prompts.
+    IMPROVED: Extract concrete sounds from visual descriptions.
+    Maps visual actions/objects to the actual sounds they make.
+
+    OLD APPROACH (BAD):
+        "ambient sounds of a man is doing a bench press exercise"
+        → AudioCraft doesn't know what "bench press" sounds like!
+
+    NEW APPROACH (GOOD):
+        "gym weight plates clanking, heavy breathing, metal bar impacts"
+        → Concrete audio elements AudioCraft can generate!
 
     Args:
-        visual_desc: What the model sees (e.g., "a river flowing through a lush green forest")
+        visual_desc: What the model sees
         action_desc: What's happening
         sound_desc: Direct sound description (from BLIP)
         mood: Scene mood (cheerful, tense, calm, etc.)
         energy_level: Energy level 1-10
 
     Returns:
-        Natural language audio prompt for AudioCraft
+        Concrete audio prompt or None if should skip (e.g., dialogue scenes)
 
     Example:
-        Input: "a river flowing through a lush green forest", mood="calm", energy=2
-        Output: "ambient sounds of a river flowing through a lush green forest, peaceful and calming ambience, subtle and gentle"
+        Input: "a man is doing a bench press exercise", mood="tense", energy=7
+        Output: "gym weight plates clanking, heavy breathing, metal bar impacts, tense and dramatic, medium intensity"
     """
 
-    # Use the visual description DIRECTLY as the basis for audio
-    # The visual description already tells us what's there!
+    # Use SoundExtractor to get concrete sound descriptions
+    extractor = SoundExtractor()
 
-    # Start with: "ambient sounds of [what we see]"
-    base_prompt = f"ambient sounds of {visual_desc.strip()}"
+    # Extract concrete sounds from visual description
+    base_sound = extractor.extract_sounds(visual_desc, action_desc, sound_desc)
 
-    # Add mood context if available
-    if mood and mood != 'neutral':
-        mood_descriptors = {
-            'cheerful': ', bright and uplifting atmosphere',
-            'energetic': ', dynamic and energetic feel',
-            'tense': ', tense and suspenseful mood',
-            'dark': ', dark and ominous atmosphere',
-            'calm': ', peaceful and calming ambience',
-            'melancholic': ', somber and melancholic tone'
-        }
+    # If None, this is a dialogue scene or should be skipped
+    if base_sound is None:
+        return None
 
-        mood_suffix = mood_descriptors.get(mood, '')
-        if mood_suffix:
-            base_prompt += mood_suffix
+    # Enhance with mood and energy
+    enhanced_sound = extractor.enhance_with_mood(base_sound, mood, energy_level)
 
-    # Add energy/intensity context
-    if energy_level:
-        if energy_level >= 8:
-            base_prompt += ', high intensity'
-        elif energy_level >= 6:
-            base_prompt += ', medium intensity'
-        elif energy_level <= 3:
-            base_prompt += ', subtle and gentle'
-
-    return base_prompt
+    return enhanced_sound
 
 
-def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str = None, events: List[Dict] = None) -> List[Dict]:
+def suggest_sfx(
+    scenes: List[Dict],
+    transcription: List[Dict],
+    video_path: str = None,
+    audio_path: str = None,
+    events: List[Dict] = None
+) -> List[Dict]:
     """
     DYNAMICALLY suggest sound effects based on natural language understanding.
     No static mappings - generates contextual SFX from visual descriptions.
     NOW WITH EVENT-BASED DETECTION for frame-accurate SFX timing.
+
+    IMPROVEMENTS (Phase 3):
+    - Audio presence detection - skips/reduces suggestions when audio exists
+    - Concrete sound extraction - maps visuals to actual sounds
+    - Primary vs Enhancement labeling
+    - Dialogue scene filtering
 
     Week 2 Improvements:
     - Event-based detection for precise timing (motion peaks, transitions)
@@ -694,10 +766,11 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str =
         scenes: List of scenes with dynamic descriptions
         transcription: List of transcription segments
         video_path: Path to video file (optional, needed for motion verification)
+        audio_path: Path to audio file (optional, for audio presence detection)
         events: List of detected events (motion peaks, transitions) for precise SFX
 
     Returns:
-        List of dynamically generated SFX suggestions
+        List of dynamically generated SFX suggestions with type labels
     """
     suggestions = []
 
@@ -765,7 +838,7 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str =
             mood = scene.get('mood', 'neutral')
             energy_level = scene.get('energy_level', 5)
 
-            # TRULY DYNAMIC prompt generation - uses visual description + mood + energy
+            # IMPROVED: Extract concrete sounds - uses visual description + mood + energy
             sfx_prompt = convert_visual_to_audio_description(
                 visual_desc,
                 action_desc,
@@ -774,11 +847,37 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str =
                 energy_level=energy_level
             )
 
+            # If None returned, this is a dialogue scene - skip
+            if sfx_prompt is None:
+                continue
+
             # CONTEXT DISAMBIGUATION: Make sound more specific based on environment
             sfx_prompt = disambiguator.disambiguate_sound(sfx_prompt, visual_desc, action_desc)
 
             # Only add if we generated something meaningful
             if sfx_prompt and len(sfx_prompt) > 5:
+                # AUDIO PRESENCE CHECK: Detect if audio already exists
+                audio_present = False
+                audio_energy = 0.0
+                suggestion_type = 'primary'  # Default: primary suggestion
+
+                if audio_path:
+                    audio_present = has_significant_audio(audio_path, timestamp)
+                    audio_energy = analyze_audio_energy(audio_path, timestamp)
+
+                    if audio_present:
+                        # Audio exists - mark as enhancement (optional)
+                        suggestion_type = 'enhancement'
+                        # Reduce confidence for enhancement suggestions
+                        audio_confidence_mult = 0.4
+                    else:
+                        # No audio - mark as primary (needed)
+                        suggestion_type = 'primary'
+                        audio_confidence_mult = 1.0
+                else:
+                    # No audio file provided - assume silent, mark as primary
+                    suggestion_type = 'primary'
+                    audio_confidence_mult = 1.0
                 base_confidence = scene.get('confidence', 0.7)
 
                 # MOTION VERIFICATION: Check if action-based sounds have actual motion
@@ -828,7 +927,8 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str =
                             # If motion verification fails, don't penalize
                             motion_verified = True
 
-                final_confidence = base_confidence * motion_confidence_multiplier
+                # Combine all confidence multipliers
+                final_confidence = base_confidence * motion_confidence_multiplier * audio_confidence_mult
 
                 suggestion = {
                     'timestamp': timestamp,
@@ -837,12 +937,19 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict], video_path: str =
                     'confidence': final_confidence,
                     'visual_context': visual_desc,
                     'action_context': action_desc,
-                    'motion_verified': motion_verified
+                    'motion_verified': motion_verified,
+                    # NEW: Audio presence information
+                    'type': suggestion_type,  # 'primary' or 'enhancement'
+                    'audio_present': audio_present,
+                    'audio_energy': audio_energy
                 }
 
-                # Add warning if motion verification failed
+                # Add warnings
                 if not motion_verified:
                     suggestion['warning'] = 'Action mentioned but no motion detected - possible false positive'
+
+                if audio_present:
+                    suggestion['note'] = 'Original audio present - this is an optional enhancement'
 
                 suggestions.append(suggestion)
 
@@ -1009,9 +1116,10 @@ def analyze_video(video_path: str, audio_path: str):
     # Combine all events
     all_events = motion_events + transitions
 
-    # Generate SFX suggestions with event-based detection (Week 2)
+    # Generate SFX suggestions with event-based detection (Week 2) + audio presence (Phase 3)
     print("Generating SFX suggestions from events and scenes...", file=sys.stderr)
-    sfx_suggestions = suggest_sfx(scenes, transcription, video_path, events=all_events)
+    print("🔊 Checking audio presence to avoid redundant suggestions...", file=sys.stderr)
+    sfx_suggestions = suggest_sfx(scenes, transcription, video_path, audio_path, events=all_events)
 
     # Generate background music suggestions (Week 3)
     print("🎵 Generating background music suggestions...", file=sys.stderr)
@@ -1027,10 +1135,17 @@ def analyze_video(video_path: str, audio_path: str):
         'transcription': transcription
     }
 
+    # Count primary vs enhancement suggestions
+    primary_count = sum(1 for s in sfx_suggestions if s.get('type') == 'primary')
+    enhancement_count = sum(1 for s in sfx_suggestions if s.get('type') == 'enhancement')
+
     print(f"\n✅ Analysis complete!", file=sys.stderr)
     print(f"   📊 {len(scenes)} scenes analyzed", file=sys.stderr)
     print(f"   🎯 {len(all_events)} events detected", file=sys.stderr)
     print(f"   🔊 {len(sfx_suggestions)} SFX suggestions", file=sys.stderr)
+    if primary_count > 0 or enhancement_count > 0:
+        print(f"      ├─ {primary_count} primary (silent sections)", file=sys.stderr)
+        print(f"      └─ {enhancement_count} enhancements (optional)", file=sys.stderr)
     print(f"   🎵 {len(music_suggestions)} music suggestions", file=sys.stderr)
 
     return analysis

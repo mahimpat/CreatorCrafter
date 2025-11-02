@@ -1,0 +1,20 @@
+# AI/ML Dependencies
+# Install torch first, then audiocraft
+torch>=2.2.0
+torchaudio>=2.2.0
+audiocraft
+openai-whisper
+transformers>=4.30.0  # For CLIP vision model
+
+# Video Processing
+opencv-python==4.8.1.78
+numpy<2.0.0,>=1.24.0
+scenedetect[opencv]>=0.6.0  # Scene detection for smart analysis
+
+# Audio Processing
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# Utilities
+Pillow>=10.0.0
+scipy>=1.11.0  # For enhanced peak detection in event_detector

@@ -48,6 +48,66 @@ export interface TextOverlay {
   }
 }
 
+export interface VideoClip {
+  id: string
+  name: string
+  path: string
+  duration: number
+  thumbnail?: string
+  importedAt: number
+}
+
+export interface VideoTimelineClip {
+  id: string
+  videoClipId: string // Reference to VideoClip
+  start: number
+  duration: number
+  clipStart: number // Start time within the source video
+  clipEnd: number // End time within the source video
+}
+
+// Media Overlay System (Images & Videos as overlays)
+export interface MediaOverlayAsset {
+  id: string
+  name: string
+  path: string
+  type: 'image' | 'video'
+  duration: number // For videos, or display duration for images
+  width?: number
+  height?: number
+  thumbnail?: string
+  importedAt: number
+}
+
+export interface MediaOverlay {
+  id: string
+  assetId: string // Reference to MediaOverlayAsset
+  start: number // Start time on timeline
+  duration: number // How long to show
+  // Transform properties
+  transform: {
+    x: number // Position X (0-1, percentage of canvas)
+    y: number // Position Y (0-1, percentage of canvas)
+    width: number // Width (0-1, percentage of canvas width)
+    height: number // Height (0-1, percentage of canvas height)
+    rotation: number // Rotation in degrees
+    scaleX: number // Scale X (1 = 100%)
+    scaleY: number // Scale Y (1 = 100%)
+    anchorX: number // Anchor point X (0-1, within overlay)
+    anchorY: number // Anchor point Y (0-1, within overlay)
+  }
+  // Appearance properties
+  opacity: number // 0-1
+  visible: boolean
+  blendMode: 'normal' | 'multiply' | 'screen' | 'overlay' | 'darken' | 'lighten'
+  // Video-specific properties
+  clipStart?: number // For video overlays - trim start
+  clipEnd?: number // For video overlays - trim end
+  volume?: number // For video overlays with audio (0-1)
+  // Layer ordering
+  zIndex: number // Higher = on top
+}
+
 export interface VideoAnalysisResult {
   scenes: Array<{
     timestamp: number
@@ -58,7 +118,7 @@ export interface VideoAnalysisResult {
   suggestedSFX: Array<{
     timestamp: number
     prompt: string
-    reason: string
+    reason?: string
     visual_context?: string
     action_context?: string
     confidence?: number
@@ -96,6 +156,12 @@ interface ProjectState {
   textOverlays: TextOverlay[]
   analysis: VideoAnalysisResult | null
   isAnalyzing: boolean
+  // Multi-video support
+  videoClips: VideoClip[]
+  videoTimelineClips: VideoTimelineClip[]
+  // Media overlay support (images & videos)
+  mediaOverlayAssets: MediaOverlayAsset[]
+  mediaOverlays: MediaOverlay[]
   // Timeline editing
   selectedClipIds: string[]
   snappingEnabled: boolean
@@ -130,6 +196,20 @@ interface ProjectContextType extends ProjectState {
   deleteTextOverlay: (id: string) => void
   setAnalysis: (analysis: VideoAnalysisResult | null) => void
   setIsAnalyzing: (analyzing: boolean) => void
+  // Video clip management
+  importVideoClip: (path: string) => Promise<void>
+  addVideoClip: (clip: VideoClip) => void
+  removeVideoClip: (id: string) => void
+  addVideoToTimeline: (clip: VideoTimelineClip) => void
+  updateVideoTimelineClip: (id: string, clip: Partial<VideoTimelineClip>) => void
+  deleteVideoTimelineClip: (id: string) => void
+  // Media overlay management
+  importMediaOverlay: (path: string, type: 'image' | 'video') => Promise<void>
+  addMediaOverlayAsset: (asset: MediaOverlayAsset) => void
+  removeMediaOverlayAsset: (id: string) => void
+  addMediaOverlayToTimeline: (overlay: MediaOverlay) => void
+  updateMediaOverlay: (id: string, overlay: Partial<MediaOverlay>) => void
+  deleteMediaOverlay: (id: string) => void
   // Timeline editing methods
   selectClip: (id: string, multiSelect?: boolean) => void
   deselectClip: (id: string) => void
@@ -165,6 +245,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     textOverlays: [],
     analysis: null,
     isAnalyzing: false,
+    videoClips: [],
+    videoTimelineClips: [],
+    mediaOverlayAssets: [],
+    mediaOverlays: [],
     selectedClipIds: [],
     snappingEnabled: true,
     canUndo: false,
@@ -309,6 +393,161 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setState(prev => ({ ...prev, isAnalyzing: analyzing }))
   }
 
+  // Video clip management methods
+  const importVideoClip = async (path: string) => {
+    try {
+      // Get metadata for the video
+      const metadata = await window.electronAPI.getVideoMetadata(path)
+
+      // Create video clip object
+      const videoClip: VideoClip = {
+        id: `video-${Date.now()}`,
+        name: path.split('/').pop() || path.split('\\').pop() || 'Video',
+        path: path,
+        duration: metadata.format?.duration || 0,
+        importedAt: Date.now()
+      }
+
+      // Add to video clips library
+      addVideoClip(videoClip)
+    } catch (error) {
+      console.error('Error importing video clip:', error)
+      throw error
+    }
+  }
+
+  const addVideoClip = (clip: VideoClip) => {
+    setState(prev => ({
+      ...prev,
+      videoClips: [...prev.videoClips, clip],
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const removeVideoClip = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      videoClips: prev.videoClips.filter(clip => clip.id !== id),
+      // Also remove any timeline clips using this video
+      videoTimelineClips: prev.videoTimelineClips.filter(tc => tc.videoClipId !== id),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const addVideoToTimeline = (clip: VideoTimelineClip) => {
+    setState(prev => ({
+      ...prev,
+      videoTimelineClips: [...prev.videoTimelineClips, clip],
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const updateVideoTimelineClip = (id: string, clip: Partial<VideoTimelineClip>) => {
+    setState(prev => ({
+      ...prev,
+      videoTimelineClips: prev.videoTimelineClips.map(c =>
+        c.id === id ? { ...c, ...clip } : c
+      ),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const deleteVideoTimelineClip = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      videoTimelineClips: prev.videoTimelineClips.filter(c => c.id !== id),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  // Media overlay management functions
+  const importMediaOverlay = async (path: string, type: 'image' | 'video') => {
+    try {
+      let duration = 5 // Default duration for images (5 seconds)
+      let width: number | undefined
+      let height: number | undefined
+
+      if (type === 'video') {
+        // Get metadata for video overlays
+        const metadata = await window.electronAPI.getVideoMetadata(path)
+        duration = metadata.format?.duration || 5
+
+        // Get video dimensions
+        const videoStream = metadata.streams.find(s => s.codec_type === 'video')
+        if (videoStream) {
+          width = videoStream.width
+          height = videoStream.height
+        }
+      } else {
+        // For images, we'd need to load the image to get dimensions
+        // For now, we'll set them when rendering
+        duration = 5 // Default 5 seconds for images
+      }
+
+      // Create media overlay asset
+      const asset: MediaOverlayAsset = {
+        id: `overlay-asset-${Date.now()}`,
+        name: path.split('/').pop() || path.split('\\').pop() || 'Media',
+        path: path,
+        type: type,
+        duration: duration,
+        width: width,
+        height: height,
+        importedAt: Date.now()
+      }
+
+      // Add to media overlay assets library
+      addMediaOverlayAsset(asset)
+    } catch (error) {
+      console.error('Error importing media overlay:', error)
+      throw error
+    }
+  }
+
+  const addMediaOverlayAsset = (asset: MediaOverlayAsset) => {
+    setState(prev => ({
+      ...prev,
+      mediaOverlayAssets: [...prev.mediaOverlayAssets, asset],
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const removeMediaOverlayAsset = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      mediaOverlayAssets: prev.mediaOverlayAssets.filter(a => a.id !== id),
+      // Also remove any overlays using this asset
+      mediaOverlays: prev.mediaOverlays.filter(o => o.assetId !== id),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const addMediaOverlayToTimeline = (overlay: MediaOverlay) => {
+    setState(prev => ({
+      ...prev,
+      mediaOverlays: [...prev.mediaOverlays, overlay],
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const updateMediaOverlay = (id: string, overlay: Partial<MediaOverlay>) => {
+    setState(prev => ({
+      ...prev,
+      mediaOverlays: prev.mediaOverlays.map(o =>
+        o.id === id ? { ...o, ...overlay } : o
+      ),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const deleteMediaOverlay = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      mediaOverlays: prev.mediaOverlays.filter(o => o.id !== id),
+      hasUnsavedChanges: true
+    }))
+  }
+
   // Timeline editing methods
   const selectClip = (id: string, multiSelect: boolean = false) => {
     setState(prev => {
@@ -430,7 +669,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     try {
       // Get video metadata
       const metadata = await window.electronAPI.getVideoMetadata(videoPath)
-      const duration = parseFloat(metadata.format.duration)
+      const duration = metadata.format.duration
 
       // Create project structure and copy video
       const result = await window.electronAPI.createProject({
@@ -476,6 +715,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         sfxTracks: [],
         sfxLibrary: [],
         textOverlays: [],
+        videoClips: [],
+        videoTimelineClips: [],
+        mediaOverlayAssets: [],
+        mediaOverlays: [],
         analysis: null,
         isAnalyzing: false,
         selectedClipIds: [],
@@ -600,6 +843,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         sfxTracks: deserialized.sfxTracks,
         sfxLibrary: deserialized.sfxLibrary || [],
         textOverlays: deserialized.textOverlays,
+        videoClips: deserialized.videoClips || [],
+        videoTimelineClips: deserialized.videoTimelineClips || [],
+        mediaOverlayAssets: deserialized.mediaOverlayAssets || [],
+        mediaOverlays: deserialized.mediaOverlays || [],
         analysis: deserialized.analysis,
         isAnalyzing: false,
         selectedClipIds: [],
@@ -636,6 +883,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       textOverlays: [],
       analysis: null,
       isAnalyzing: false,
+      videoClips: [],
+      videoTimelineClips: [],
+      mediaOverlayAssets: [],
+      mediaOverlays: [],
       selectedClipIds: [],
       snappingEnabled: true,
       canUndo: false,
@@ -680,6 +931,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         deleteTextOverlay,
         setAnalysis,
         setIsAnalyzing,
+        importVideoClip,
+        addVideoClip,
+        removeVideoClip,
+        addVideoToTimeline,
+        updateVideoTimelineClip,
+        deleteVideoTimelineClip,
+        importMediaOverlay,
+        addMediaOverlayAsset,
+        removeMediaOverlayAsset,
+        addMediaOverlayToTimeline,
+        updateMediaOverlay,
+        deleteMediaOverlay,
         selectClip,
         deselectClip,
         clearSelection,

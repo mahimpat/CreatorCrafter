@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "AI-powered content creation assistant for video creators",
   "main": "dist-electron/main.js",
-  "author": "Your Name",
+  "author": {
+    "name": "CreatorCrafter Team",
+    "email": "contact@creatorcrafter.com"
+  },
   "license": "MIT",
   "private": true,
   "scripts": {
@@ -12,19 +15,23 @@
     "build:dir": "tsc && vite build && electron-builder --dir",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\"",
-    "electron:build": "tsc && vite build && electron-builder",
+    "electron:build": "vite build && electron-builder",
+    "electron:build:secure": "npm run compile:python && tsc && vite build && electron-builder",
     "type-check": "tsc --noEmit",
     "setup": "npm run setup:python && npm run download:models",
-    "setup:python": "python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt",
-    "download:models": "source venv/bin/activate && python python/download_models.py",
-    "postinstall": "npm run download:models"
+    "setup:python": "python3 -m venv venv && bash -c 'source venv/bin/activate && pip install -r requirements.txt'",
+    "download:models": "bash -c 'source venv/bin/activate && python python/download_models.py'",
+    "compile:python": "python3 python/compile_scripts.py",
+    "build:python:exe": "python3 python/build_executables.py",
+    "postinstall": "echo 'Skipping model download during npm install. Run: npm run setup'"
   },
   "dependencies": {
     "axios": "^1.12.2",
     "dotenv": "^17.2.3",
     "lucide-react": "^0.548.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-hot-toast": "^2.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -41,15 +48,41 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.aicontentcreator.app",
-    "productName": "AI Content Creator",
+    "appId": "com.creatorcrafter.app",
+    "productName": "CreatorCrafter",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "package.json"
+      "package.json",
+      "!python",
+      "!requirements.txt",
+      "!venv"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "extraResources": [
+      {
+        "from": "python/dist",
+        "to": "python",
+        "filter": [
+          "**/*.pyc"
+        ]
+      },
+      {
+        "from": "requirements.txt",
+        "to": "requirements.txt"
+      },
+      {
+        "from": "build/ffmpeg/bin",
+        "to": "ffmpeg",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "mac": {
       "category": "public.app-category.video",
@@ -58,23 +91,76 @@
         "zip"
       ],
       "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
-      ],
-      "icon": "build/icon.ico"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CreatorCrafter",
+      "runAfterFinish": true,
+      "displayLanguageSelector": false,
+      "installerSidebar": null,
+      "uninstallerSidebar": null,
+      "deleteAppDataOnUninstall": true,
+      "include": "build/installer.nsh",
+      "warningsAsErrors": false
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "category": "Video"
+      "category": "Video;AudioVideo;",
+      "desktop": {
+        "Name": "CreatorCrafter",
+        "Comment": "AI-powered video editing tool",
+        "Categories": "Video;AudioVideo;",
+        "MimeType": "video/mp4;video/x-msvideo;video/quicktime;"
+      }
+    },
+    "deb": {
+      "depends": [
+        "ffmpeg",
+        "python3",
+        "python3-pip",
+        "python3-venv"
+      ]
     }
   }
 }

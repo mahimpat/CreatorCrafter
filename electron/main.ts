@@ -38,6 +38,7 @@ app.on('remote-get-current-web-contents', (event) => {
 })
 
 let mainWindow: BrowserWindow | null = null
+let hasUnsavedChanges = false
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 function createWindow() {
@@ -86,6 +87,37 @@ function createWindow() {
   // Security: Prevent opening new windows
   mainWindow.webContents.setWindowOpenHandler(() => {
     return { action: 'deny' }
+  })
+
+  // Prevent closing with unsaved changes
+  mainWindow.on('close', (event) => {
+    if (hasUnsavedChanges) {
+      event.preventDefault()
+
+      dialog.showMessageBox(mainWindow!, {
+        type: 'warning',
+        buttons: ['Save and Close', 'Discard Changes', 'Cancel'],
+        defaultId: 0,
+        title: 'Unsaved Changes',
+        message: 'You have unsaved changes.',
+        detail: 'Do you want to save your changes before closing?'
+      }).then(({ response }) => {
+        if (response === 0) {
+          // Save and close
+          mainWindow?.webContents.send('save-before-close')
+          // Wait for save confirmation, then close
+          setTimeout(() => {
+            hasUnsavedChanges = false
+            mainWindow?.close()
+          }, 1000)
+        } else if (response === 1) {
+          // Discard and close
+          hasUnsavedChanges = false
+          mainWindow?.close()
+        }
+        // response === 2: Cancel, do nothing
+      })
+    }
   })
 
   mainWindow.on('closed', () => {
@@ -142,7 +174,9 @@ function registerIpcHandlers() {
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
       filters: [
-        { name: 'Videos', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm'] }
+        { name: 'All Media', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'] },
+        { name: 'Videos', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm'] },
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'] }
       ]
     })
 
@@ -170,8 +204,10 @@ function registerIpcHandlers() {
   })
 
   // Get the application root directory
+  // In production, Python scripts are in resources/ directory (extraResources)
+  // In development, they're in the project root
   const appRoot = app.isPackaged
-    ? join(process.resourcesPath, 'app')
+    ? process.resourcesPath
     : join(__dirname, '..')
 
   // Video processing handlers
@@ -257,10 +293,14 @@ function registerIpcHandlers() {
   // AudioCraft integration (Python bridge)
   ipcMain.handle('audiocraft:generate', async (_, prompt: string, duration: number, modelType: string = 'audiogen') => {
     return new Promise((resolve, reject) => {
-      const pythonScript = join(appRoot, 'python', 'audiocraft_generator.py')
+      // In production, use compiled .pyc files; in development, use .py
+      const scriptName = app.isPackaged ? 'audiocraft_generator.pyc' : 'audiocraft_generator.py'
+      const pythonScript = join(appRoot, 'python', scriptName)
       const outputPath = join(app.getPath('temp'), `sfx-${Date.now()}.wav`)
-      // Use venv python
-      const pythonPath = join(appRoot, 'venv', 'bin', 'python')
+      // Use venv python (platform-specific paths)
+      const pythonPath = process.platform === 'win32'
+        ? join(appRoot, 'venv', 'Scripts', 'python.exe')
+        : join(appRoot, 'venv', 'bin', 'python')
 
       const modelName = modelType === 'musicgen' ? 'MusicGen' : 'AudioGen'
       console.log(`Starting ${modelName} generation:`, { prompt, duration, outputPath, modelType })
@@ -342,9 +382,13 @@ function registerIpcHandlers() {
   // AI analysis handler (video understanding)
   ipcMain.handle('ai:analyzeVideo', async (_, videoPath: string, audioPath: string) => {
     return new Promise((resolve, reject) => {
-      const pythonScript = join(appRoot, 'python', 'video_analyzer.py')
-      // Use venv python
-      const pythonPath = join(appRoot, 'venv', 'bin', 'python')
+      // In production, use compiled .pyc files; in development, use .py
+      const scriptName = app.isPackaged ? 'video_analyzer.pyc' : 'video_analyzer.py'
+      const pythonScript = join(appRoot, 'python', scriptName)
+      // Use venv python (platform-specific paths)
+      const pythonPath = process.platform === 'win32'
+        ? join(appRoot, 'venv', 'Scripts', 'python.exe')
+        : join(appRoot, 'venv', 'bin', 'python')
 
       console.log('Analyzing video with:', { pythonPath, pythonScript, videoPath, audioPath })
 
@@ -408,9 +452,20 @@ function registerIpcHandlers() {
   })
 
   // Render final video
-  ipcMain.handle('video:render', async (_, options: RenderOptions) => {
-    return new Promise((resolve, reject) => {
+  ipcMain.handle('video:render', async (event, options: RenderOptions) => {
+    return new Promise(async (resolve, reject) => {
       const { videoPath, outputPath, subtitles, sfxTracks, overlays } = options
+
+      console.log('Starting video render:', { videoPath, outputPath })
+
+      // Get video duration for progress calculation
+      let videoDuration = 0
+      try {
+        const metadata = await getVideoMetadata(videoPath)
+        videoDuration = parseFloat(metadata.format.duration)
+      } catch (err) {
+        console.error('Failed to get video metadata:', err)
+      }
 
       // Build complex FFmpeg command with filters
       const ffmpegArgs = buildRenderCommand(videoPath, outputPath, {
@@ -419,19 +474,95 @@ function registerIpcHandlers() {
         overlays
       })
 
+      console.log('FFmpeg command:', 'ffmpeg', ffmpegArgs.join(' '))
+
       const ffmpeg = spawn('ffmpeg', ffmpegArgs)
 
-      ffmpeg.on('close', (code) => {
-        if (code === 0) {
-          resolve(outputPath)
-        } else {
-          reject(new Error(`Render failed with code ${code}`))
+      let ffmpegOutput = ''
+
+      // Parse FFmpeg progress output
+      ffmpeg.stderr.on('data', (data: Buffer) => {
+        const output = data.toString()
+        ffmpegOutput += output
+
+        // Parse progress from FFmpeg output
+        // Example: frame=  123 fps= 25 q=28.0 size=    1024kB time=00:00:05.00 bitrate=1677.7kbits/s speed=1.2x
+        const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2}\.\d{2})/)
+        if (timeMatch && videoDuration > 0) {
+          const hours = parseInt(timeMatch[1])
+          const minutes = parseInt(timeMatch[2])
+          const seconds = parseFloat(timeMatch[3])
+          const currentTime = hours * 3600 + minutes * 60 + seconds
+
+          const progress = Math.min(100, (currentTime / videoDuration) * 100)
+
+          // Send progress to renderer
+          event.sender.send('render-progress', {
+            progress: progress.toFixed(1),
+            currentTime,
+            totalTime: videoDuration
+          })
+        }
+
+        // Also check for speed and ETA
+        const speedMatch = output.match(/speed=\s*(\d+\.?\d*)x/)
+        if (speedMatch) {
+          const speed = parseFloat(speedMatch[1])
+          event.sender.send('render-speed', { speed })
         }
       })
 
-      ffmpeg.on('error', reject)
+      ffmpeg.on('close', (code) => {
+        if (code === 0) {
+          console.log('Render completed successfully')
+          event.sender.send('render-progress', { progress: 100 })
+          resolve(outputPath)
+        } else {
+          console.error('Render failed with code:', code)
+          console.error('FFmpeg output:', ffmpegOutput)
+          reject(new Error(`Render failed with code ${code}. Check console for details.`))
+        }
+      })
+
+      ffmpeg.on('error', (err) => {
+        console.error('FFmpeg error:', err)
+        reject(err)
+      })
     })
   })
+
+  // Helper function to get video metadata
+  async function getVideoMetadata(videoPath: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const ffprobe = spawn('ffprobe', [
+        '-v', 'quiet',
+        '-print_format', 'json',
+        '-show_format',
+        '-show_streams',
+        videoPath
+      ])
+
+      let output = ''
+      ffprobe.stdout.on('data', (data) => {
+        output += data.toString()
+      })
+
+      ffprobe.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const metadata = JSON.parse(output)
+            resolve(metadata)
+          } catch (err) {
+            reject(err)
+          }
+        } else {
+          reject(new Error(`FFprobe exited with code ${code}`))
+        }
+      })
+
+      ffprobe.on('error', reject)
+    })
+  }
 
   // Project management handlers
   ipcMain.handle('project:create', async (_, options: { projectName: string; projectPath: string; videoPath: string }) => {
@@ -625,6 +756,16 @@ function registerIpcHandlers() {
       return { success: false, error: error.message }
     }
   })
+
+  // Unsaved changes tracking
+  ipcMain.handle('app:setUnsavedChanges', async (_, hasChanges: boolean) => {
+    hasUnsavedChanges = hasChanges
+    return true
+  })
+
+  ipcMain.handle('app:getUnsavedChanges', async () => {
+    return hasUnsavedChanges
+  })
 }
 
 interface RenderOptions {
@@ -641,28 +782,169 @@ function buildRenderCommand(
   options: Omit<RenderOptions, 'videoPath' | 'outputPath'>
 ): string[] {
   const args = ['-i', videoPath]
+  let inputIndex = 1
 
   // Add SFX tracks as additional inputs
+  const sfxInputs: Array<{ index: number; start: number; path: string }> = []
   options.sfxTracks?.forEach(sfx => {
     args.push('-i', sfx.path)
+    sfxInputs.push({ index: inputIndex, start: sfx.start, path: sfx.path })
+    inputIndex++
   })
 
-  // Build filter complex for overlays and mixing audio
-  const filters: string[] = []
+  // Add media overlay inputs (images/videos)
+  const overlayInputs: Array<{ index: number; overlay: any }> = []
+  options.overlays?.forEach(overlay => {
+    if (overlay.mediaPath) {
+      args.push('-i', overlay.mediaPath)
+      overlayInputs.push({ index: inputIndex, overlay })
+      inputIndex++
+    }
+  })
 
-  if (options.sfxTracks && options.sfxTracks.length > 0) {
-    // Mix audio tracks
-    const audioInputs = options.sfxTracks.map((_, i) => `[${i + 1}:a]`).join('')
-    filters.push(`[0:a]${audioInputs}amix=inputs=${options.sfxTracks.length + 1}[aout]`)
+  // Build filter complex for video, subtitles, overlays, and audio mixing
+  const filters: string[] = []
+  let videoLabel = '[0:v]'
+
+  // 1. Burn subtitles into video
+  if (options.subtitles && options.subtitles.length > 0) {
+    const subtitleFilter = buildSubtitleFilter(options.subtitles)
+    filters.push(`${videoLabel}${subtitleFilter}[v_sub]`)
+    videoLabel = '[v_sub]'
   }
 
+  // 2. Apply media overlays (images/videos with transforms)
+  if (overlayInputs.length > 0) {
+    overlayInputs.forEach((input, idx) => {
+      const overlay = input.overlay
+      const overlayFilter = buildOverlayFilter(input.index, overlay)
+      const outputLabel = idx === overlayInputs.length - 1 ? '[vout]' : `[v_overlay_${idx}]`
+      filters.push(`${videoLabel}[${input.index}:v]${overlayFilter}${outputLabel}`)
+      videoLabel = outputLabel
+    })
+  } else {
+    // No overlays, just rename the video stream
+    if (videoLabel !== '[0:v]') {
+      filters.push(`${videoLabel}copy[vout]`)
+    } else {
+      videoLabel = '[vout]'
+      filters.push(`[0:v]copy[vout]`)
+    }
+  }
+
+  // 3. Mix audio tracks (original + SFX with timing)
+  if (sfxInputs.length > 0) {
+    const audioFilter = buildAudioMixFilter(sfxInputs)
+    filters.push(`[0:a]${audioFilter}[aout]`)
+  } else {
+    // No SFX, just copy original audio
+    filters.push('[0:a]copy[aout]')
+  }
+
+  // Apply all filters
   if (filters.length > 0) {
     args.push('-filter_complex', filters.join(';'))
-    args.push('-map', '0:v')
+    args.push('-map', '[vout]')
     args.push('-map', '[aout]')
+  } else {
+    // No filters, just copy streams
+    args.push('-map', '0:v')
+    args.push('-map', '0:a')
   }
 
-  args.push('-c:v', 'libx264', '-c:a', 'aac', '-y', outputPath)
+  // Output encoding settings
+  args.push(
+    '-c:v', 'libx264',      // H.264 video codec
+    '-preset', 'medium',     // Encoding speed/quality balance
+    '-crf', '23',            // Quality (lower = better, 18-28 range)
+    '-c:a', 'aac',           // AAC audio codec
+    '-b:a', '192k',          // Audio bitrate
+    '-movflags', '+faststart', // Enable streaming
+    '-y',                    // Overwrite output file
+    outputPath
+  )
 
   return args
+}
+
+// Build subtitle filter (burn subtitles into video)
+function buildSubtitleFilter(subtitles: Array<{ text: string; start: number; end: number; style?: any }>): string {
+  // Escape text for FFmpeg drawtext filter
+  const escapeText = (text: string): string => {
+    return text
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/:/g, '\\:')
+      .replace(/\n/g, '\\n')
+  }
+
+  // Build drawtext filter for each subtitle with enable condition
+  const drawTextFilters = subtitles.map((sub, idx) => {
+    const escapedText = escapeText(sub.text)
+    const style = sub.style || {}
+
+    const fontFile = style.fontFamily ? `fontfile='${style.fontFamily}'` : ''
+    const fontSize = style.fontSize || 24
+    const fontColor = style.color || 'white'
+    const borderColor = style.borderColor || 'black'
+    const borderWidth = style.borderWidth || 2
+
+    // Position (default: bottom center)
+    const x = style.x !== undefined ? style.x : '(w-text_w)/2'
+    const y = style.y !== undefined ? style.y : 'h-th-50'
+
+    return `drawtext=${fontFile ? fontFile + ':' : ''}text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${x}:y=${y}:enable='between(t,${sub.start},${sub.end})'`
+  }).join(',')
+
+  return drawTextFilters
+}
+
+// Build overlay filter for media overlays (images/videos)
+function buildOverlayFilter(overlayInputIndex: number, overlay: any): string {
+  const x = overlay.x || 0
+  const y = overlay.y || 0
+  const width = overlay.width || -1  // -1 means keep aspect ratio
+  const height = overlay.height || -1
+  const opacity = overlay.opacity !== undefined ? overlay.opacity : 1
+  const start = overlay.start || 0
+  const end = overlay.end || 999999
+
+  // Scale and position overlay
+  let filter = `[${overlayInputIndex}:v]`
+
+  // Apply transforms (scale, opacity)
+  if (width !== -1 || height !== -1) {
+    filter += `scale=${width}:${height},`
+  }
+
+  if (opacity < 1) {
+    filter += `format=yuva420p,colorchannelmixer=aa=${opacity},`
+  }
+
+  // Apply rotation if specified
+  if (overlay.rotation) {
+    filter += `rotate=${overlay.rotation * Math.PI / 180}:c=none,`
+  }
+
+  // Remove trailing comma
+  filter = filter.replace(/,$/, '')
+  filter += `[ovr];`
+
+  // Overlay onto main video with timing
+  return `[ovr]overlay=x=${x}:y=${y}:enable='between(t,${start},${end})'`
+}
+
+// Build audio mix filter with timing (delayed audio for SFX)
+function buildAudioMixFilter(sfxInputs: Array<{ index: number; start: number; path: string }>): string {
+  // Delay each SFX track to match its start time
+  const delayedTracks = sfxInputs.map((sfx, idx) => {
+    const delayMs = Math.floor(sfx.start * 1000)
+    return `[${sfx.index}:a]adelay=${delayMs}|${delayMs}[sfx${idx}]`
+  })
+
+  // Mix all tracks together
+  const mixInputs = ['[0:a]', ...sfxInputs.map((_, idx) => `[sfx${idx}]`)].join('')
+  const mixFilter = `${mixInputs}amix=inputs=${sfxInputs.length + 1}:duration=longest:dropout_transition=2`
+
+  return delayedTracks.join(';') + ';' + mixFilter
 }

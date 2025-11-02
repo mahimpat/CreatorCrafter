@@ -116,6 +116,88 @@
   color: #fff;
 }
 
+/* Timeline Toolbar */
+.timeline-toolbar {
+  height: 48px;
+  background: #252525;
+  border-bottom: 1px solid #3a3a3a;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #333;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #ccc;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background: #3a3a3a;
+  border-color: #555;
+  color: #fff;
+}
+
+.toolbar-btn:active:not(:disabled) {
+  background: #2a2a2a;
+  transform: translateY(1px);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-btn.active {
+  background: #4fc3f7;
+  border-color: #4fc3f7;
+  color: #fff;
+}
+
+.toolbar-btn.active:hover {
+  background: #29b6f6;
+  border-color: #29b6f6;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #3a3a3a;
+}
+
+.toolbar-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #888;
+  font-size: 12px;
+  padding: 6px 12px;
+  background: #2a2a2a;
+  border-radius: 6px;
+}
+
+.toolbar-hint {
+  font-style: italic;
+}
+
 /* Timeline Main */
 .timeline-main {
   flex: 1;
@@ -134,6 +216,16 @@
   border-right: 1px solid #3a3a3a;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.timeline-labels-spacer {
+  height: 40px;
+  min-height: 40px;
+  flex-shrink: 0;
+  background: #252525;
+  border-bottom: 1px solid #3a3a3a;
 }
 
 .track-label {
@@ -166,7 +258,7 @@
 .timeline-scroll-area {
   flex: 1;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   background: #1a1a1a;
 }
 
@@ -433,7 +525,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 8px;
+  width: 12px;
   background: transparent;
   z-index: 10;
   cursor: ew-resize;
@@ -576,6 +668,21 @@
   background: linear-gradient(135deg, #ab47bc, #9c27b0);
 }
 
+/* Media Overlay Items */
+.media-overlay-item {
+  background: linear-gradient(135deg, #9c27b0, #e91e63);
+  border-color: #880e4f;
+}
+
+.media-overlay-item:hover {
+  background: linear-gradient(135deg, #ab47bc, #f06292);
+}
+
+/* Media Overlay Track */
+.media-overlay-track {
+  min-height: 80px;
+}
+
 /* SFX Suggestions */
 .sfx-suggestion {
   position: absolute;
@@ -609,21 +716,26 @@
 }
 
 /* Scrollbar Styling */
-.timeline-scroll-area::-webkit-scrollbar {
+.timeline-scroll-area::-webkit-scrollbar,
+.timeline-labels::-webkit-scrollbar {
+  width: 12px;
   height: 12px;
 }
 
-.timeline-scroll-area::-webkit-scrollbar-track {
+.timeline-scroll-area::-webkit-scrollbar-track,
+.timeline-labels::-webkit-scrollbar-track {
   background: #2a2a2a;
 }
 
-.timeline-scroll-area::-webkit-scrollbar-thumb {
+.timeline-scroll-area::-webkit-scrollbar-thumb,
+.timeline-labels::-webkit-scrollbar-thumb {
   background: #555;
   border-radius: 6px;
   border: 2px solid #2a2a2a;
 }
 
-.timeline-scroll-area::-webkit-scrollbar-thumb:hover {
+.timeline-scroll-area::-webkit-scrollbar-thumb:hover,
+.timeline-labels::-webkit-scrollbar-thumb:hover {
   background: #666;
 }
 
@@ -646,4 +758,71 @@
   .timeline-tools {
     gap: 8px;
   }
+}
+
+/* Delete Button Drop Zone */
+.delete-drop-zone {
+  transition: all 0.3s ease !important;
+  position: relative;
+  overflow: visible;
+}
+
+/* When dragging (ready to receive) */
+.delete-drop-zone.drop-ready {
+  background: #3a3a3a !important;
+  border-color: #666 !important;
+  animation: pulse-border 1.5s ease-in-out infinite;
+}
+
+/* When hovering over button while dragging */
+.delete-drop-zone.drop-active {
+  background: #ff4444 !important;
+  border-color: #ff6666 !important;
+  color: #fff !important;
+  transform: scale(1.1) !important;
+  box-shadow: 0 4px 20px rgba(255, 68, 68, 0.5) !important;
+  animation: none;
+}
+
+.delete-drop-zone.drop-active svg {
+  animation: shake-icon 0.5s ease infinite;
+}
+
+/* Pulse border animation for ready state */
+@keyframes pulse-border {
+  0%, 100% {
+    border-color: #666;
+    box-shadow: 0 0 0 rgba(255, 68, 68, 0);
+  }
+  50% {
+    border-color: #ff6666;
+    box-shadow: 0 0 12px rgba(255, 68, 68, 0.4);
+  }
+}
+
+/* Shake icon animation */
+@keyframes shake-icon {
+  0%, 100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  25% {
+    transform: translateX(-3px) rotate(-5deg);
+  }
+  75% {
+    transform: translateX(3px) rotate(5deg);
+  }
+}
+
+/* Track item dragging states */
+.track-item {
+  cursor: grab;
+}
+
+.track-item:active {
+  cursor: grabbing;
+}
+
+.track-item.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
 }

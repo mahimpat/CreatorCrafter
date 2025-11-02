@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // AI/ML APIs
   analyzeVideo: (videoPath: string, audioPath: string) =>
     ipcRenderer.invoke('ai:analyzeVideo', videoPath, audioPath),
-  generateSFX: (prompt: string, duration: number, modelType?: string) =>
+  generateSFX: (prompt: string, duration: number, modelType?: 'audiogen' | 'musicgen') =>
     ipcRenderer.invoke('audiocraft:generate', prompt, duration, modelType || 'audiogen'),
 
   // File system APIs
@@ -38,7 +38,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('project:getRecent'),
   removeRecentProject: (projectPath: string) =>
     ipcRenderer.invoke('project:removeRecent', projectPath),
-  copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports') =>
+  copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports' | 'audio' | 'music') =>
     ipcRenderer.invoke('project:copyAsset', sourcePath, projectPath, assetType),
   resolveProjectPath: (projectPath: string, relativePath: string) =>
     ipcRenderer.invoke('project:resolvePath', projectPath, relativePath),
@@ -61,7 +61,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
   freesoundGetSound: (soundId: number) =>
     ipcRenderer.invoke('freesound:getSound', soundId),
   freesoundDownloadPreview: (previewUrl: string, outputPath: string) =>
-    ipcRenderer.invoke('freesound:downloadPreview', previewUrl, outputPath)
+    ipcRenderer.invoke('freesound:downloadPreview', previewUrl, outputPath),
+
+  // App state management
+  setUnsavedChanges: (hasChanges: boolean) =>
+    ipcRenderer.invoke('app:setUnsavedChanges', hasChanges),
+  getUnsavedChanges: () =>
+    ipcRenderer.invoke('app:getUnsavedChanges')
+})
+
+// Expose electron object for IPC event listeners (needed for progress tracking)
+contextBridge.exposeInMainWorld('electron', {
+  ipcRenderer: {
+    on: (channel: string, func: (...args: any[]) => void) => {
+      const validChannels = ['render-progress', 'render-speed']
+      if (validChannels.includes(channel)) {
+        ipcRenderer.on(channel, func)
+      }
+    },
+    removeListener: (channel: string, func: (...args: any[]) => void) => {
+      const validChannels = ['render-progress', 'render-speed']
+      if (validChannels.includes(channel)) {
+        ipcRenderer.removeListener(channel, func)
+      }
+    }
+  }
 })
 
 // Type definitions for window.electronAPI
@@ -84,7 +108,7 @@ export interface ElectronAPI {
   openProjectFile: () => Promise<string | null>
   getRecentProjects: () => Promise<any[]>
   removeRecentProject: (projectPath: string) => Promise<boolean>
-  copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports') => Promise<string>
+  copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports' | 'audio' | 'music') => Promise<string>
   resolveProjectPath: (projectPath: string, relativePath: string) => Promise<string>
   getProjectSFXFiles: (projectPath: string) => Promise<string[]>
   getProjectExports: (projectPath: string) => Promise<string[]>
@@ -97,6 +121,10 @@ export interface ElectronAPI {
   freesoundSearch: (params: any) => Promise<{ success: boolean; results?: any; error?: string }>
   freesoundGetSound: (soundId: number) => Promise<{ success: boolean; sound?: any; error?: string }>
   freesoundDownloadPreview: (previewUrl: string, outputPath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
+
+  // App state management
+  setUnsavedChanges: (hasChanges: boolean) => Promise<boolean>
+  getUnsavedChanges: () => Promise<boolean>
 }
 
 export interface VideoMetadata {
@@ -124,7 +152,10 @@ export interface VideoAnalysis {
   suggestedSFX: Array<{
     timestamp: number
     prompt: string
-    reason: string
+    reason?: string
+    visual_context?: string
+    action_context?: string
+    confidence?: number
   }>
   transcription: Array<{
     text: string
@@ -145,5 +176,11 @@ export interface RenderOptions {
 declare global {
   interface Window {
     electronAPI: ElectronAPI
+    electron: {
+      ipcRenderer: {
+        on: (channel: string, func: (...args: any[]) => void) => void
+        removeListener: (channel: string, func: (...args: any[]) => void) => void
+      }
+    }
   }
 }

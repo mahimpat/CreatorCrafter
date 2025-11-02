@@ -1,13 +1,15 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback, memo } from 'react'
 import { useProject } from '../context/ProjectContext'
 import { Play, Pause, Volume2, VolumeX } from 'lucide-react'
+import MediaOverlayCanvas from './MediaOverlayCanvas'
 import './VideoPlayer.css'
 
-export default function VideoPlayer() {
+function VideoPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const sfxAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map())
   const {
     videoPath,
+    videoMetadata,
     currentTime,
     setCurrentTime,
     setDuration,
@@ -22,6 +24,17 @@ export default function VideoPlayer() {
   const [isMuted, setIsMuted] = useState(false)
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null)
   const [activeOverlays, setActiveOverlays] = useState<string[]>([])
+  const [videoDimensions, setVideoDimensions] = useState({ width: 1920, height: 1080 })
+
+  // Get video dimensions from metadata
+  useEffect(() => {
+    if (videoMetadata?.streams) {
+      const videoStream = videoMetadata.streams.find((s: any) => s.codec_type === 'video')
+      if (videoStream && videoStream.width && videoStream.height) {
+        setVideoDimensions({ width: videoStream.width, height: videoStream.height })
+      }
+    }
+  }, [videoMetadata])
 
   useEffect(() => {
     const video = videoRef.current
@@ -184,21 +197,21 @@ export default function VideoPlayer() {
     }
   }, [])
 
-  const togglePlayPause = () => {
+  const togglePlayPause = useCallback(() => {
     setIsPlaying(!isPlaying)
-  }
+  }, [isPlaying, setIsPlaying])
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     setIsMuted(!isMuted)
-  }
+  }, [isMuted])
 
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newVolume = parseFloat(e.target.value)
     setVolume(newVolume)
     if (newVolume > 0 && isMuted) {
       setIsMuted(false)
     }
-  }
+  }, [isMuted])
 
   const activeSubtitleData = subtitles.find(sub => sub.id === activeSubtitle)
   const activeOverlayData = textOverlays.filter(overlay => activeOverlays.includes(overlay.id))
@@ -253,6 +266,13 @@ export default function VideoPlayer() {
                 <span className="sfx-count">{activeSfxTracks.length} SFX</span>
               </div>
             )}
+
+            {/* Media Overlay Canvas */}
+            <MediaOverlayCanvas
+              videoRef={videoRef}
+              videoWidth={videoDimensions.width}
+              videoHeight={videoDimensions.height}
+            />
           </>
         )}
       </div>
@@ -280,3 +300,6 @@ export default function VideoPlayer() {
     </div>
   )
 }
+
+// Memoize VideoPlayer to prevent unnecessary re-renders
+export default memo(VideoPlayer)
