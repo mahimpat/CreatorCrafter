@@ -104,6 +104,7 @@ export default function SFXEditor() {
     reason?: string;
     visual_context?: string;
     action_context?: string;
+    confidence?: number;
   }) => {
     try {
       setIsGenerating(true)

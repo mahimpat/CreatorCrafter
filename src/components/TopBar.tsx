@@ -1,9 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useProject } from '../context/ProjectContext'
 import { Search, Save, Upload } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { getUserFriendlyError } from '../utils/errorMessages'
 import './TopBar.css'
 
-export default function TopBar() {
+interface TopBarProps {
+  onExport?: () => void
+}
+
+export default function TopBar({ onExport }: TopBarProps) {
   const {
     videoPath,
     setIsAnalyzing,
@@ -21,7 +27,6 @@ export default function TopBar() {
     closeProject
   } = useProject()
 
-  const [isExporting, setIsExporting] = useState(false)
   const [showFileMenu, setShowFileMenu] = useState(false)
   const fileMenuRef = useRef<HTMLDivElement>(null)
 
@@ -70,9 +75,10 @@ export default function TopBar() {
 
     try {
       await saveProject()
+      toast.success('Project saved successfully')
     } catch (error) {
       console.error('Error saving project:', error)
-      alert('Failed to save project. Please try again.')
+      toast.error(getUserFriendlyError(error))
     }
   }
 
@@ -84,11 +90,13 @@ export default function TopBar() {
       const location = await window.electronAPI.openProjectFolder()
       if (!location) return
 
+      const loadingToast = toast.loading('Saving project...')
       await saveProjectAs(name, location)
-      alert('Project saved successfully!')
+      toast.dismiss(loadingToast)
+      toast.success('Project saved successfully!')
     } catch (error) {
       console.error('Error saving project as:', error)
-      alert('Failed to save project. Please try again.')
+      toast.error(getUserFriendlyError(error))
     }
   }
 
@@ -108,6 +116,8 @@ export default function TopBar() {
   const handleAnalyzeVideo = async () => {
     if (!videoPath) return
 
+    const loadingToast = toast.loading('Analyzing video... This may take a few minutes.')
+
     try {
       setIsAnalyzing(true)
 
@@ -121,6 +131,8 @@ export default function TopBar() {
         // Check if it's specifically a "no audio track" error
         if (audioError?.message?.includes('no audio track')) {
           console.log('Video has no audio - proceeding with visual-only analysis')
+          toast.dismiss(loadingToast)
+          toast.loading('Video has no audio - performing visual-only analysis...')
           // Continue without audio - visual analysis will still work
         } else {
           // Other FFmpeg errors should stop the process
@@ -132,65 +144,27 @@ export default function TopBar() {
       const analysis = await window.electronAPI.analyzeVideo(videoPath, audioPath)
 
       setAnalysis(analysis)
+      toast.dismiss(loadingToast)
+      toast.success('Video analyzed successfully!')
     } catch (error) {
       console.error('Error analyzing video:', error)
-      alert('Failed to analyze video. Please make sure Python and required dependencies are installed.')
+      toast.dismiss(loadingToast)
+      toast.error(getUserFriendlyError(error), {
+        duration: 6000,
+      })
     } finally {
       setIsAnalyzing(false)
     }
   }
 
-  const handleExport = async () => {
+  const handleExport = () => {
     if (!videoPath) return
-
-    try {
-      setIsExporting(true)
-
-      const outputPath = await window.electronAPI.saveFileDialog('output.mp4')
-
-      if (outputPath) {
-        await window.electronAPI.renderVideo({
-          videoPath,
-          outputPath,
-          subtitles: subtitles.map(s => ({
-            text: s.text,
-            start: s.start,
-            end: s.end
-          })),
-          sfxTracks: sfxTracks.map(sfx => ({
-            path: sfx.path,
-            start: sfx.start
-          })),
-          overlays: textOverlays.map(o => ({
-            text: o.text,
-            start: o.start,
-            end: o.end,
-            style: o.style
-          }))
-        })
-
-        // Copy exported video to project exports folder if project exists
-        if (projectPath) {
-          try {
-            await window.electronAPI.copyAssetToProject(outputPath, projectPath, 'exports')
-          } catch (err) {
-            console.error('Failed to copy export to project:', err)
-          }
-        }
-
-        alert('Video exported successfully!')
-      }
-    } catch (error) {
-      console.error('Error exporting video:', error)
-      alert('Failed to export video. Please try again.')
-    } finally {
-      setIsExporting(false)
-    }
+    onExport?.()
   }
 
   const handleExportSubtitles = async () => {
     if (subtitles.length === 0) {
-      alert('No subtitles to export')
+      toast.error('No subtitles to export')
       return
     }
 
@@ -198,6 +172,8 @@ export default function TopBar() {
       const outputPath = await window.electronAPI.saveFileDialog('subtitles.srt')
 
       if (outputPath) {
+        const loadingToast = toast.loading('Exporting subtitles...')
+
         // Convert subtitles to SRT format
         const srtContent = subtitles
           .map((sub, index) => {
@@ -208,11 +184,12 @@ export default function TopBar() {
           .join('\n')
 
         await window.electronAPI.writeFile(outputPath, srtContent)
-        alert('Subtitles exported successfully!')
+        toast.dismiss(loadingToast)
+        toast.success('Subtitles exported successfully!')
       }
     } catch (error) {
       console.error('Error exporting subtitles:', error)
-      alert('Failed to export subtitles. Please try again.')
+      toast.error(getUserFriendlyError(error))
     }
   }
 
@@ -321,10 +298,10 @@ export default function TopBar() {
         <button
           className="btn-primary"
           onClick={handleExport}
-          disabled={isExporting}
+          disabled={!videoPath}
         >
           <Upload size={16} />
-          <span>{isExporting ? 'Exporting...' : 'Export Video'}</span>
+          <span>Export Video</span>
         </button>
       </div>
     </div>

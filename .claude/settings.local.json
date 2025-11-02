@@ -7,7 +7,8 @@
       "Read(//tmp/audiocraft/**)",
       "Bash(sudo apt-get install:*)",
       "Bash(killall:*)",
-      "Bash(npm run electron:dev:*)"
+      "Bash(npm run electron:dev:*)",
+      "Bash(npx vite build:*)"
     ],
     "deny": [],
     "ask": []

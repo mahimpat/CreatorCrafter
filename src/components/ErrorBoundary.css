@@ -1,0 +1,145 @@
+.error-boundary {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  padding: 20px;
+}
+
+.error-boundary-content {
+  max-width: 600px;
+  background: #2a2a2a;
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.error-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+}
+
+.error-boundary h1 {
+  margin: 0 0 12px 0;
+  font-size: 28px;
+  color: #fff;
+}
+
+.error-message {
+  color: #ccc;
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0 0 24px 0;
+}
+
+.error-details {
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 24px 0;
+  text-align: left;
+}
+
+.error-details summary {
+  color: #4a9eff;
+  cursor: pointer;
+  font-weight: 500;
+  user-select: none;
+}
+
+.error-details summary:hover {
+  text-decoration: underline;
+}
+
+.error-stack {
+  margin-top: 12px;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.error-stack pre {
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 12px;
+  overflow-x: auto;
+  margin-top: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #f87171;
+}
+
+.error-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin: 24px 0;
+}
+
+.error-actions .btn-primary,
+.error-actions .btn-secondary {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.error-actions .btn-primary {
+  background: #4a9eff;
+  color: #fff;
+}
+
+.error-actions .btn-primary:hover {
+  background: #3a8eef;
+}
+
+.error-actions .btn-secondary {
+  background: transparent;
+  color: #999;
+  border: 1px solid #3a3a3a;
+}
+
+.error-actions .btn-secondary:hover {
+  background: #3a3a3a;
+  color: #fff;
+}
+
+.error-help {
+  text-align: left;
+  background: #1a1a2a;
+  border: 1px solid #3a3a4a;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 24px;
+}
+
+.error-help p {
+  margin: 0 0 12px 0;
+  color: #ccc;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.error-help ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.error-help li {
+  margin-bottom: 4px;
+}

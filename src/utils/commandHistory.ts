@@ -12,7 +12,7 @@ export interface Command {
 export class CommandHistory {
   private history: Command[] = []
   private currentIndex: number = -1
-  private maxHistory: number = 20 // Limit history to prevent memory issues
+  private maxHistory: number = 50 // Limit history to prevent memory issues (increased from 20)
 
   /**
    * Execute a command and add it to history

@@ -1,4 +1,4 @@
-import { Subtitle, SFXTrack, TextOverlay, VideoAnalysisResult } from '../context/ProjectContext'
+import { Subtitle, SFXTrack, TextOverlay, VideoAnalysisResult, VideoClip, VideoTimelineClip, MediaOverlayAsset, MediaOverlay } from '../context/ProjectContext'
 import { ProjectFile, PROJECT_VERSION, ProjectSFXTrack } from '../types/project'
 
 // Browser-compatible path utilities (no Node.js path module)
@@ -44,6 +44,10 @@ export function serializeProject(
     subtitles: Subtitle[]
     sfxTracks: SFXTrack[]
     textOverlays: TextOverlay[]
+    videoClips?: VideoClip[]
+    videoTimelineClips?: VideoTimelineClip[]
+    mediaOverlayAssets?: MediaOverlayAsset[]
+    mediaOverlays?: MediaOverlay[]
     analysis: VideoAnalysisResult | null
   },
   createdAt?: string
@@ -94,8 +98,12 @@ export function serializeProject(
     subtitles: state.subtitles,
     sfxTracks: projectSFXTracks,
     textOverlays: state.textOverlays,
+    videoClips: state.videoClips,
+    videoTimelineClips: state.videoTimelineClips,
+    mediaOverlayAssets: state.mediaOverlayAssets,
+    mediaOverlays: state.mediaOverlays,
     analysis: state.analysis
-  }
+  } as ProjectFile
 }
 
 /**
@@ -114,6 +122,10 @@ export function deserializeProject(
   sfxTracks: SFXTrack[]
   sfxLibrary?: any[]
   textOverlays: TextOverlay[]
+  videoClips?: VideoClip[]
+  videoTimelineClips?: VideoTimelineClip[]
+  mediaOverlayAssets?: MediaOverlayAsset[]
+  mediaOverlays?: MediaOverlay[]
   analysis: VideoAnalysisResult | null
   createdAt: string
   lastModified: string
@@ -164,6 +176,10 @@ export function deserializeProject(
     subtitles: projectFile.subtitles,
     sfxTracks,
     textOverlays: projectFile.textOverlays,
+    videoClips: (projectFile as any).videoClips || [],
+    videoTimelineClips: (projectFile as any).videoTimelineClips || [],
+    mediaOverlayAssets: (projectFile as any).mediaOverlayAssets || [],
+    mediaOverlays: (projectFile as any).mediaOverlays || [],
     analysis: projectFile.analysis,
     createdAt: projectFile.createdAt,
     lastModified: projectFile.lastModified

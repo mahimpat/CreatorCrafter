@@ -1,0 +1,28 @@
+# Windows-optimized requirements for CreatorCrafter
+# This file avoids xformers compilation issues
+
+# Install PyTorch FIRST using this command:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Core dependencies (prefer binary wheels)
+--prefer-binary
+numpy>=1.24.0,<2.0.0
+scipy>=1.11.0
+Pillow>=10.0.0
+
+# Video Processing
+opencv-python>=4.8.0
+
+# AI/ML Models
+transformers>=4.30.0
+openai-whisper>=20231117
+
+# Audio Processing
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# Scene Detection
+scenedetect[opencv]>=0.6.0
+
+# AudioCraft (install last, may show xformers warning - ignore it)
+audiocraft>=1.0.0

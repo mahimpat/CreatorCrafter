@@ -5,8 +5,12 @@ import VideoPlayer from './VideoPlayer'
 import Timeline from './Timeline'
 import SidePanel from './SidePanel'
 import ProjectManager from './ProjectManager'
+import MediaBin from './MediaBin'
+import OverlayLibrary from './OverlayLibrary'
+import MediaOverlayProperties from './MediaOverlayProperties'
 import TopBar from './TopBar'
 import AnalysisPanel from './AnalysisPanel'
+import ExportDialog from './ExportDialog'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import './VideoEditor.css'
 
@@ -14,19 +18,40 @@ export default function VideoEditor() {
   const { isAnalyzing } = useProject()
   const [selectedTool, setSelectedTool] = useState<'subtitles' | 'sfx' | 'overlays'>('subtitles')
   const [isAssetsOpen, setIsAssetsOpen] = useState(true)
+  const [leftPanelTab, setLeftPanelTab] = useState<'project' | 'media' | 'overlays'>('media')
+  const [showExportDialog, setShowExportDialog] = useState(false)
 
   // Enable auto-save
   useAutoSave()
 
   return (
     <div className="video-editor">
-      <TopBar />
+      <TopBar onExport={() => setShowExportDialog(true)} />
 
       <div className="editor-main">
         {/* Left Sidebar - Assets Panel */}
         <div className={`editor-left-sidebar ${isAssetsOpen ? 'open' : 'collapsed'}`}>
           <div className="left-sidebar-header">
-            <h3>Project Assets</h3>
+            <div className="left-sidebar-tabs">
+              <button
+                className={`tab-btn ${leftPanelTab === 'media' ? 'active' : ''}`}
+                onClick={() => setLeftPanelTab('media')}
+              >
+                Media
+              </button>
+              <button
+                className={`tab-btn ${leftPanelTab === 'overlays' ? 'active' : ''}`}
+                onClick={() => setLeftPanelTab('overlays')}
+              >
+                Overlays
+              </button>
+              <button
+                className={`tab-btn ${leftPanelTab === 'project' ? 'active' : ''}`}
+                onClick={() => setLeftPanelTab('project')}
+              >
+                Project
+              </button>
+            </div>
             <button
               className="collapse-btn"
               onClick={() => setIsAssetsOpen(!isAssetsOpen)}
@@ -36,7 +61,13 @@ export default function VideoEditor() {
             </button>
           </div>
           <div className="left-sidebar-content">
-            <ProjectManager />
+            {leftPanelTab === 'media' ? (
+              <MediaBin />
+            ) : leftPanelTab === 'overlays' ? (
+              <OverlayLibrary />
+            ) : (
+              <ProjectManager />
+            )}
           </div>
         </div>
 
@@ -84,11 +115,19 @@ export default function VideoEditor() {
             </button>
           </div>
 
-          <SidePanel selectedTool={selectedTool} />
+          {selectedTool === 'overlays' ? (
+            <MediaOverlayProperties />
+          ) : (
+            <SidePanel selectedTool={selectedTool} />
+          )}
         </div>
       </div>
 
       {isAnalyzing && <AnalysisPanel />}
+      <ExportDialog
+        isOpen={showExportDialog}
+        onClose={() => setShowExportDialog(false)}
+      />
     </div>
   )
 }
