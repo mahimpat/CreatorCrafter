@@ -16,6 +16,10 @@
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\"",
     "electron:build": "vite build && electron-builder",
+    "electron:build:win": "vite build && electron-builder --win",
+    "electron:build:mac": "vite build && electron-builder --mac",
+    "electron:build:linux": "vite build && electron-builder --linux",
+    "electron:build:all": "vite build && electron-builder --win --mac --linux",
     "electron:build:secure": "npm run compile:python && tsc && vite build && electron-builder",
     "type-check": "tsc --noEmit",
     "setup": "npm run setup:python && npm run download:models",
@@ -41,6 +45,7 @@
     "concurrently": "^8.2.2",
     "electron": "^28.1.0",
     "electron-builder": "^24.9.1",
+    "electron-builder-squirrel-windows": "^24.13.3",
     "typescript": "^5.3.3",
     "vite": "^5.0.11",
     "vite-plugin-electron": "^0.28.2",
@@ -66,15 +71,37 @@
     ],
     "extraResources": [
       {
-        "from": "python/dist",
+        "from": "python",
         "to": "python",
         "filter": [
-          "**/*.pyc"
+          "*.py",
+          "!compile_scripts.py",
+          "!build_executables.py"
         ]
       },
       {
         "from": "requirements.txt",
         "to": "requirements.txt"
+      },
+      {
+        "from": "requirements-windows.txt",
+        "to": "requirements-windows.txt"
+      },
+      {
+        "from": "windows-hotfix-v3.bat",
+        "to": "../windows-hotfix-v3.bat"
+      },
+      {
+        "from": "fix-audiocraft-only.bat",
+        "to": "../fix-audiocraft-only.bat"
+      },
+      {
+        "from": "fix-av-package.bat",
+        "to": "../fix-av-package.bat"
+      },
+      {
+        "from": "diagnose-audiocraft.bat",
+        "to": "../diagnose-audiocraft.bat"
       },
       {
         "from": "build/ffmpeg/bin",

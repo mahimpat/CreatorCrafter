@@ -210,6 +210,12 @@ function registerIpcHandlers() {
     ? process.resourcesPath
     : join(__dirname, '..')
 
+  // Get the installation directory (parent of resources)
+  // This is where venv is created by the installer
+  const installDir = app.isPackaged
+    ? join(process.resourcesPath, '..')
+    : join(__dirname, '..')
+
   // Video processing handlers
   ipcMain.handle('video:extractAudio', async (_, videoPath: string) => {
     return new Promise((resolve, reject) => {
@@ -293,14 +299,14 @@ function registerIpcHandlers() {
   // AudioCraft integration (Python bridge)
   ipcMain.handle('audiocraft:generate', async (_, prompt: string, duration: number, modelType: string = 'audiogen') => {
     return new Promise((resolve, reject) => {
-      // In production, use compiled .pyc files; in development, use .py
-      const scriptName = app.isPackaged ? 'audiocraft_generator.pyc' : 'audiocraft_generator.py'
+      // Always use .py files (cross-version compatible)
+      const scriptName = 'audiocraft_generator.py'
       const pythonScript = join(appRoot, 'python', scriptName)
       const outputPath = join(app.getPath('temp'), `sfx-${Date.now()}.wav`)
       // Use venv python (platform-specific paths)
       const pythonPath = process.platform === 'win32'
-        ? join(appRoot, 'venv', 'Scripts', 'python.exe')
-        : join(appRoot, 'venv', 'bin', 'python')
+        ? join(installDir, 'venv', 'Scripts', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
 
       const modelName = modelType === 'musicgen' ? 'MusicGen' : 'AudioGen'
       console.log(`Starting ${modelName} generation:`, { prompt, duration, outputPath, modelType })
@@ -382,13 +388,13 @@ function registerIpcHandlers() {
   // AI analysis handler (video understanding)
   ipcMain.handle('ai:analyzeVideo', async (_, videoPath: string, audioPath: string) => {
     return new Promise((resolve, reject) => {
-      // In production, use compiled .pyc files; in development, use .py
-      const scriptName = app.isPackaged ? 'video_analyzer.pyc' : 'video_analyzer.py'
+      // Always use .py files (cross-version compatible)
+      const scriptName = 'video_analyzer.py'
       const pythonScript = join(appRoot, 'python', scriptName)
       // Use venv python (platform-specific paths)
       const pythonPath = process.platform === 'win32'
-        ? join(appRoot, 'venv', 'Scripts', 'python.exe')
-        : join(appRoot, 'venv', 'bin', 'python')
+        ? join(installDir, 'venv', 'Scripts', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
 
       console.log('Analyzing video with:', { pythonPath, pythonScript, videoPath, audioPath })
 
