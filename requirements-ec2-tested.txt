@@ -1,0 +1,64 @@
+# CreatorCrafter - EC2 Requirements (Minimal, Tested Versions)
+# Based on working laptop setup, optimized for Linux server
+
+# Installation Instructions:
+# 1. Install system dependencies first:
+#    sudo apt install -y pkg-config python3.11-dev ffmpeg libavformat-dev libavcodec-dev
+#    sudo apt install -y libavdevice-dev libavutil-dev libavfilter-dev libswscale-dev libswresample-dev
+#    sudo apt install -y libsndfile1-dev portaudio19-dev libjpeg-dev libpng-dev
+#
+# 2. Create and activate venv:
+#    python3.11 -m venv venv
+#    source venv/bin/activate
+#
+# 3. Install PyTorch FIRST (CPU version for EC2):
+#    pip install torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+#
+# 4. Install this requirements file:
+#    pip install -r requirements-ec2-tested.txt
+
+# Core AI Models (exact versions from working laptop)
+audiocraft==1.3.0
+openai-whisper==20250625
+transformers==4.57.1
+
+# Audio Processing
+librosa==0.11.0
+soundfile==0.13.1
+av==16.0.1
+audioread==3.0.1
+
+# Video Processing
+opencv-python==4.8.1.78
+scenedetect==0.6.7.1
+
+# Scientific Computing
+numpy==1.26.4
+scipy==1.16.2
+
+# Image Processing
+Pillow==11.3.0
+
+# AudioCraft Dependencies
+einops==0.8.1
+hydra-core==1.3.2
+omegaconf==2.3.0
+julius==0.2.7
+flashy==0.0.2
+encodec==0.1.1
+
+# Transformers Dependencies
+tokenizers==0.22.1
+huggingface-hub==0.36.0
+safetensors==0.6.2
+filelock==3.20.0
+regex==2025.10.23
+
+# Utilities
+tqdm==4.67.1
+requests==2.32.5
+PyYAML==6.0.3
+packaging==25.0
+
+# Note: xformers will fail to install on CPU-only systems
+# This is EXPECTED and OK - audiocraft works without it
