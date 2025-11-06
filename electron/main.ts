@@ -304,8 +304,9 @@ function registerIpcHandlers() {
       const pythonScript = join(appRoot, 'python', scriptName)
       const outputPath = join(app.getPath('temp'), `sfx-${Date.now()}.wav`)
       // Use venv python (platform-specific paths)
+      // Windows: Embeddable Python has python.exe in root, not Scripts/
       const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'Scripts', 'python.exe')
+        ? join(installDir, 'venv', 'python.exe')
         : join(installDir, 'venv', 'bin', 'python')
 
       const modelName = modelType === 'musicgen' ? 'MusicGen' : 'AudioGen'
@@ -392,8 +393,9 @@ function registerIpcHandlers() {
       const scriptName = 'video_analyzer.py'
       const pythonScript = join(appRoot, 'python', scriptName)
       // Use venv python (platform-specific paths)
+      // Windows: Embeddable Python has python.exe in root, not Scripts/
       const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'Scripts', 'python.exe')
+        ? join(installDir, 'venv', 'python.exe')
         : join(installDir, 'venv', 'bin', 'python')
 
       console.log('Analyzing video with:', { pythonPath, pythonScript, videoPath, audioPath })

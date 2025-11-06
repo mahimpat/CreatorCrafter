@@ -8,7 +8,13 @@
       "Bash(sudo apt-get install:*)",
       "Bash(killall:*)",
       "Bash(npm run electron:dev:*)",
-      "Bash(npx vite build:*)"
+      "Bash(npx vite build:*)",
+      "Bash(test:*)",
+      "Bash(chmod:*)",
+      "Bash(npm run electron:build:win:*)",
+      "Bash(tee:*)",
+      "Bash(npm run build:*)",
+      "Bash(unzip:*)"
     ],
     "deny": [],
     "ask": []

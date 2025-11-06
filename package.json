@@ -109,6 +109,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "scripts/dist/python-env-windows-x64-v1.0.0.zip",
+        "to": "python-env.zip"
       }
     ],
     "mac": {

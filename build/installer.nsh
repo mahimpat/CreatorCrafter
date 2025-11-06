@@ -1,318 +1,356 @@
-; Custom NSIS installer script for CreatorCrafter
-; This script handles Python environment setup on Windows with detailed logging
+; CreatorCrafter NSIS Installer Script
+; Extracts pre-built Python environment bundled with installer for reliable installation
 
 !include "LogicLib.nsh"
 !include "WordFunc.nsh"
+!include "FileFunc.nsh"
+!include "StrFunc.nsh"
+
+; Initialize string functions
+${StrStr}
+
+; Configuration
+!define PYTHON_ENV_FILENAME "python-env.zip"
+!define PYTHON_ENV_SHA256 "db106dba2bbe10a8c3fd1c907277659726e0a6355ca839ec5978e746d7254d4f"
+!define PYTHON_ENV_SIZE_MB 393
 
 !macro customInit
-  ; Show details by default (keep installer window open)
+  ; Keep installer window open to show details
   SetAutoClose false
 !macroend
 
 !macro customInstall
-  ; Enable detailed output
   SetDetailsPrint both
 
-  DetailPrint "=========================================="
-  DetailPrint "CreatorCrafter Installation"
-  DetailPrint "=========================================="
+  DetailPrint ""
+  DetailPrint "============================================"
+  DetailPrint "  CreatorCrafter Installation - v1.0.0"
+  DetailPrint "============================================"
+  DetailPrint ""
+  DetailPrint "This installer will:"
+  DetailPrint "  1. Install CreatorCrafter application"
+  DetailPrint "  2. Extract pre-built Python environment (${PYTHON_ENV_SIZE_MB}MB - bundled)"
+  DetailPrint "  3. Configure dependencies"
+  DetailPrint "  4. Setup FFmpeg for video processing"
+  DetailPrint ""
+  DetailPrint "Estimated time: 3-5 minutes"
+  DetailPrint "No internet connection required for installation"
+  DetailPrint "Internet needed only for AI models (download on first use)"
+  DetailPrint ""
+  DetailPrint "============================================"
   DetailPrint ""
 
-  ; Check if Python 3 is installed
-  DetailPrint "[1/5] Checking Python installation..."
-  nsExec::ExecToStack 'python --version'
-  Pop $0  ; Exit code
-  Pop $1  ; Output
+  ; ==========================================
+  ; STEP 1: Locate Bundled Python Environment
+  ; ==========================================
 
-  ${If} $0 != 0
-    DetailPrint "ERROR: Python not found!"
-    DetailPrint ""
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Python 3 is required but not found.$\n$\nPlease install Python 3.8 or higher from:$\nhttps://www.python.org/downloads/$\n$\nMake sure to check 'Add Python to PATH' during installation.$\n$\nThen run this installer again."
-    Abort "Python is required for installation"
-  ${Else}
-    DetailPrint "Python found: $1"
-    DetailPrint ""
-  ${EndIf}
-
-  ; Create virtual environment
-  DetailPrint "[2/5] Creating Python virtual environment..."
-  DetailPrint "Location: $INSTDIR\venv"
-  DetailPrint "This may take a minute..."
+  DetailPrint "[1/3] Preparing Python environment..."
+  DetailPrint ""
+  DetailPrint "Python environment is bundled with this installer"
+  DetailPrint "Size: ${PYTHON_ENV_SIZE_MB} MB"
+  DetailPrint "No internet connection required!"
   DetailPrint ""
 
-  nsExec::ExecToLog 'python -m venv "$INSTDIR\venv"'
-  Pop $0
+  ; Python environment is bundled in installer resources
+  StrCpy $0 "$INSTDIR\resources\${PYTHON_ENV_FILENAME}"
 
-  ${If} $0 != 0
-    DetailPrint "ERROR: Failed to create virtual environment (exit code: $0)"
-    MessageBox MB_ICONEXCLAMATION|MB_OKCANCEL "Failed to create Python virtual environment.$\n$\nThis might happen if:$\n- Python venv module is not installed$\n- Disk space is low$\n- Antivirus is blocking$\n$\nClick OK to continue anyway (you'll need to run the hotfix)$\nClick Cancel to abort installation" IDOK continue_anyway
-    Abort "Virtual environment creation failed"
-    continue_anyway:
-    DetailPrint "Continuing installation without venv..."
-    DetailPrint "You will need to run windows-hotfix.bat after installation"
+  ; Verify bundled file exists
+  ${If} ${FileExists} "$0"
+    DetailPrint "Bundled Python environment found: OK"
+    DetailPrint "Location: $0"
     DetailPrint ""
-    Goto skip_python_setup
-  ${Else}
-    DetailPrint "Virtual environment created successfully!"
-    DetailPrint ""
-  ${EndIf}
-
-  ; Upgrade pip
-  DetailPrint "[3/5] Upgrading pip..."
-  DetailPrint ""
-
-  nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install --upgrade pip'
-  Pop $0
-
-  ${If} $0 != 0
-    DetailPrint "WARNING: Failed to upgrade pip (exit code: $0)"
-    DetailPrint "Continuing anyway..."
-  ${Else}
-    DetailPrint "Pip upgraded successfully!"
-  ${EndIf}
-  DetailPrint ""
-
-  ; Install Python dependencies (using Windows-optimized approach)
-  DetailPrint "[4/5] Installing Python dependencies..."
-  DetailPrint "This will download ~2GB and may take 10-20 minutes..."
-  DetailPrint ""
-  DetailPrint "IMPORTANT: If installation seems stuck:"
-  DetailPrint "  - Don't close! Large packages take time to download/install."
-  DetailPrint "  - PyTorch alone is ~2GB and takes 5-10 minutes."
-  DetailPrint "  - xformers may fail - this is NORMAL and OK!"
-  DetailPrint ""
-
-  ; Step 1: Install PyTorch FIRST (CPU version to avoid CUDA issues)
-  DetailPrint "Step 1/2: Installing PyTorch (CPU version)..."
-  DetailPrint "This is the largest package (~2GB) and may take 5-10 minutes..."
-  DetailPrint ""
-  nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu'
-  Pop $0
-
-  ${If} $0 != 0
-    DetailPrint ""
-    DetailPrint "ERROR: PyTorch installation failed (exit code: $0)"
-    DetailPrint ""
-    MessageBox MB_ICONEXCLAMATION|MB_OKCANCEL "Failed to install PyTorch.$\n$\nThis might happen if:$\n- Internet connection is slow/interrupted$\n- Disk space is low (<3GB)$\n- Antivirus is blocking downloads$\n$\nClick OK to continue (you'll need to run windows-hotfix-v3.bat)$\nClick Cancel to abort installation" IDOK continue_anyway2
-    Abort "PyTorch installation failed"
-    continue_anyway2:
-    DetailPrint "Continuing without PyTorch..."
-    DetailPrint "You MUST run windows-hotfix-v3.bat after installation"
-    DetailPrint ""
-    Goto skip_model_download
   ${Else}
     DetailPrint ""
-    DetailPrint "✓ PyTorch installed successfully!"
+    DetailPrint "ERROR: Bundled Python environment not found!"
+    DetailPrint "Expected at: $0"
     DetailPrint ""
+    DetailPrint "This installer may be corrupted or incomplete."
+    DetailPrint ""
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Python environment package not found in installer.$\n$\nThe installer may be corrupted.$\n$\nPlease download a fresh installer or contact support."
+    Goto skip_python_env
   ${EndIf}
 
-  ; Step 2: Install other dependencies individually (more reliable than batch)
-  DetailPrint "Step 2/2: Installing other dependencies..."
-  DetailPrint "Installing: numpy, scipy, Pillow, opencv-python..."
-  nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install --prefer-binary numpy scipy Pillow opencv-python'
+  ; ==========================================
+  ; STEP 2: Extract Python Environment
+  ; ==========================================
 
-  DetailPrint "Installing: transformers, librosa, soundfile, scenedetect..."
-  nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install --prefer-binary transformers librosa soundfile scenedetect[opencv]'
+  DetailPrint "[2/3] Extracting Python environment..."
+  DetailPrint ""
+  DetailPrint "Destination: $INSTDIR\venv"
+  DetailPrint "This may take 3-5 minutes..."
+  DetailPrint ""
 
-  DetailPrint "Installing: openai-whisper..."
-  nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install --prefer-binary openai-whisper'
+  ; Extract using nsisunz plugin to a temp location first
+  DetailPrint "Extracting files..."
+  nsisunz::UnzipToLog "$0" "$INSTDIR"
+  Pop $2
 
-  ; Install av (PyAV) separately first - it's a common failure point
-  DetailPrint "Installing: av (PyAV - FFmpeg bindings)..."
-  DetailPrint "Note: This package sometimes has issues on Windows"
-  nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install --prefer-binary av'
-  Pop $0
+  ${If} $2 != "success"
+    DetailPrint ""
+    DetailPrint "ERROR: Failed to extract Python environment!"
+    DetailPrint "Error: $2"
+    DetailPrint ""
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Failed to extract Python environment.$\n$\nError: $2$\n$\nThis might be due to:$\n- Insufficient disk space$\n- Antivirus blocking extraction$\n- Corrupted download$\n$\nPlease free up disk space or disable antivirus temporarily."
+    Goto skip_python_env
+  ${EndIf}
 
-  ${If} $0 != 0
-    DetailPrint "WARNING: av (PyAV) installation had issues"
-    DetailPrint "Attempting alternative installation method..."
-    nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install setuptools wheel Cython'
-    nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install av --no-build-isolation'
-    Pop $0
-    ${If} $0 != 0
-      DetailPrint "WARNING: av installation failed - AudioCraft may have limited functionality"
+  DetailPrint ""
+  DetailPrint "Extraction complete!"
+  DetailPrint ""
+
+  ; Rename venv_windows to venv
+  DetailPrint "Configuring Python environment..."
+  Rename "$INSTDIR\venv_windows" "$INSTDIR\venv"
+  DetailPrint ""
+
+  ; Verify Python executable exists
+  ${If} ${FileExists} "$INSTDIR\venv\python.exe"
+    DetailPrint "Python executable found: OK"
+    DetailPrint "Location: $INSTDIR\venv\python.exe"
+    DetailPrint ""
+
+    ; Test Python installation
+    DetailPrint "Testing Python installation..."
+    nsExec::ExecToStack '"$INSTDIR\venv\python.exe" --version'
+    Pop $3  ; Exit code
+    Pop $4  ; Output
+
+    ${If} $3 == 0
+      DetailPrint "Python test successful: $4"
+      DetailPrint ""
+
+      ; Test critical imports
+      DetailPrint "Verifying AI dependencies..."
+      nsExec::ExecToLog '"$INSTDIR\venv\python.exe" -c "import torch, audiocraft, whisper, transformers; print(\"All dependencies OK\")"'
+      Pop $3
+
+      ${If} $3 == 0
+        DetailPrint ""
+        DetailPrint "All Python dependencies verified successfully!"
+        DetailPrint ""
+      ${Else}
+        DetailPrint ""
+        DetailPrint "WARNING: Some dependencies may have issues"
+        DetailPrint "Application may still work, but some features might fail"
+        DetailPrint ""
+      ${EndIf}
+
+    ${Else}
+      DetailPrint "WARNING: Python test failed"
+      DetailPrint "Application may not work correctly"
+      DetailPrint ""
     ${EndIf}
-  ${EndIf}
 
-  ; Install audiocraft last (may show xformers warnings - that's expected)
-  DetailPrint "Installing: audiocraft (xformers warnings are NORMAL)..."
-  DetailPrint "Note: If you see xformers errors, ignore them - app will still work!"
-  nsExec::ExecToLog '"$INSTDIR\venv\Scripts\pip.exe" install --prefer-binary audiocraft'
-  Pop $0
-
-  ; Verify AudioCraft was actually installed (not just warnings, but actually importable)
-  DetailPrint "Verifying AudioCraft installation..."
-  nsExec::ExecToLog '"$INSTDIR\venv\Scripts\python.exe" -c "import audiocraft; print(\"AudioCraft OK\")"'
-  Pop $1
-
-  ${If} $1 != 0
-    DetailPrint ""
-    DetailPrint "ERROR: AudioCraft failed to install properly!"
-    DetailPrint "SFX generation will not work until AudioCraft is installed."
-    DetailPrint ""
-    DetailPrint "After installation, run windows-hotfix-v3.bat to fix this."
-    DetailPrint ""
   ${Else}
+    DetailPrint "WARNING: Python executable not found!"
+    DetailPrint "Expected at: $INSTDIR\venv\python.exe"
     DetailPrint ""
-    DetailPrint "✓ AudioCraft verified successfully!"
-    DetailPrint "✓ All dependencies installed successfully!"
+    DetailPrint "This might indicate:"
+    DetailPrint "  - Extraction failed"
+    DetailPrint "  - Corrupted download"
+    DetailPrint "  - Antivirus interference"
     DetailPrint ""
   ${EndIf}
 
-  ; Download AI models
-  DetailPrint "[5/5] Downloading AI models..."
-  DetailPrint "This will download ~500MB more and may take 5-10 minutes..."
-  DetailPrint "Models being downloaded:"
-  DetailPrint "  - Whisper (speech recognition) ~150MB"
-  DetailPrint "  - AudioCraft (sound effects) ~300MB"
-  DetailPrint "  - BLIP (image understanding) ~50MB"
+  skip_python_env:
+
+  ; ==========================================
+  ; STEP 3: Setup FFmpeg
+  ; ==========================================
+
+  DetailPrint ""
+  DetailPrint "[3/3] Setting up FFmpeg for video processing..."
   DetailPrint ""
 
-  ; Use .py files (cross-version compatible)
-  ${If} ${FileExists} "$INSTDIR\resources\python\download_models.py"
-    DetailPrint "Using: download_models.py"
-    nsExec::ExecToLog '"$INSTDIR\venv\Scripts\python.exe" "$INSTDIR\resources\python\download_models.py"'
-  ${Else}
-    DetailPrint "WARNING: download_models.py not found!"
-    DetailPrint "Skipping model download - models will download on first use"
-    Goto skip_model_download
-  ${EndIf}
-
-  Pop $0
-
-  ${If} $0 != 0
-    DetailPrint ""
-    DetailPrint "WARNING: Model download had issues (exit code: $0)"
-    DetailPrint "Models will be downloaded automatically when you first use the features"
-    DetailPrint ""
-  ${Else}
-    DetailPrint ""
-    DetailPrint "AI models downloaded successfully!"
-    DetailPrint ""
-  ${EndIf}
-
-  skip_model_download:
-  skip_python_setup:
-
-  ; Setup FFmpeg
-  DetailPrint ""
-  DetailPrint "=========================================="
-  DetailPrint "Setting up FFmpeg"
-  DetailPrint "=========================================="
-  DetailPrint ""
-
-  ; Check if FFmpeg binaries exist in the package
   ${If} ${FileExists} "$INSTDIR\resources\ffmpeg\ffmpeg.exe"
-    DetailPrint "FFmpeg binaries found in installation package"
+    DetailPrint "FFmpeg binaries found: OK"
     DetailPrint "Location: $INSTDIR\resources\ffmpeg\"
     DetailPrint ""
 
-    ; Add FFmpeg to system PATH for current user
-    DetailPrint "Adding FFmpeg to PATH..."
-    DetailPrint ""
+    ; Test FFmpeg
+    DetailPrint "Testing FFmpeg installation..."
+    nsExec::ExecToStack '"$INSTDIR\resources\ffmpeg\ffmpeg.exe" -version'
+    Pop $3
+    Pop $4
 
-    ; Read current user PATH
+    ${If} $3 == 0
+      DetailPrint "FFmpeg test successful"
+      DetailPrint ""
+    ${Else}
+      DetailPrint "WARNING: FFmpeg test failed"
+      DetailPrint ""
+    ${EndIf}
+
+    ; Add FFmpeg to user PATH (optional, for command-line access)
+    DetailPrint "Adding FFmpeg to PATH for this user..."
     ReadRegStr $1 HKCU "Environment" "Path"
 
-    ; Add FFmpeg to PATH (append)
-    StrCpy $1 "$1;$INSTDIR\resources\ffmpeg"
-    WriteRegStr HKCU "Environment" "Path" "$1"
-
-    DetailPrint "✓ FFmpeg added to PATH: $INSTDIR\resources\ffmpeg"
+    ; Check if already in PATH
+    ${StrStr} $2 "$1" "$INSTDIR\resources\ffmpeg"
+    ${If} $2 == ""
+      ; Not in PATH, add it
+      StrCpy $1 "$1;$INSTDIR\resources\ffmpeg"
+      WriteRegStr HKCU "Environment" "Path" "$1"
+      DetailPrint "FFmpeg added to PATH"
+      DetailPrint ""
+      DetailPrint "Note: Restart or logout/login for PATH changes to take effect globally"
+    ${Else}
+      DetailPrint "FFmpeg already in PATH"
+    ${EndIf}
     DetailPrint ""
-    DetailPrint "Note: You may need to restart your computer or logout/login"
-    DetailPrint "      for PATH changes to take effect globally."
-    DetailPrint ""
-    DetailPrint "✓ FFmpeg setup complete!"
 
   ${Else}
-    DetailPrint "WARNING: FFmpeg binaries not found in package!"
+    DetailPrint "WARNING: FFmpeg binaries not found!"
     DetailPrint "Expected location: $INSTDIR\resources\ffmpeg\ffmpeg.exe"
     DetailPrint ""
-    DetailPrint "You will need to install FFmpeg manually:"
-    DetailPrint "1. Download from: https://ffmpeg.org/download.html"
-    DetailPrint "2. Extract to a folder"
-    DetailPrint "3. Add to PATH"
+    DetailPrint "Video processing features may not work without FFmpeg."
+    DetailPrint "Please install FFmpeg manually from: https://ffmpeg.org"
     DetailPrint ""
   ${EndIf}
 
+  ; ==========================================
+  ; Installation Complete
+  ; ==========================================
+
+  DetailPrint ""
+  DetailPrint "============================================"
+  DetailPrint "  Installation Complete!"
+  DetailPrint "============================================"
   DetailPrint ""
 
-  ; Installation complete
-  DetailPrint ""
-  DetailPrint "=========================================="
-  DetailPrint "Installation Complete!"
-  DetailPrint "=========================================="
-  DetailPrint ""
-  DetailPrint "CreatorCrafter is now installed at:"
-  DetailPrint "$INSTDIR"
-  DetailPrint ""
-
-  ; Check if we have a working venv
-  ${If} ${FileExists} "$INSTDIR\venv\Scripts\python.exe"
-    DetailPrint "Python virtual environment: OK"
-    DetailPrint "Location: $INSTDIR\venv"
+  ${If} ${FileExists} "$INSTDIR\venv\python.exe"
+    DetailPrint "Status: Ready to use!"
+    DetailPrint ""
+    DetailPrint "What's included:"
+    DetailPrint "  - CreatorCrafter application"
+    DetailPrint "  - Python 3.11.9 + AI dependencies"
+    DetailPrint "  - PyTorch 2.1.0 (CPU)"
+    DetailPrint "  - AudioCraft 1.3.0"
+    DetailPrint "  - Whisper (speech recognition)"
+    DetailPrint "  - FFmpeg (video processing)"
+    DetailPrint ""
+    DetailPrint "First-run setup:"
+    DetailPrint "  - AI models will download automatically on first use"
+    DetailPrint "  - First video analysis: ~5 minutes (downloads Whisper model)"
+    DetailPrint "  - First SFX generation: ~10 minutes (downloads AudioCraft model)"
+    DetailPrint "  - After first use: everything is instant!"
+    DetailPrint ""
+    DetailPrint "Installation directory: $INSTDIR"
+    DetailPrint "Python environment: $INSTDIR\venv"
+    DetailPrint "AI models will cache to: %USERPROFILE%\.cache\huggingface"
+    DetailPrint ""
   ${Else}
-    DetailPrint "Python virtual environment: NOT CREATED"
+    DetailPrint "Status: Partial installation"
     DetailPrint ""
-    DetailPrint "IMPORTANT: You need to run the hotfix!"
-    DetailPrint "After installation completes:"
-    DetailPrint "1. Navigate to: $INSTDIR"
-    DetailPrint "2. Right-click: windows-hotfix-v3.bat"
-    DetailPrint "3. Select: Run as Administrator"
-    DetailPrint "4. Wait 10-20 minutes for completion"
-    DetailPrint "5. Restart CreatorCrafter"
+    DetailPrint "Python environment was not installed successfully."
+    DetailPrint ""
+    DetailPrint "To complete setup manually:"
+    DetailPrint "  1. Download: ${PYTHON_ENV_FILENAME}"
+    DetailPrint "  2. From: Google Drive (check installer-config.json)"
+    DetailPrint "  3. Extract to: $INSTDIR\venv"
+    DetailPrint "  4. Ensure python.exe exists at: $INSTDIR\venv\python.exe"
+    DetailPrint "  5. Launch CreatorCrafter"
+    DetailPrint ""
+    DetailPrint "Alternatively, use the hotfix scripts:"
+    DetailPrint "  - Run: $INSTDIR\windows-hotfix-v3.bat (as Administrator)"
+    DetailPrint "  - Wait: 10-20 minutes for completion"
+    DetailPrint "  - Restart: CreatorCrafter"
     DetailPrint ""
   ${EndIf}
 
+  DetailPrint "============================================"
   DetailPrint ""
   DetailPrint "You can now close this window and launch CreatorCrafter!"
   DetailPrint ""
-
-  ; Create a readme file with instructions
-  FileOpen $4 "$INSTDIR\FIRST_RUN_INSTRUCTIONS.txt" w
-  FileWrite $4 "CreatorCrafter - First Run Instructions$\r$\n"
-  FileWrite $4 "========================================$\r$\n"
-  FileWrite $4 "$\r$\n"
-  FileWrite $4 "If you encounter errors about Python or AI features:$\r$\n"
-  FileWrite $4 "$\r$\n"
-  FileWrite $4 "1. Make sure Python 3.8+ is installed$\r$\n"
-  FileWrite $4 "2. Make sure FFmpeg is installed and in PATH$\r$\n"
-  FileWrite $4 "3. Check that venv folder exists: $INSTDIR\venv$\r$\n"
-  FileWrite $4 "$\r$\n"
-  FileWrite $4 "If venv doesn't exist or features don't work:$\r$\n"
-  FileWrite $4 "1. Right-click windows-hotfix.bat$\r$\n"
-  FileWrite $4 "2. Select 'Run as Administrator'$\r$\n"
-  FileWrite $4 "3. Wait 10-15 minutes for completion$\r$\n"
-  FileWrite $4 "4. Restart CreatorCrafter$\r$\n"
-  FileWrite $4 "$\r$\n"
-  FileWrite $4 "Requirements:$\r$\n"
-  FileWrite $4 "- Python 3.8 or higher (from python.org)$\r$\n"
-  FileWrite $4 "- FFmpeg (from ffmpeg.org)$\r$\n"
-  FileWrite $4 "- ~2GB free disk space for AI models$\r$\n"
-  FileWrite $4 "- Internet connection for model downloads$\r$\n"
-  FileWrite $4 "$\r$\n"
-  FileWrite $4 "For more help, see HOTFIX_README.md$\r$\n"
-  FileClose $4
-
-  DetailPrint "Created: FIRST_RUN_INSTRUCTIONS.txt"
+  DetailPrint "Enjoy creating amazing content!"
   DetailPrint ""
+
+  ; Create README with instructions
+  FileOpen $5 "$INSTDIR\INSTALLATION_NOTES.txt" w
+  FileWrite $5 "CreatorCrafter - Installation Notes$\r$\n"
+  FileWrite $5 "======================================$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileWrite $5 "Installation Date: $\r$\n"
+  FileWrite $5 "Version: 1.0.0$\r$\n"
+  FileWrite $5 "Location: $INSTDIR$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileWrite $5 "What's Installed:$\r$\n"
+  FileWrite $5 "  - CreatorCrafter application$\r$\n"
+  FileWrite $5 "  - Python 3.11.9 environment (pre-built)$\r$\n"
+  FileWrite $5 "  - PyTorch 2.1.0 (CPU version)$\r$\n"
+  FileWrite $5 "  - AudioCraft 1.3.0 for SFX generation$\r$\n"
+  FileWrite $5 "  - Whisper for transcription$\r$\n"
+  FileWrite $5 "  - FFmpeg for video processing$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileWrite $5 "First Run:$\r$\n"
+  FileWrite $5 "  - Application launches immediately$\r$\n"
+  FileWrite $5 "  - AI models download on first use of each feature$\r$\n"
+  FileWrite $5 "  - First analysis: ~5 min (Whisper + BLIP models)$\r$\n"
+  FileWrite $5 "  - First SFX: ~10 min (AudioCraft model)$\r$\n"
+  FileWrite $5 "  - All subsequent uses: instant (models cached)$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileWrite $5 "File Locations:$\r$\n"
+  FileWrite $5 "  - Application: $INSTDIR$\r$\n"
+  FileWrite $5 "  - Python: $INSTDIR\venv\python.exe$\r$\n"
+  FileWrite $5 "  - FFmpeg: $INSTDIR\resources\ffmpeg\$\r$\n"
+  FileWrite $5 "  - AI Models: %USERPROFILE%\.cache\huggingface\$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileWrite $5 "Disk Space:$\r$\n"
+  FileWrite $5 "  - Application: ~500 MB$\r$\n"
+  FileWrite $5 "  - Python environment: ~1.5 GB$\r$\n"
+  FileWrite $5 "  - AI models (after download): ~2 GB$\r$\n"
+  FileWrite $5 "  - Total: ~4 GB$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileWrite $5 "Troubleshooting:$\r$\n"
+  FileWrite $5 "  - If Python features don't work, check: $INSTDIR\venv\python.exe$\r$\n"
+  FileWrite $5 "  - If video processing fails, check: $INSTDIR\resources\ffmpeg\ffmpeg.exe$\r$\n"
+  FileWrite $5 "  - For model download issues, check internet connection$\r$\n"
+  FileWrite $5 "  - Logs are in: %APPDATA%\CreatorCrafter\logs\$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileWrite $5 "Manual Python Environment Installation:$\r$\n"
+  FileWrite $5 "  If Python environment installation failed:$\r$\n"
+  FileWrite $5 "  1. Download: ${PYTHON_ENV_FILENAME}$\r$\n"
+  FileWrite $5 "  2. From: Google Drive (see installer-config.json)$\r$\n"
+  FileWrite $5 "  3. Extract to: $INSTDIR\venv$\r$\n"
+  FileWrite $5 "  4. Verify python.exe exists$\r$\n"
+  FileWrite $5 "  5. Launch CreatorCrafter$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileWrite $5 "Support:$\r$\n"
+  FileWrite $5 "  - Documentation: See DEPLOYMENT-READY.md$\r$\n"
+  FileWrite $5 "  - Issues: Check GitHub issues or contact support$\r$\n"
+  FileWrite $5 "$\r$\n"
+  FileClose $5
+
+  DetailPrint "Created: INSTALLATION_NOTES.txt"
+  DetailPrint ""
+
 !macroend
 
 !macro customUnInstall
-  DetailPrint "Removing Python virtual environment..."
+  DetailPrint "Uninstalling CreatorCrafter..."
+  DetailPrint ""
+
+  ; Remove Python environment
+  DetailPrint "Removing Python environment..."
   RMDir /r "$INSTDIR\venv"
 
   ; Remove FFmpeg from PATH
   DetailPrint "Removing FFmpeg from PATH..."
   ReadRegStr $1 HKCU "Environment" "Path"
 
-  ; Remove the FFmpeg path
+  ; Remove all variations of the FFmpeg path
   ${WordReplace} "$1" ";$INSTDIR\resources\ffmpeg" "" "+" $1
   ${WordReplace} "$1" "$INSTDIR\resources\ffmpeg;" "" "+" $1
   ${WordReplace} "$1" "$INSTDIR\resources\ffmpeg" "" "+" $1
 
   WriteRegStr HKCU "Environment" "Path" "$1"
 
-  DetailPrint "Cleanup complete!"
+  ; Note: We don't remove AI models cache (user may have other apps using them)
+  DetailPrint ""
+  DetailPrint "Note: AI model cache not removed from:"
+  DetailPrint "%USERPROFILE%\.cache\huggingface\"
+  DetailPrint "You can manually delete this if you want to free up ~2GB"
+  DetailPrint ""
+
+  DetailPrint "Uninstallation complete!"
 !macroend
