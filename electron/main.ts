@@ -5,6 +5,7 @@ import * as fs from 'fs/promises'
 import { readFile } from 'fs/promises'
 import * as projectManager from './projectManager'
 import { initializeFreesoundService, getFreesoundService } from './freesoundService'
+import * as elevenlabsService from './elevenlabsService'
 import * as dotenv from 'dotenv'
 
 // Load environment variables
@@ -384,6 +385,68 @@ function registerIpcHandlers() {
         reject(new Error(`Failed to start AudioCraft: ${err.message}`))
       })
     })
+  })
+
+  // ElevenLabs Sound Effects handler
+  ipcMain.handle('elevenlabs:generate', async (_, prompt: string, duration: number | undefined, apiKey: string) => {
+    try {
+      const outputPath = join(app.getPath('temp'), `sfx-${Date.now()}.wav`)
+
+      console.log('Starting ElevenLabs generation:', { prompt, duration })
+
+      const result = await elevenlabsService.generateSoundEffect(
+        { apiKey, defaultDuration: duration },
+        { prompt, duration, outputPath }
+      )
+
+      console.log('ElevenLabs raw result:', result)
+
+      if (result.success) {
+        // Handle snake_case from Python (file_path, credits_used)
+        const filePath = (result as any).file_path || result.filePath
+        const creditsUsed = (result as any).credits_used || result.creditsUsed
+
+        if (filePath) {
+          console.log('ElevenLabs generation successful:', { filePath, duration: result.duration, creditsUsed })
+          return {
+            success: true,
+            filePath,
+            duration: result.duration,
+            creditsUsed
+          }
+        }
+      }
+
+      throw new Error(result.error || 'Unknown error')
+    } catch (error: any) {
+      console.error('ElevenLabs generation error:', error)
+      return {
+        success: false,
+        error: error.message || 'Failed to generate sound effect'
+      }
+    }
+  })
+
+  // ElevenLabs API key validation
+  ipcMain.handle('elevenlabs:validateKey', async (_, apiKey: string) => {
+    try {
+      const isValid = await elevenlabsService.validateApiKey(apiKey)
+      return { valid: isValid }
+    } catch (error) {
+      console.error('ElevenLabs key validation error:', error)
+      return { valid: false }
+    }
+  })
+
+  // ElevenLabs credits check
+  ipcMain.handle('elevenlabs:getCredits', async (_, apiKey: string) => {
+    try {
+      const credits = await elevenlabsService.getRemainingCredits(apiKey)
+      return { credits }
+    } catch (error) {
+      console.error('ElevenLabs credits check error:', error)
+      return { credits: null }
+    }
   })
 
   // AI analysis handler (video understanding)

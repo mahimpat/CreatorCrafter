@@ -1,9 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { SFXTrack } from '../context/ProjectContext'
-import { Trash2, Wand2, Library, Music } from 'lucide-react'
+import { Trash2, Wand2, Library, Music, Settings, ChevronDown, ChevronUp } from 'lucide-react'
 import FreesoundLibrary from './FreesoundLibrary'
+import toast from 'react-hot-toast'
 import './SFXEditor.css'
+
+type SFXProvider = 'audiocraft' | 'elevenlabs'
 
 export default function SFXEditor() {
   const { sfxTracks, addSFXTrack, deleteSFXTrack, sfxLibrary, addSFXToLibrary, removeSFXFromLibrary, currentTime, analysis, projectPath } = useProject()
@@ -14,13 +17,120 @@ export default function SFXEditor() {
   const [duration, setDuration] = useState(2)
   const [modelType, setModelType] = useState<'audiogen' | 'musicgen'>('audiogen')
 
+  // Settings state
+  const [showSettings, setShowSettings] = useState(false)
+  const [sfxProvider, setSfxProvider] = useState<SFXProvider>('audiocraft')
+  const [elevenlabsApiKey, setElevenlabsApiKey] = useState('')
+  const [isValidatingKey, setIsValidatingKey] = useState(false)
+  const [apiKeyValid, setApiKeyValid] = useState<boolean | null>(null)
+  const [creditsRemaining, setCreditsRemaining] = useState<number | null>(null)
+
+  // Load settings from localStorage on mount
+  useEffect(() => {
+    const savedProvider = localStorage.getItem('sfx-provider') as SFXProvider
+    const savedApiKey = localStorage.getItem('elevenlabs-api-key')
+
+    if (savedProvider) setSfxProvider(savedProvider)
+    if (savedApiKey) {
+      setElevenlabsApiKey(savedApiKey)
+      // Validate on load
+      validateApiKey(savedApiKey)
+    }
+  }, [])
+
+  // Save settings to localStorage
+  const saveSettings = (provider: SFXProvider, apiKey: string) => {
+    localStorage.setItem('sfx-provider', provider)
+    localStorage.setItem('elevenlabs-api-key', apiKey)
+  }
+
+  const validateApiKey = async (key: string) => {
+    if (!key) {
+      setApiKeyValid(null)
+      return
+    }
+
+    setIsValidatingKey(true)
+    try {
+      const result = await window.electronAPI.elevenlabsValidateKey(key)
+      setApiKeyValid(result.valid)
+
+      if (result.valid) {
+        // Fetch credits if valid
+        const creditsResult = await window.electronAPI.elevenlabsGetCredits(key)
+        setCreditsRemaining(creditsResult.credits)
+        toast.success('API key validated successfully!')
+      } else {
+        toast.error('Invalid API key. Please check your key at elevenlabs.io')
+      }
+    } catch (error) {
+      console.error('Error validating API key:', error)
+      setApiKeyValid(false)
+      toast.error('Failed to validate API key')
+    } finally {
+      setIsValidatingKey(false)
+    }
+  }
+
+  const handleProviderChange = (provider: SFXProvider) => {
+    setSfxProvider(provider)
+    saveSettings(provider, elevenlabsApiKey)
+  }
+
+  const handleApiKeyChange = (key: string) => {
+    setElevenlabsApiKey(key)
+    setApiKeyValid(null)
+    saveSettings(sfxProvider, key)
+  }
+
+  const handleValidateKey = () => {
+    validateApiKey(elevenlabsApiKey)
+  }
+
   const handleGenerateSFX = async () => {
     if (!prompt) return
 
+    // Check provider-specific requirements
+    if (sfxProvider === 'elevenlabs') {
+      if (!elevenlabsApiKey) {
+        toast.error('Please configure your ElevenLabs API key in Settings')
+        setShowSettings(true)
+        return
+      }
+      // Allow generation even if validation failed (user may have valid key but free tier)
+      // The API call itself will fail with proper error if key is actually invalid
+    }
+
     try {
       setIsGenerating(true)
+      let sfxPath: string
+      let actualDuration = duration
+      let creditsUsed = 0
 
-      let sfxPath = await window.electronAPI.generateSFX(prompt, duration, modelType)
+      if (sfxProvider === 'elevenlabs') {
+        // Generate with ElevenLabs
+        const result = await window.electronAPI.elevenlabsGenerate(prompt, duration, elevenlabsApiKey)
+
+        console.log('ElevenLabs result:', result)
+
+        if (!result.success) {
+          throw new Error(result.error || 'ElevenLabs generation failed')
+        }
+
+        sfxPath = result.filePath!
+        actualDuration = result.duration || duration
+        creditsUsed = result.creditsUsed || 0
+
+        // Update credits display
+        if (creditsRemaining !== null) {
+          setCreditsRemaining(creditsRemaining - creditsUsed)
+        }
+
+        toast.success(`Generated! Used ${creditsUsed} credits`)
+      } else {
+        // Generate with AudioCraft (default)
+        sfxPath = await window.electronAPI.generateSFX(prompt, duration, modelType)
+      }
 
       // Copy to project folder if project exists
       if (projectPath) {
@@ -43,19 +153,17 @@ export default function SFXEditor() {
         id: `sfx-${Date.now()}`,
         path: sfxPath,
         prompt,
-        duration,
+        duration: actualDuration,
         createdAt: Date.now()
       }
 
       addSFXToLibrary(libraryItem)
       setPrompt('')
 
-      alert(`SFX "${prompt}" generated! Drag from "Library" tab to timeline to use it.`)
-    } catch (error) {
+      toast.success(`SFX "${prompt}" generated! Drag from "My SFX" tab to timeline.`)
+    } catch (error: any) {
       console.error('Error generating SFX:', error)
-      alert(
-        'Failed to generate SFX. Make sure Python and AudioCraft are properly installed.'
-      )
+      toast.error(error?.message || 'Failed to generate SFX')
     } finally {
       setIsGenerating(false)
     }
@@ -87,6 +195,7 @@ export default function SFXEditor() {
           path: filePath,
           start: currentTime,
           duration: 2, // Will be updated after loading
+          originalDuration: 2, // Will be updated after loading
           volume: 1
         }
 
@@ -98,14 +207,17 @@ export default function SFXEditor() {
     }
   }
 
-  const handleUseSuggestion = async (suggestion: {
-    timestamp: number;
-    prompt: string;
-    reason?: string;
-    visual_context?: string;
-    action_context?: string;
-    confidence?: number;
-  }) => {
+  const handleUseSuggestion = async (
+    suggestion: {
+      timestamp: number;
+      prompt: string;
+      reason?: string;
+      visual_context?: string;
+      action_context?: string;
+      confidence?: number;
+    },
+    provider?: SFXProvider
+  ) => {
     try {
       setIsGenerating(true)
 
@@ -115,17 +227,52 @@ export default function SFXEditor() {
       // - Mood and energy context
       // - No static keyword matching
       const finalPrompt = suggestion.prompt
+      const useProvider = provider || sfxProvider // Use specified provider or current default
       setPrompt(finalPrompt)
 
       console.log('Using backend prompt:', {
         prompt: finalPrompt,
         timestamp: suggestion.timestamp,
         confidence: suggestion.confidence,
-        reason: suggestion.reason
+        reason: suggestion.reason,
+        provider: useProvider
       })
 
-      // Generate the SFX using AudioCraft with the optimized prompt
-      let sfxPath = await window.electronAPI.generateSFX(finalPrompt, duration, modelType)
+      // Generate the SFX using selected provider
+      let sfxPath: string
+      let actualDuration = duration
+      let creditsUsed = 0
+
+      if (useProvider === 'elevenlabs') {
+        // Check API key requirement
+        if (!elevenlabsApiKey) {
+          toast.error('Please configure your ElevenLabs API key in Settings')
+          setShowSettings(true)
+          return
+        }
+
+        // Generate with ElevenLabs
+        const result = await window.electronAPI.elevenlabsGenerate(finalPrompt, duration, elevenlabsApiKey)
+
+        if (!result.success) {
+          throw new Error(result.error || 'ElevenLabs generation failed')
+        }
+
+        sfxPath = result.filePath!
+        actualDuration = result.duration || duration
+        creditsUsed = result.creditsUsed || 0
+
+        // Update credits display
+        if (creditsRemaining !== null) {
+          setCreditsRemaining(creditsRemaining - creditsUsed)
+        }
+
+        toast.success(`Generated with ElevenLabs! Used ${creditsUsed} credits`)
+      } else {
+        // Generate with AudioCraft (default)
+        sfxPath = await window.electronAPI.generateSFX(finalPrompt, duration, modelType)
+        toast.success('Generated with AudioCraft!')
+      }
 
       // Copy to project folder if project exists
       if (projectPath) {
@@ -148,7 +295,7 @@ export default function SFXEditor() {
         id: `sfx-lib-${Date.now()}`,
         path: sfxPath,
         prompt: finalPrompt,
-        duration,
+        duration: actualDuration,
         createdAt: Date.now()
       }
       addSFXToLibrary(libraryItem)
@@ -158,7 +305,8 @@ export default function SFXEditor() {
         id: `sfx-${Date.now()}`,
         path: sfxPath,
         start: suggestion.timestamp,
-        duration,
+        duration: actualDuration,
+        originalDuration: actualDuration,  // Store original duration
         volume: 1,
         prompt: finalPrompt
       }
@@ -167,12 +315,10 @@ export default function SFXEditor() {
       setPrompt('')
 
       // Show success message
-      alert(`SFX "${finalPrompt}" generated and added to timeline at ${suggestion.timestamp.toFixed(2)}s. Also saved to "My SFX" library for reuse!`)
-    } catch (error) {
+      toast.success(`SFX added to timeline at ${suggestion.timestamp.toFixed(2)}s and saved to library!`)
+    } catch (error: any) {
       console.error('Error generating suggested SFX:', error)
-      alert(
-        'Failed to generate SFX. Make sure Python and AudioCraft are properly installed.'
-      )
+      toast.error(error?.message || 'Failed to generate SFX')
     } finally {
       setIsGenerating(false)
     }
@@ -223,9 +369,93 @@ export default function SFXEditor() {
       <div className="sfx-tab-content">
         {activeTab === 'generate' && (
           <div className="generate-tab">
+            {/* Settings Section */}
+            <div className="settings-section">
+              <button
+                className="settings-toggle"
+                onClick={() => setShowSettings(!showSettings)}
+              >
+                <Settings size={16} />
+                <span>SFX Provider Settings</span>
+                {showSettings ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+
+              {showSettings && (
+                <div className="settings-content">
+                  <div className="input-group">
+                    <label>AI Provider</label>
+                    <select
+                      value={sfxProvider}
+                      onChange={(e) => handleProviderChange(e.target.value as SFXProvider)}
+                    >
+                      <option value="audiocraft">AudioCraft (Local, Free, Non-Commercial)</option>
+                      <option value="elevenlabs">ElevenLabs (Cloud, Paid, Commercial License)</option>
+                    </select>
+                    <small className="help-text">
+                      {sfxProvider === 'audiocraft'
+                        ? '⚠️ AudioCraft is FREE but for NON-COMMERCIAL use only. Requires Python and local models.'
+                        : '✅ ElevenLabs is COMMERCIAL-SAFE. Requires API key ($5/mo Starter plan).'}
+                    </small>
+                  </div>
+
+                  {sfxProvider === 'elevenlabs' && (
+                    <>
+                      <div className="input-group">
+                        <label>ElevenLabs API Key</label>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <input
+                            type="password"
+                            placeholder="Enter your ElevenLabs API key"
+                            value={elevenlabsApiKey}
+                            onChange={(e) => handleApiKeyChange(e.target.value)}
+                            style={{ flex: 1 }}
+                          />
+                          <button
+                            className="btn-small"
+                            onClick={handleValidateKey}
+                            disabled={!elevenlabsApiKey || isValidatingKey}
+                          >
+                            {isValidatingKey ? 'Validating...' : 'Validate'}
+                          </button>
+                        </div>
+                        {apiKeyValid === true && (
+                          <small className="help-text" style={{ color: '#22c55e' }}>
+                            ✓ API key is valid
+                            {creditsRemaining !== null && ` • ${creditsRemaining} credits remaining`}
+                          </small>
+                        )}
+                        {apiKeyValid === false && (
+                          <small className="help-text" style={{ color: '#ef4444' }}>
+                            ✗ Invalid API key
+                          </small>
+                        )}
+                        <small className="help-text">
+                          Get your API key at <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>elevenlabs.io</a>
+                          <br />
+                          <strong style={{ color: '#22c55e' }}>✓ Free tier supported!</strong> Upgrade to paid plans for more credits.
+                        </small>
+                      </div>
+
+                      <div className="cost-info" style={{
+                        background: '#1e293b',
+                        padding: '0.75rem',
+                        borderRadius: '4px',
+                        fontSize: '0.85em'
+                      }}>
+                        <strong>💰 Cost:</strong>
+                        <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
+                          <li>With duration: {duration * 40} credits (~${(duration * 40 * 0.00015).toFixed(3)})</li>
+                          <li>Without duration (AI decides): 200 credits (~$0.03)</li>
+                        </ul>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
             <div className="generate-sfx">
-        <h4>Generate with AI (AudioCraft)</h4>
+        <h4>Generate with AI ({sfxProvider === 'elevenlabs' ? 'ElevenLabs' : 'AudioCraft'})</h4>
 
         <textarea
           placeholder="Describe the sound effect (e.g., 'door creaking open slowly')"
@@ -234,21 +464,23 @@ export default function SFXEditor() {
           rows={3}
         />
 
-        <div className="input-group">
-          <label>Model Type</label>
-          <select
-            value={modelType}
-            onChange={e => setModelType(e.target.value as 'audiogen' | 'musicgen')}
-          >
-            <option value="audiogen">AudioGen (Sound Effects & Foley)</option>
-            <option value="musicgen">MusicGen (Background Music)</option>
-          </select>
-          <small className="help-text">
-            {modelType === 'audiogen'
-              ? 'Best for realistic sound effects, foley, impacts, and environmental sounds'
-              : 'Best for background music, melodies, and musical transitions'}
-          </small>
-        </div>
+        {sfxProvider === 'audiocraft' && (
+          <div className="input-group">
+            <label>Model Type</label>
+            <select
+              value={modelType}
+              onChange={e => setModelType(e.target.value as 'audiogen' | 'musicgen')}
+            >
+              <option value="audiogen">AudioGen (Sound Effects & Foley)</option>
+              <option value="musicgen">MusicGen (Background Music)</option>
+            </select>
+            <small className="help-text">
+              {modelType === 'audiogen'
+                ? 'Best for realistic sound effects, foley, impacts, and environmental sounds'
+                : 'Best for background music, melodies, and musical transitions'}
+            </small>
+          </div>
+        )}
 
         <div className="input-group">
           <label>Duration (seconds)</label>
@@ -256,10 +488,15 @@ export default function SFXEditor() {
             type="number"
             step="0.5"
             min="0.5"
-            max="10"
+            max={sfxProvider === 'elevenlabs' ? 30 : 10}
             value={duration}
             onChange={e => setDuration(parseFloat(e.target.value) || 2)}
           />
+          <small className="help-text">
+            {sfxProvider === 'elevenlabs'
+              ? 'Max 30 seconds. Leave blank for AI-decided duration (costs more).'
+              : 'Max 10 seconds for AudioCraft.'}
+          </small>
         </div>
 
         <button
@@ -297,14 +534,26 @@ export default function SFXEditor() {
                     </div>
                   </div>
                 </div>
-                <button
-                  className="btn-small"
-                  onClick={() => handleUseSuggestion(suggestion)}
-                  disabled={isGenerating}
-                  title={`Generate: ${suggestion.prompt}`}
-                >
-                  {isGenerating ? 'Generating...' : 'Use'}
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <button
+                    className="btn-small"
+                    onClick={() => handleUseSuggestion(suggestion, 'audiocraft')}
+                    disabled={isGenerating}
+                    title="Generate with AudioCraft (Free, Non-Commercial)"
+                    style={{ background: '#3b82f6' }}
+                  >
+                    {isGenerating ? '...' : 'AudioCraft'}
+                  </button>
+                  <button
+                    className="btn-small"
+                    onClick={() => handleUseSuggestion(suggestion, 'elevenlabs')}
+                    disabled={isGenerating || !elevenlabsApiKey}
+                    title={elevenlabsApiKey ? "Generate with ElevenLabs (Commercial)" : "Configure API key first"}
+                    style={{ background: elevenlabsApiKey ? '#10b981' : '#6b7280' }}
+                  >
+                    {isGenerating ? '...' : 'ElevenLabs'}
+                  </button>
+                </div>
               </div>
             )
             })}
@@ -374,6 +623,7 @@ export default function SFXEditor() {
                                 path: absolutePath,  // Use 'path' not 'audioPath'
                                 start: music.timestamp,  // Use 'start' not 'timestamp'
                                 duration: music.duration,
+                                originalDuration: music.duration,  // Store original duration
                                 volume: 0.5,  // Lower volume for background music
                                 prompt: `Music: ${music.description}`
                               })
