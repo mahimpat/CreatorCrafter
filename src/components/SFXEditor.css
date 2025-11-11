@@ -361,3 +361,75 @@
 .delete-btn-small:hover {
   background: #dc2626;
 }
+
+/* Settings Section */
+.settings-section {
+  margin-bottom: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.settings-toggle {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s;
+}
+
+.settings-toggle:hover {
+  background: var(--bg-tertiary);
+}
+
+.settings-toggle svg:last-child {
+  margin-left: auto;
+}
+
+.settings-content {
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.input-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.input-group select,
+.input-group input[type="text"],
+.input-group input[type="password"],
+.input-group input[type="number"] {
+  padding: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.input-group select:focus,
+.input-group input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}

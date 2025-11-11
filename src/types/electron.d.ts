@@ -36,6 +36,11 @@ declare global {
       freesoundGetSound: (soundId: number) => Promise<{ success: boolean; sound?: any; error?: string }>
       freesoundDownloadPreview: (previewUrl: string, outputPath: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
 
+      // ElevenLabs APIs
+      elevenlabsGenerate: (prompt: string, duration: number | undefined, apiKey: string) => Promise<{ success: boolean; filePath?: string; duration?: number; creditsUsed?: number; error?: string }>
+      elevenlabsValidateKey: (apiKey: string) => Promise<{ valid: boolean }>
+      elevenlabsGetCredits: (apiKey: string) => Promise<{ credits: number | null }>
+
       // App state management
       setUnsavedChanges: (hasChanges: boolean) => Promise<boolean>
       getUnsavedChanges: () => Promise<boolean>

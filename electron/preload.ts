@@ -18,6 +18,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generateSFX: (prompt: string, duration: number, modelType?: 'audiogen' | 'musicgen') =>
     ipcRenderer.invoke('audiocraft:generate', prompt, duration, modelType || 'audiogen'),
 
+  // ElevenLabs APIs
+  elevenlabsGenerate: (prompt: string, duration: number | undefined, apiKey: string) =>
+    ipcRenderer.invoke('elevenlabs:generate', prompt, duration, apiKey),
+  elevenlabsValidateKey: (apiKey: string) =>
+    ipcRenderer.invoke('elevenlabs:validateKey', apiKey),
+  elevenlabsGetCredits: (apiKey: string) =>
+    ipcRenderer.invoke('elevenlabs:getCredits', apiKey),
+
   // File system APIs
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   writeFile: (filePath: string, content: string) =>
@@ -97,6 +105,12 @@ export interface ElectronAPI {
   renderVideo: (options: RenderOptions) => Promise<string>
   analyzeVideo: (videoPath: string, audioPath: string) => Promise<VideoAnalysis>
   generateSFX: (prompt: string, duration: number, modelType?: 'audiogen' | 'musicgen') => Promise<string>
+
+  // ElevenLabs APIs
+  elevenlabsGenerate: (prompt: string, duration: number | undefined, apiKey: string) => Promise<{ success: boolean; filePath?: string; duration?: number; creditsUsed?: number; error?: string }>
+  elevenlabsValidateKey: (apiKey: string) => Promise<{ valid: boolean }>
+  elevenlabsGetCredits: (apiKey: string) => Promise<{ credits: number | null }>
+
   readFile: (filePath: string) => Promise<string>
   writeFile: (filePath: string, content: string) => Promise<boolean>
 
