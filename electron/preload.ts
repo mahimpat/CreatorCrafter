@@ -15,8 +15,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // AI/ML APIs
   analyzeVideo: (videoPath: string, audioPath: string) =>
     ipcRenderer.invoke('ai:analyzeVideo', videoPath, audioPath),
+  unifiedAnalyze: (videoPath: string) =>
+    ipcRenderer.invoke('video:unifiedAnalyze', videoPath),
+
+  // Timeline analysis - analyzes the timeline composition (video clips only, not SFX/overlays)
+  analyzeTimeline: (composition: Array<{
+    videoPath: string
+    start: number
+    duration: number
+    clipStart: number
+    clipEnd: number
+  }>) =>
+    ipcRenderer.invoke('timeline:analyze', composition),
   generateSFX: (prompt: string, duration: number, modelType?: 'audiogen' | 'musicgen') =>
     ipcRenderer.invoke('audiocraft:generate', prompt, duration, modelType || 'audiogen'),
+
+  // Caption styling AI analysis
+  analyzeCaptions: (transcriptionData: any) =>
+    ipcRenderer.invoke('captions:analyze', transcriptionData),
 
   // ElevenLabs APIs
   elevenlabsGenerate: (prompt: string, duration: number | undefined, apiKey: string) =>
@@ -25,6 +41,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('elevenlabs:validateKey', apiKey),
   elevenlabsGetCredits: (apiKey: string) =>
     ipcRenderer.invoke('elevenlabs:getCredits', apiKey),
+
+  // Thumbnail generation APIs
+  thumbnailAnalyze: (videoPath: string) =>
+    ipcRenderer.invoke('thumbnail:analyze', videoPath),
+  thumbnailExtract: (videoPath: string, timestamp: number) =>
+    ipcRenderer.invoke('thumbnail:extract', videoPath, timestamp),
+  thumbnailGenerate: (options: { videoPath: string; timestamp: number; text: string; template: string; brandKitId?: string }) =>
+    ipcRenderer.invoke('thumbnail:generate', options),
+  thumbnailGenerateCaptions: (videoPath: string, timestamp: number) =>
+    ipcRenderer.invoke('thumbnail:generateCaptions', videoPath, timestamp),
+
+  // Brand Kit APIs
+  brandkitList: () =>
+    ipcRenderer.invoke('brandkit:list'),
+  brandkitLoad: (brandKitId: string) =>
+    ipcRenderer.invoke('brandkit:load', brandKitId),
+  brandkitSave: (brandKit: any) =>
+    ipcRenderer.invoke('brandkit:save', brandKit),
+  brandkitDelete: (brandKitId: string) =>
+    ipcRenderer.invoke('brandkit:delete', brandKitId),
+
+  // Multi-Platform Export API
+  thumbnailMultiExport: (options: any) =>
+    ipcRenderer.invoke('thumbnail:multiExport', options),
 
   // File system APIs
   readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
@@ -46,7 +86,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('project:getRecent'),
   removeRecentProject: (projectPath: string) =>
     ipcRenderer.invoke('project:removeRecent', projectPath),
-  copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports' | 'audio' | 'music') =>
+  copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports' | 'audio' | 'music' | 'thumbnails') =>
     ipcRenderer.invoke('project:copyAsset', sourcePath, projectPath, assetType),
   resolveProjectPath: (projectPath: string, relativePath: string) =>
     ipcRenderer.invoke('project:resolvePath', projectPath, relativePath),
@@ -75,7 +115,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setUnsavedChanges: (hasChanges: boolean) =>
     ipcRenderer.invoke('app:setUnsavedChanges', hasChanges),
   getUnsavedChanges: () =>
-    ipcRenderer.invoke('app:getUnsavedChanges')
+    ipcRenderer.invoke('app:getUnsavedChanges'),
+
+  // SFX Library
+  loadSFXLibrary: () =>
+    ipcRenderer.invoke('sfxLibrary:load'),
+  getSFXLibraryPath: (relativePath: string) =>
+    ipcRenderer.invoke('sfxLibrary:getPath', relativePath),
+  copySFXToProject: (libraryPath: string, projectPath: string) =>
+    ipcRenderer.invoke('sfxLibrary:copyToProject', libraryPath, projectPath)
 })
 
 // Expose electron object for IPC event listeners (needed for progress tracking)
@@ -111,6 +159,21 @@ export interface ElectronAPI {
   elevenlabsValidateKey: (apiKey: string) => Promise<{ valid: boolean }>
   elevenlabsGetCredits: (apiKey: string) => Promise<{ credits: number | null }>
 
+  // Thumbnail generation APIs
+  thumbnailAnalyze: (videoPath: string) => Promise<{ success: boolean; candidates?: Array<{
+    timestamp: number
+    frame_number: number
+    score: number
+    has_faces: boolean
+    face_count: number
+    sharpness: number
+    contrast: number
+    vibrancy: number
+  }>; error?: string }>
+  thumbnailExtract: (videoPath: string, timestamp: number) => Promise<{ success: boolean; frame_path?: string; timestamp?: number; error?: string }>
+  thumbnailGenerate: (options: { videoPath: string; timestamp: number; text: string; template: string }) => Promise<{ success: boolean; thumbnail_path?: string; error?: string }>
+  thumbnailGenerateCaptions: (videoPath: string, timestamp: number) => Promise<{ success: boolean; captions?: string[]; visual_description?: string; audio_context?: string; error?: string }>
+
   readFile: (filePath: string) => Promise<string>
   writeFile: (filePath: string, content: string) => Promise<boolean>
 
@@ -122,7 +185,7 @@ export interface ElectronAPI {
   openProjectFile: () => Promise<string | null>
   getRecentProjects: () => Promise<any[]>
   removeRecentProject: (projectPath: string) => Promise<boolean>
-  copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports' | 'audio' | 'music') => Promise<string>
+  copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports' | 'audio' | 'music' | 'thumbnails') => Promise<string>
   resolveProjectPath: (projectPath: string, relativePath: string) => Promise<string>
   getProjectSFXFiles: (projectPath: string) => Promise<string[]>
   getProjectExports: (projectPath: string) => Promise<string[]>

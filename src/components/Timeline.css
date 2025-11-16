@@ -367,6 +367,7 @@
 
 /* Tracks */
 .track {
+  min-height: 80px;
   border-bottom: 1px solid #2a2a2a;
   background: #1e1e1e;
   position: relative;
@@ -525,7 +526,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 12px;
+  width: 16px; /* Increased for easier interaction */
   background: transparent;
   z-index: 10;
   cursor: ew-resize;
@@ -626,6 +627,43 @@
 
 .sfx-item:hover {
   background: linear-gradient(135deg, #66bb6a, #4caf50);
+}
+
+/* Audio Items */
+.audio-item {
+  background: linear-gradient(135deg, #2196f3, #1976d2);
+  border-color: #1565c0;
+}
+
+.audio-item:hover {
+  background: linear-gradient(135deg, #42a5f5, #2196f3);
+}
+
+/* Split Button */
+.split-btn {
+  position: absolute;
+  background: #ff5722 !important;
+  border: 2px solid #ffffff !important;
+  border-radius: 50%;
+  width: 32px !important;
+  height: 32px !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+  z-index: 100 !important;
+  transition: all 0.2s ease;
+}
+
+.split-btn:hover {
+  background: #f4511e !important;
+  transform: translate(-50%, -50%) scale(1.1) !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6) !important;
+}
+
+.split-btn:active {
+  transform: translate(-50%, -50%) scale(0.95) !important;
 }
 
 .waveform {

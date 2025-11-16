@@ -1,4 +1,4 @@
-import { Subtitle, SFXTrack, TextOverlay, VideoAnalysisResult, VideoClip, VideoTimelineClip, MediaOverlayAsset, MediaOverlay } from '../context/ProjectContext'
+import { Subtitle, SFXTrack, TextOverlay, VideoAnalysisResult, UnifiedAnalysisResult, VideoClip, VideoTimelineClip, MediaOverlayAsset, MediaOverlay, AudioTrack } from '../context/ProjectContext'
 import { ProjectFile, PROJECT_VERSION, ProjectSFXTrack } from '../types/project'
 
 // Browser-compatible path utilities (no Node.js path module)
@@ -43,12 +43,15 @@ export function serializeProject(
     duration: number
     subtitles: Subtitle[]
     sfxTracks: SFXTrack[]
+    sfxLibrary?: import('../context/ProjectContext').SFXLibraryItem[]
     textOverlays: TextOverlay[]
     videoClips?: VideoClip[]
     videoTimelineClips?: VideoTimelineClip[]
     mediaOverlayAssets?: MediaOverlayAsset[]
     mediaOverlays?: MediaOverlay[]
+    audioTracks?: AudioTrack[]
     analysis: VideoAnalysisResult | null
+    unifiedAnalysis?: UnifiedAnalysisResult | null
   },
   createdAt?: string
 ): ProjectFile {
@@ -66,8 +69,26 @@ export function serializeProject(
       path: relativePath.replace(/\\/g, '/'), // Normalize path separators
       start: track.start,
       duration: track.duration,
+      originalDuration: track.originalDuration, // Include original duration
       volume: track.volume,
       prompt: track.prompt
+    }
+  })
+
+  // Convert sfxLibrary items to relative paths
+  const projectSFXLibrary: ProjectSFXTrack[] | undefined = state.sfxLibrary?.map(item => {
+    const relativePath = item.path.startsWith(projectPath)
+      ? getRelativePath(projectPath, item.path)
+      : item.path // Keep absolute if external
+
+    return {
+      id: item.id,
+      path: relativePath.replace(/\\/g, '/'),
+      start: 0, // Library items don't have timeline positions
+      duration: item.duration,
+      originalDuration: item.duration,
+      volume: 1,
+      prompt: item.prompt
     }
   })
 
@@ -80,6 +101,23 @@ export function serializeProject(
   const audioRelativePath = state.originalAudioPath && state.originalAudioPath.startsWith(projectPath)
     ? getRelativePath(projectPath, state.originalAudioPath).replace(/\\/g, '/')
     : state.originalAudioPath || ''
+
+  // Convert audio tracks to relative paths (using same format as SFX tracks)
+  const projectAudioTracks: any[] | undefined = state.audioTracks?.map(track => {
+    const relativePath = track.path.startsWith(projectPath)
+      ? getRelativePath(projectPath, track.path)
+      : track.path
+
+    return {
+      id: track.id,
+      path: relativePath.replace(/\\/g, '/'),
+      start: track.start,
+      duration: track.duration,
+      originalDuration: track.originalDuration,
+      volume: track.volume,
+      trimStart: track.trimStart
+    }
+  })
 
   return {
     version: PROJECT_VERSION,
@@ -97,12 +135,15 @@ export function serializeProject(
     } : undefined,
     subtitles: state.subtitles,
     sfxTracks: projectSFXTracks,
+    sfxLibrary: projectSFXLibrary,
     textOverlays: state.textOverlays,
     videoClips: state.videoClips,
     videoTimelineClips: state.videoTimelineClips,
     mediaOverlayAssets: state.mediaOverlayAssets,
     mediaOverlays: state.mediaOverlays,
-    analysis: state.analysis
+    audioTracks: projectAudioTracks,
+    analysis: state.analysis,
+    unifiedAnalysis: state.unifiedAnalysis
   } as ProjectFile
 }
 
@@ -120,13 +161,15 @@ export function deserializeProject(
   duration: number
   subtitles: Subtitle[]
   sfxTracks: SFXTrack[]
-  sfxLibrary?: any[]
+  sfxLibrary: import('../context/ProjectContext').SFXLibraryItem[]
   textOverlays: TextOverlay[]
   videoClips?: VideoClip[]
   videoTimelineClips?: VideoTimelineClip[]
   mediaOverlayAssets?: MediaOverlayAsset[]
   mediaOverlays?: MediaOverlay[]
+  audioTracks?: AudioTrack[]
   analysis: VideoAnalysisResult | null
+  unifiedAnalysis?: UnifiedAnalysisResult | null
   createdAt: string
   lastModified: string
 } {
@@ -159,8 +202,43 @@ export function deserializeProject(
       path: absolutePath,
       start: track.start,
       duration: track.duration,
+      originalDuration: track.originalDuration || track.duration, // Backward compatibility
       volume: track.volume,
       prompt: track.prompt
+    }
+  })
+
+  // Resolve SFX library paths to absolute
+  const sfxLibrary: import('../context/ProjectContext').SFXLibraryItem[] = (projectFile.sfxLibrary || []).map(item => {
+    const isRelative = !isAbsolutePath(item.path)
+    const absolutePath = isRelative
+      ? joinPaths(projectPath, item.path)
+      : item.path
+
+    return {
+      id: item.id,
+      path: absolutePath,
+      prompt: item.prompt || '',
+      duration: item.duration,
+      createdAt: Date.now() // Use current time since we don't store this
+    }
+  })
+
+  // Resolve audio track paths to absolute
+  const audioTracks: AudioTrack[] = ((projectFile as any).audioTracks || []).map((track: any) => {
+    const isRelative = !isAbsolutePath(track.path)
+    const absolutePath = isRelative
+      ? joinPaths(projectPath, track.path)
+      : track.path
+
+    return {
+      id: track.id,
+      path: absolutePath,
+      start: track.start,
+      duration: track.duration,
+      originalDuration: track.originalDuration || track.duration,
+      volume: track.volume,
+      trimStart: track.trimStart || 0
     }
   })
 
@@ -175,12 +253,15 @@ export function deserializeProject(
     duration,
     subtitles: projectFile.subtitles,
     sfxTracks,
+    sfxLibrary,
     textOverlays: projectFile.textOverlays,
     videoClips: (projectFile as any).videoClips || [],
     videoTimelineClips: (projectFile as any).videoTimelineClips || [],
     mediaOverlayAssets: (projectFile as any).mediaOverlayAssets || [],
     mediaOverlays: (projectFile as any).mediaOverlays || [],
+    audioTracks,
     analysis: projectFile.analysis,
+    unifiedAnalysis: projectFile.unifiedAnalysis || null,
     createdAt: projectFile.createdAt,
     lastModified: projectFile.lastModified
   }

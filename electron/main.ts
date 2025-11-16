@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, shell } from 'electron'
-import { join } from 'path'
-import { spawn } from 'child_process'
+import { join, dirname, basename } from 'path'
+import { spawn, exec } from 'child_process'
 import * as fs from 'fs/promises'
 import { readFile } from 'fs/promises'
 import * as projectManager from './projectManager'
@@ -449,6 +449,76 @@ function registerIpcHandlers() {
     }
   })
 
+  // Caption styling AI analysis handler
+  ipcMain.handle('captions:analyze', async (_, transcriptionData: any) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const scriptName = 'caption_styler.py'
+        const pythonScript = join(appRoot, 'python', scriptName)
+        const pythonPath = process.platform === 'win32'
+          ? join(installDir, 'venv', 'python.exe')
+          : join(installDir, 'venv', 'bin', 'python')
+
+        const timestamp = Date.now()
+        const inputPath = join(app.getPath('temp'), `captions-input-${timestamp}.json`)
+        const outputPath = join(app.getPath('temp'), `captions-output-${timestamp}.json`)
+
+        // Write input data to temp file
+        await fs.writeFile(inputPath, JSON.stringify(transcriptionData), 'utf-8')
+
+        console.log('Analyzing captions with:', { pythonPath, pythonScript })
+
+        const python = spawn(pythonPath, [
+          pythonScript,
+          '--input', inputPath,
+          '--output', outputPath
+        ])
+
+        let errorOutput = ''
+
+        python.stderr.on('data', (data) => {
+          errorOutput += data.toString()
+          console.log('Caption analysis:', data.toString())
+        })
+
+        python.on('close', async (code) => {
+          // Clean up input file
+          try {
+            await fs.unlink(inputPath)
+          } catch (err) {
+            console.warn('Failed to delete temp input file:', err)
+          }
+
+          if (code === 0) {
+            try {
+              const resultData = await fs.readFile(outputPath, 'utf-8')
+              const result = JSON.parse(resultData)
+
+              // Clean up output file
+              await fs.unlink(outputPath)
+
+              resolve(result)
+            } catch (err) {
+              console.error('Failed to read/parse caption analysis output:', err)
+              reject(new Error(`Failed to parse caption analysis: ${err}`))
+            }
+          } else {
+            console.error('Caption analysis failed:', errorOutput)
+            reject(new Error(`Caption analysis failed with code ${code}: ${errorOutput}`))
+          }
+        })
+
+        python.on('error', (err) => {
+          console.error('Failed to spawn python for caption analysis:', err)
+          reject(err)
+        })
+      } catch (error) {
+        console.error('Caption analysis error:', error)
+        reject(error)
+      }
+    })
+  })
+
   // AI analysis handler (video understanding)
   ipcMain.handle('ai:analyzeVideo', async (_, videoPath: string, audioPath: string) => {
     return new Promise((resolve, reject) => {
@@ -501,6 +571,623 @@ function registerIpcHandlers() {
         reject(err)
       })
     })
+  })
+
+  // Unified video analysis handler (combines thumbnail + SFX analysis)
+  ipcMain.handle('video:unifiedAnalyze', async (_, videoPath: string) => {
+    return new Promise((resolve, reject) => {
+      const scriptName = 'unified_analyzer.py'
+      const pythonScript = join(appRoot, 'python', scriptName)
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+
+      const outputPath = join(app.getPath('temp'), `unified-analysis-${Date.now()}.json`)
+
+      console.log('Running unified analysis:', { pythonPath, pythonScript, videoPath })
+
+      const python = spawn(pythonPath, [
+        pythonScript,
+        '--video', videoPath,
+        '--output', outputPath
+      ])
+
+      let output = ''
+      let errorOutput = ''
+
+      python.stdout.on('data', (data) => {
+        output += data.toString()
+      })
+
+      python.stderr.on('data', (data) => {
+        errorOutput += data.toString()
+        console.log('Unified analysis progress:', data.toString())
+      })
+
+      python.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(output)
+            resolve(result)
+          } catch (err) {
+            console.error('Failed to parse unified analysis output:', output)
+            reject(new Error(`Failed to parse unified analysis: ${err}`))
+          }
+        } else {
+          console.error('Unified analysis failed:', errorOutput)
+          reject(new Error(`Unified analysis failed with code ${code}: ${errorOutput}`))
+        }
+      })
+
+      python.on('error', (err) => {
+        console.error('Failed to spawn python for unified analysis:', err)
+        reject(err)
+      })
+    })
+  })
+
+  // Timeline analysis handler - analyzes the entire timeline composition
+  ipcMain.handle('timeline:analyze', async (_, composition: Array<{
+    videoPath: string
+    start: number
+    duration: number
+    clipStart: number
+    clipEnd: number
+  }>) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const tempDir = app.getPath('temp')
+        const timestamp = Date.now()
+        const concatListPath = join(tempDir, `timeline-concat-${timestamp}.txt`)
+        const outputVideoPath = join(tempDir, `timeline-preview-${timestamp}.mp4`)
+
+        console.log('Analyzing timeline composition:', { clips: composition.length })
+
+        // Step 1: Create FFmpeg concat file
+        // Format: file 'path' \n inpoint X \n outpoint Y \n duration Z
+        const concatContent = composition.map((clip, index) => {
+          // Escape single quotes in path for FFmpeg
+          const escapedPath = clip.videoPath.replace(/'/g, "'\\''")
+          const lines = [`file '${escapedPath}'`]
+
+          // Add trim points if specified
+          if (clip.clipStart > 0) {
+            lines.push(`inpoint ${clip.clipStart}`)
+          }
+          if (clip.clipEnd > clip.clipStart) {
+            lines.push(`outpoint ${clip.clipEnd}`)
+          }
+
+          return lines.join('\n')
+        }).join('\n')
+
+        // Write concat file
+        await writeFile(concatListPath, concatContent, 'utf-8')
+        console.log('Created concat file:', concatListPath)
+
+        // Step 2: Concatenate videos using FFmpeg
+        console.log('Concatenating timeline clips...')
+        const ffmpegConcat = spawn('ffmpeg', [
+          '-f', 'concat',
+          '-safe', '0',
+          '-i', concatListPath,
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',  // Fast encoding for analysis
+          '-crf', '28',            // Lower quality (faster encoding)
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-y',                    // Overwrite output
+          outputVideoPath
+        ])
+
+        let ffmpegError = ''
+        ffmpegConcat.stderr.on('data', (data) => {
+          ffmpegError += data.toString()
+        })
+
+        await new Promise((resolve, reject) => {
+          ffmpegConcat.on('close', (code) => {
+            if (code === 0) {
+              console.log('Timeline concatenation complete:', outputVideoPath)
+              resolve(true)
+            } else {
+              console.error('FFmpeg concatenation failed:', ffmpegError)
+              reject(new Error(`FFmpeg failed with code ${code}`))
+            }
+          })
+          ffmpegConcat.on('error', reject)
+        })
+
+        // Step 3: Analyze the concatenated timeline video
+        console.log('Analyzing concatenated timeline...')
+        const scriptName = 'unified_analyzer.py'
+        const pythonScript = join(appRoot, 'python', scriptName)
+        const pythonPath = process.platform === 'win32'
+          ? join(installDir, 'venv', 'python.exe')
+          : join(installDir, 'venv', 'bin', 'python')
+
+        const analysisOutputPath = join(tempDir, `timeline-analysis-${timestamp}.json`)
+
+        const python = spawn(pythonPath, [
+          pythonScript,
+          '--video', outputVideoPath,
+          '--output', analysisOutputPath
+        ])
+
+        let pythonOutput = ''
+        let pythonError = ''
+
+        python.stdout.on('data', (data) => {
+          pythonOutput += data.toString()
+        })
+
+        python.stderr.on('data', (data) => {
+          pythonError += data.toString()
+          console.log('Analysis progress:', data.toString().trim())
+        })
+
+        python.on('close', async (code) => {
+          // Clean up temporary files
+          try {
+            await unlink(concatListPath)
+            await unlink(outputVideoPath)
+          } catch (err) {
+            console.warn('Failed to clean up temp files:', err)
+          }
+
+          if (code === 0) {
+            try {
+              // Read analysis results
+              const analysisData = await readFile(analysisOutputPath, 'utf-8')
+              const analysis = JSON.parse(analysisData)
+
+              // Clean up analysis file
+              try {
+                await unlink(analysisOutputPath)
+              } catch (err) {
+                console.warn('Failed to clean up analysis file:', err)
+              }
+
+              // Format response for Timeline component
+              resolve({
+                success: true,
+                subtitles: analysis.transcription || [],
+                suggestedSFX: analysis.sfx_suggestions || []
+              })
+            } catch (err) {
+              console.error('Failed to parse analysis results:', err)
+              reject(new Error(`Failed to parse analysis: ${err}`))
+            }
+          } else {
+            console.error('Timeline analysis failed:', pythonError)
+            reject(new Error(`Analysis failed with code ${code}: ${pythonError}`))
+          }
+        })
+
+        python.on('error', (err) => {
+          console.error('Failed to spawn python:', err)
+          reject(err)
+        })
+
+      } catch (err) {
+        console.error('Timeline analysis error:', err)
+        reject(err)
+      }
+    })
+  })
+
+  // Thumbnail generation handlers
+  ipcMain.handle('thumbnail:analyze', async (_, videoPath: string) => {
+    return new Promise((resolve, reject) => {
+      const pythonScript = join(appRoot, 'python', 'thumbnail_generator.py')
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+
+      const outputPath = join(app.getPath('temp'), `thumbnail-analysis-${Date.now()}.json`)
+
+      console.log('Analyzing video for thumbnails:', { pythonPath, pythonScript, videoPath })
+
+      const python = spawn(pythonPath, [
+        pythonScript,
+        '--mode', 'analyze',
+        '--video', videoPath,
+        '--output', outputPath,
+        '--interval', '2',
+        '--max-frames', '15'
+      ])
+
+      let output = ''
+      let errorOutput = ''
+
+      python.stdout.on('data', (data) => {
+        output += data.toString()
+      })
+
+      python.stderr.on('data', (data) => {
+        errorOutput += data.toString()
+        console.log('Thumbnail analysis:', data.toString())
+      })
+
+      python.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(output)
+            resolve(result)
+          } catch (err) {
+            console.error('Failed to parse JSON:', output)
+            reject(new Error(`Failed to parse thumbnail analysis results: ${err}`))
+          }
+        } else {
+          console.error('Thumbnail analysis failed:', errorOutput)
+          reject(new Error(`Thumbnail analysis failed with code ${code}: ${errorOutput}`))
+        }
+      })
+
+      python.on('error', (err) => {
+        console.error('Failed to spawn python for thumbnail analysis:', err)
+        reject(err)
+      })
+    })
+  })
+
+  ipcMain.handle('thumbnail:extract', async (_, videoPath: string, timestamp: number) => {
+    return new Promise((resolve, reject) => {
+      const pythonScript = join(appRoot, 'python', 'thumbnail_generator.py')
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+
+      const outputPath = join(app.getPath('temp'), `thumbnail-frame-${Date.now()}.png`)
+
+      console.log('Extracting thumbnail frame:', { videoPath, timestamp, outputPath })
+
+      const python = spawn(pythonPath, [
+        pythonScript,
+        '--mode', 'extract',
+        '--video', videoPath,
+        '--timestamp', timestamp.toString(),
+        '--output', outputPath
+      ])
+
+      let output = ''
+      let errorOutput = ''
+
+      python.stdout.on('data', (data) => {
+        output += data.toString()
+      })
+
+      python.stderr.on('data', (data) => {
+        errorOutput += data.toString()
+        console.log('Frame extraction:', data.toString())
+      })
+
+      python.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(output)
+            resolve(result)
+          } catch (err) {
+            console.error('Failed to parse JSON:', output)
+            reject(new Error(`Failed to parse frame extraction result: ${err}`))
+          }
+        } else {
+          console.error('Frame extraction failed:', errorOutput)
+          reject(new Error(`Frame extraction failed with code ${code}: ${errorOutput}`))
+        }
+      })
+
+      python.on('error', (err) => {
+        console.error('Failed to spawn python for frame extraction:', err)
+        reject(err)
+      })
+    })
+  })
+
+  ipcMain.handle('thumbnail:generate', async (_, options: {
+    videoPath: string
+    timestamp: number
+    text: string
+    template: string
+    background?: string
+  }) => {
+    return new Promise((resolve, reject) => {
+      const pythonScript = join(appRoot, 'python', 'thumbnail_generator.py')
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+
+      const outputPath = join(app.getPath('temp'), `thumbnail-${Date.now()}.png`)
+
+      console.log('Generating thumbnail:', { options, outputPath })
+
+      const args = [
+        pythonScript,
+        '--mode', 'generate',
+        '--video', options.videoPath,
+        '--timestamp', options.timestamp.toString(),
+        '--text', options.text,
+        '--template', options.template,
+        '--output', outputPath
+      ]
+
+      // Add background parameter if specified
+      if (options.background) {
+        args.push('--background', options.background)
+      }
+
+      const python = spawn(pythonPath, args)
+
+      let output = ''
+      let errorOutput = ''
+
+      python.stdout.on('data', (data) => {
+        output += data.toString()
+      })
+
+      python.stderr.on('data', (data) => {
+        errorOutput += data.toString()
+        console.log('Thumbnail generation:', data.toString())
+      })
+
+      python.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(output)
+            resolve(result)
+          } catch (err) {
+            console.error('Failed to parse JSON:', output)
+            reject(new Error(`Failed to parse thumbnail generation result: ${err}`))
+          }
+        } else {
+          console.error('Thumbnail generation failed:', errorOutput)
+          reject(new Error(`Thumbnail generation failed with code ${code}: ${errorOutput}`))
+        }
+      })
+
+      python.on('error', (err) => {
+        console.error('Failed to spawn python for thumbnail generation:', err)
+        reject(err)
+      })
+    })
+  })
+
+  // AI Caption Generation for thumbnails
+  ipcMain.handle('thumbnail:generateCaptions', async (_, videoPath: string, timestamp: number) => {
+    return new Promise((resolve, reject) => {
+      const pythonScript = join(appRoot, 'python', 'caption_generator.py')
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+
+      const outputPath = join(app.getPath('temp'), `captions-${Date.now()}.json`)
+
+      console.log('Generating AI captions:', { videoPath, timestamp, outputPath })
+
+      const python = spawn(pythonPath, [
+        pythonScript,
+        '--video', videoPath,
+        '--timestamp', timestamp.toString(),
+        '--output', outputPath
+      ])
+
+      let output = ''
+      let errorOutput = ''
+
+      python.stdout.on('data', (data) => {
+        output += data.toString()
+      })
+
+      python.stderr.on('data', (data) => {
+        errorOutput += data.toString()
+        console.log('Caption generation:', data.toString())
+      })
+
+      python.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(output)
+            resolve(result)
+          } catch (err) {
+            console.error('Failed to parse JSON:', output)
+            // Fallback to default captions if parsing fails
+            resolve({
+              success: false,
+              captions: ["WATCH THIS NOW", "MUST SEE", "YOU WON'T BELIEVE THIS"],
+              error: `Failed to parse result: ${err}`
+            })
+          }
+        } else {
+          console.error('Caption generation failed:', errorOutput)
+          // Provide fallback captions even on failure
+          resolve({
+            success: false,
+            captions: ["WATCH THIS NOW", "MUST SEE", "YOU WON'T BELIEVE THIS"],
+            error: `Caption generation failed with code ${code}`
+          })
+        }
+      })
+
+      python.on('error', (err) => {
+        console.error('Failed to spawn python for caption generation:', err)
+        // Provide fallback captions
+        resolve({
+          success: false,
+          captions: ["WATCH THIS NOW", "MUST SEE", "YOU WON'T BELIEVE THIS"],
+          error: err.message
+        })
+      })
+    })
+  })
+
+  // Multi-Platform Export handler
+  ipcMain.handle('thumbnail:multiExport', async (_, options: {
+    sourcePath: string
+    platforms: any[]
+    outputDir: string
+    baseFilename?: string
+    format?: any
+    smartCrop?: boolean
+    preserveAspect?: boolean
+  }) => {
+    return new Promise((resolve, reject) => {
+      const pythonScript = join(appRoot, 'python', 'multi_export.py')
+
+      const args = [
+        pythonScript,
+        '--source', options.sourcePath,
+        '--platforms', JSON.stringify(options.platforms),
+        '--output-dir', options.outputDir
+      ]
+
+      if (options.baseFilename) {
+        args.push('--base-filename', options.baseFilename)
+      }
+      if (options.format) {
+        args.push('--format', JSON.stringify(options.format))
+      }
+      if (options.smartCrop !== undefined) {
+        args.push('--smart-crop', options.smartCrop.toString())
+      }
+      if (options.preserveAspect !== undefined) {
+        args.push('--preserve-aspect', options.preserveAspect.toString())
+      }
+
+      const python = spawn(pythonPath, args)
+
+      let stdoutData = ''
+      let stderrData = ''
+
+      python.stdout.on('data', (data) => {
+        stdoutData += data.toString()
+      })
+
+      python.stderr.on('data', (data) => {
+        stderrData += data.toString()
+        console.log('Multi-export:', data.toString())
+      })
+
+      python.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdoutData)
+            resolve(result)
+          } catch (e) {
+            reject(new Error('Failed to parse multi-export result'))
+          }
+        } else {
+          reject(new Error(stderrData || 'Multi-export failed'))
+        }
+      })
+
+      python.on('error', (err) => {
+        reject(err)
+      })
+    })
+  })
+
+  // Brand Kit Management handlers
+  ipcMain.handle('brandkit:list', async () => {
+    try {
+      const pythonScript = join(appRoot, 'python', 'brandkit_cli.py')
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+      const result = await new Promise((resolve, reject) => {
+        exec(`"${pythonPath}" "${pythonScript}" list`, (error, stdout, stderr) => {
+          if (error) {
+            console.error('Brand kit list error:', stderr)
+            reject(new Error(stderr || error.message))
+            return
+          }
+          try {
+            const data = JSON.parse(stdout)
+            resolve(data)
+          } catch (e) {
+            reject(new Error('Failed to parse brand kit list'))
+          }
+        })
+      })
+      return { success: true, brandKits: result }
+    } catch (error: any) {
+      console.error('Brand kit list error:', error)
+      return { success: false, error: error.message, brandKits: [] }
+    }
+  })
+
+  ipcMain.handle('brandkit:load', async (_, brandKitId: string) => {
+    try {
+      const pythonScript = join(appRoot, 'python', 'brandkit_cli.py')
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+      const result = await new Promise((resolve, reject) => {
+        exec(`"${pythonPath}" "${pythonScript}" load "${brandKitId}"`, (error, stdout, stderr) => {
+          if (error) {
+            console.error('Brand kit load error:', stderr)
+            reject(new Error(stderr || error.message))
+            return
+          }
+          try {
+            const data = JSON.parse(stdout)
+            resolve(data)
+          } catch (e) {
+            reject(new Error('Failed to parse brand kit'))
+          }
+        })
+      })
+      return { success: true, brandKit: result }
+    } catch (error: any) {
+      console.error('Brand kit load error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('brandkit:save', async (_, brandKit: any) => {
+    try {
+      const pythonScript = join(appRoot, 'python', 'brandkit_cli.py')
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+      const brandKitJson = JSON.stringify(brandKit)
+      const result = await new Promise((resolve, reject) => {
+        exec(`"${pythonPath}" "${pythonScript}" save '${brandKitJson}'`, (error, stdout, stderr) => {
+          if (error) {
+            console.error('Brand kit save error:', stderr)
+            reject(new Error(stderr || error.message))
+            return
+          }
+          resolve(true)
+        })
+      })
+      return { success: true }
+    } catch (error: any) {
+      console.error('Brand kit save error:', error)
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('brandkit:delete', async (_, brandKitId: string) => {
+    try {
+      const pythonScript = join(appRoot, 'python', 'brandkit_cli.py')
+      const pythonPath = process.platform === 'win32'
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+      await new Promise((resolve, reject) => {
+        exec(`"${pythonPath}" "${pythonScript}" delete "${brandKitId}"`, (error, stdout, stderr) => {
+          if (error) {
+            console.error('Brand kit delete error:', stderr)
+            reject(new Error(stderr || error.message))
+            return
+          }
+          resolve(true)
+        })
+      })
+      return { success: true }
+    } catch (error: any) {
+      console.error('Brand kit delete error:', error)
+      return { success: false, error: error.message }
+    }
   })
 
   // File system handlers
@@ -837,6 +1524,108 @@ function registerIpcHandlers() {
   ipcMain.handle('app:getUnsavedChanges', async () => {
     return hasUnsavedChanges
   })
+
+  // SFX Library handlers
+  ipcMain.handle('sfxLibrary:load', async () => {
+    try {
+      const libraryPath = join(__dirname, '..', 'sfx_library', 'library_metadata.json')
+
+      // Import synchronous fs functions
+      const fsSync = require('fs')
+
+      if (!fsSync.existsSync(libraryPath)) {
+        return {
+          success: false,
+          error: 'SFX library not found. Please run the library generation script first.'
+        }
+      }
+
+      const metadata = JSON.parse(fsSync.readFileSync(libraryPath, 'utf-8'))
+
+      return {
+        success: true,
+        metadata
+      }
+    } catch (error: any) {
+      console.error('Error loading SFX library:', error)
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  })
+
+  ipcMain.handle('sfxLibrary:getPath', async (_, relativePath: string) => {
+    try {
+      const absolutePath = join(__dirname, '..', relativePath)
+
+      // Import synchronous fs functions
+      const fsSync = require('fs')
+
+      if (!fsSync.existsSync(absolutePath)) {
+        return {
+          success: false,
+          error: 'Sound file not found'
+        }
+      }
+
+      return {
+        success: true,
+        path: absolutePath
+      }
+    } catch (error: any) {
+      console.error('Error getting SFX path:', error)
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  })
+
+  ipcMain.handle('sfxLibrary:copyToProject', async (_, libraryPath: string, projectPath: string) => {
+    try {
+      // Get source path from library
+      const sourcePath = join(__dirname, '..', libraryPath)
+
+      // Import synchronous fs functions
+      const fsSync = require('fs')
+
+      if (!fsSync.existsSync(sourcePath)) {
+        return {
+          success: false,
+          error: 'Source sound file not found'
+        }
+      }
+
+      // Create assets/sfx directory in project if it doesn't exist
+      const projectDir = dirname(projectPath)
+      const sfxDir = join(projectDir, 'assets', 'sfx')
+
+      if (!fsSync.existsSync(sfxDir)) {
+        fsSync.mkdirSync(sfxDir, { recursive: true })
+      }
+
+      // Copy file to project with unique name
+      const fileName = basename(libraryPath)
+      const timestamp = Date.now()
+      const outputFileName = `library-${timestamp}-${fileName}`
+      const outputPath = join(sfxDir, outputFileName)
+
+      fsSync.copyFileSync(sourcePath, outputPath)
+
+      // Return absolute path for playback
+      return {
+        success: true,
+        projectPath: outputPath
+      }
+    } catch (error: any) {
+      console.error('Error copying SFX to project:', error)
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  })
 }
 
 interface RenderOptions {
@@ -894,22 +1683,22 @@ function buildRenderCommand(
       videoLabel = outputLabel
     })
   } else {
-    // No overlays, just rename the video stream
+    // No overlays, just pass through the video stream
     if (videoLabel !== '[0:v]') {
-      filters.push(`${videoLabel}copy[vout]`)
+      filters.push(`${videoLabel}null[vout]`)
     } else {
       videoLabel = '[vout]'
-      filters.push(`[0:v]copy[vout]`)
+      filters.push(`[0:v]null[vout]`)
     }
   }
 
   // 3. Mix audio tracks (original + SFX with timing)
   if (sfxInputs.length > 0) {
     const audioFilter = buildAudioMixFilter(sfxInputs)
-    filters.push(`[0:a]${audioFilter}[aout]`)
+    filters.push(`${audioFilter}[aout]`)
   } else {
-    // No SFX, just copy original audio
-    filters.push('[0:a]copy[aout]')
+    // No SFX, just pass through original audio
+    filters.push('[0:a]anull[aout]')
   }
 
   // Apply all filters
@@ -939,7 +1728,7 @@ function buildRenderCommand(
 }
 
 // Build subtitle filter (burn subtitles into video)
-function buildSubtitleFilter(subtitles: Array<{ text: string; start: number; end: number; style?: any }>): string {
+function buildSubtitleFilter(subtitles: Array<{ text: string; start: number; end: number; style?: any; words?: any[]; emphasisColor?: string; animation?: any }>): string {
   // Escape text for FFmpeg drawtext filter
   const escapeText = (text: string): string => {
     return text
@@ -951,20 +1740,84 @@ function buildSubtitleFilter(subtitles: Array<{ text: string; start: number; end
 
   // Build drawtext filter for each subtitle with enable condition
   const drawTextFilters = subtitles.map((sub, idx) => {
-    const escapedText = escapeText(sub.text)
     const style = sub.style || {}
-
-    const fontFile = style.fontFamily ? `fontfile='${style.fontFamily}'` : ''
     const fontSize = style.fontSize || 24
     const fontColor = style.color || 'white'
     const borderColor = style.borderColor || 'black'
     const borderWidth = style.borderWidth || 2
 
-    // Position (default: bottom center)
-    const x = style.x !== undefined ? style.x : '(w-text_w)/2'
-    const y = style.y !== undefined ? style.y : 'h-th-50'
+    // Check if subtitle has word-level data for AI styling
+    if (sub.words && sub.words.length > 0 && sub.animation?.type) {
+      const animationType = sub.animation.type
+      const animDuration = (sub.animation.duration || 150) / 1000  // Convert ms to seconds
 
-    return `drawtext=${fontFile ? fontFile + ':' : ''}text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${x}:y=${y}:enable='between(t,${sub.start},${sub.end})'`
+      const baseX = style.position === 'top' ? '(w-text_w)/2' :
+                    style.position === 'center' ? '(w-text_w)/2' :
+                    '(w-text_w)/2'
+
+      const baseY = style.position === 'top' ? '50' :
+                    style.position === 'center' ? '(h-text_h)/2' :
+                    'h-th-50'
+
+      // Create word-by-word filters with chosen animation
+      return sub.words.map((word: any, wordIdx: number) => {
+        const escapedWord = escapeText(word.text)
+        const wordColor = word.emphasized && sub.emphasisColor ? sub.emphasisColor : fontColor
+        const wordSize = word.emphasized ? Math.round(fontSize * 1.1) : fontSize
+        const wordOffset = wordIdx * fontSize * 0.6
+
+        const wordStart = word.start
+        const wordEnd = word.end
+        const wordDuration = wordEnd - wordStart
+
+        if (animationType === 'karaoke') {
+          // Karaoke: Simple reveal during word time
+          return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:enable='between(t,${wordStart},${wordEnd})'`
+
+        } else if (animationType === 'pop') {
+          // Pop: Scale from 0 to full size at start of word, then stay visible
+          // Use alpha fade-in combined with word timing
+          const fadeStart = wordStart
+          const fadeEnd = wordStart + Math.min(animDuration, wordDuration)
+
+          return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:alpha='if(lt(t,${fadeStart}),0,if(lt(t,${fadeEnd}),(t-${fadeStart})/${animDuration},if(lt(t,${wordEnd}),1,0)))'`
+
+        } else if (animationType === 'slide') {
+          // Slide: Slide in from bottom, then stay visible
+          const slideStart = wordStart
+          const slideEnd = wordStart + Math.min(animDuration, wordDuration)
+          const slideDistance = 50  // pixels to slide
+
+          return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y='if(lt(t,${slideStart}),${baseY}+${slideDistance},if(lt(t,${slideEnd}),${baseY}+${slideDistance}*(1-(t-${slideStart})/${animDuration}),${baseY}))':alpha='if(lt(t,${wordStart}),0,if(lt(t,${wordEnd}),1,0))'`
+
+        } else {
+          // Fallback: no animation
+          return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:enable='between(t,${wordStart},${wordEnd})'`
+        }
+      }).join(',')
+    } else if (sub.words && sub.words.length > 0) {
+      // Static rendering with emphasis colors (no animation)
+      // Build full text with emphasis markers for FFmpeg
+      const fullText = sub.words.map((word: any) => word.text).join(' ')
+      const escapedText = escapeText(fullText)
+
+      // For now, render as single text block
+      // TODO: Advanced implementation would render each emphasized word separately
+      const x = style.x !== undefined ? style.x : '(w-text_w)/2'
+      const y = style.y !== undefined ? style.y : 'h-th-50'
+
+      return `drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${x}:y=${y}:enable='between(t,${sub.start},${sub.end})'`
+    } else {
+      // Standard subtitle (no AI styling)
+      const escapedText = escapeText(sub.text)
+      const fontFile = style.fontFamily ? `fontfile='${style.fontFamily}'` : ''
+
+      // Position (default: bottom center)
+      const x = style.x !== undefined ? style.x : '(w-text_w)/2'
+      const y = style.y !== undefined ? style.y : 'h-th-50'
+
+      return `drawtext=${fontFile ? fontFile + ':' : ''}text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${x}:y=${y}:enable='between(t,${sub.start},${sub.end})'`
+    }
   }).join(',')
 
   return drawTextFilters

@@ -1,0 +1,573 @@
+{
+  "version": "2.0.0",
+  "name": "Content Creator Essentials Pack",
+  "generated_at": "2025-11-15T22:25:13.757549",
+  "total_sounds": 50,
+  "categories": {
+    "attention": {
+      "description": "Attention-grabbing sounds for hooks and dramatic moments",
+      "sounds": [
+        {
+          "name": "record-scratch",
+          "prompt": "vinyl record scratch sound effect, dramatic stop",
+          "duration": 3.0,
+          "tags": [
+            "record",
+            "scratch",
+            "stop",
+            "dramatic"
+          ]
+        },
+        {
+          "name": "rewind",
+          "prompt": "tape rewind sound effect, fast backwards",
+          "duration": 3.0,
+          "tags": [
+            "rewind",
+            "tape",
+            "backwards"
+          ]
+        },
+        {
+          "name": "fast-forward",
+          "prompt": "fast forward sound effect, VCR tape speeding up",
+          "duration": 3.0,
+          "tags": [
+            "fast",
+            "forward",
+            "speed"
+          ]
+        },
+        {
+          "name": "air-horn",
+          "prompt": "air horn blast sound effect, loud party horn",
+          "duration": 3.0,
+          "tags": [
+            "air",
+            "horn",
+            "blast",
+            "loud"
+          ]
+        },
+        {
+          "name": "dramatic-hit",
+          "prompt": "dramatic orchestral hit sound, epic impact",
+          "duration": 3.0,
+          "tags": [
+            "dramatic",
+            "orchestral",
+            "epic",
+            "impact"
+          ]
+        },
+        {
+          "name": "bass-drop",
+          "prompt": "massive bass drop sound effect, dubstep style",
+          "duration": 3.0,
+          "tags": [
+            "bass",
+            "drop",
+            "dubstep",
+            "heavy"
+          ]
+        },
+        {
+          "name": "shock-sfx",
+          "prompt": "shock sound effect, dramatic surprise sting",
+          "duration": 3.0,
+          "tags": [
+            "shock",
+            "surprise",
+            "sting"
+          ]
+        },
+        {
+          "name": "suspense-hit",
+          "prompt": "suspense thriller hit sound, tense impact",
+          "duration": 3.0,
+          "tags": [
+            "suspense",
+            "thriller",
+            "tense"
+          ]
+        },
+        {
+          "name": "jump-scare",
+          "prompt": "jump scare sound effect, sudden loud scary noise",
+          "duration": 3.0,
+          "tags": [
+            "jump",
+            "scare",
+            "scary",
+            "sudden"
+          ]
+        },
+        {
+          "name": "cartoon-boing",
+          "prompt": "cartoon boing sound effect, bouncy spring",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "boing",
+            "bounce",
+            "spring"
+          ]
+        },
+        {
+          "name": "wrong-answer",
+          "prompt": "wrong answer buzzer sound, game show fail",
+          "duration": 3.0,
+          "tags": [
+            "wrong",
+            "buzzer",
+            "fail",
+            "game"
+          ]
+        },
+        {
+          "name": "clown-horn",
+          "prompt": "clown horn honk sound effect, funny bike horn",
+          "duration": 3.0,
+          "tags": [
+            "clown",
+            "horn",
+            "honk",
+            "funny"
+          ]
+        },
+        {
+          "name": "glitch-impact",
+          "prompt": "digital glitch impact sound effect, technology malfunction",
+          "duration": 3.0,
+          "tags": [
+            "glitch",
+            "digital",
+            "tech",
+            "impact"
+          ]
+        },
+        {
+          "name": "laser-zap",
+          "prompt": "laser zap sound effect, sci-fi energy blast",
+          "duration": 3.0,
+          "tags": [
+            "laser",
+            "zap",
+            "sci-fi",
+            "energy"
+          ]
+        },
+        {
+          "name": "explosion-boom",
+          "prompt": "cinematic explosion boom, big movie blast",
+          "duration": 3.0,
+          "tags": [
+            "explosion",
+            "boom",
+            "cinematic",
+            "blast"
+          ]
+        }
+      ]
+    },
+    "creator_transitions": {
+      "description": "Modern transitions for jump cuts and scene changes",
+      "sounds": [
+        {
+          "name": "jump-cut",
+          "prompt": "quick jump cut whoosh sound, fast transition",
+          "duration": 3.0,
+          "tags": [
+            "jump",
+            "cut",
+            "whoosh",
+            "fast"
+          ]
+        },
+        {
+          "name": "glitch-transition",
+          "prompt": "digital glitch transition sound effect, data corruption",
+          "duration": 3.0,
+          "tags": [
+            "glitch",
+            "transition",
+            "digital",
+            "data"
+          ]
+        },
+        {
+          "name": "tape-stop",
+          "prompt": "tape stop sound effect, slowing down to halt",
+          "duration": 3.0,
+          "tags": [
+            "tape",
+            "stop",
+            "slow",
+            "halt"
+          ]
+        },
+        {
+          "name": "quick-swipe",
+          "prompt": "quick swipe whoosh sound, fast swish",
+          "duration": 3.0,
+          "tags": [
+            "swipe",
+            "whoosh",
+            "quick",
+            "swish"
+          ]
+        },
+        {
+          "name": "zoom-in",
+          "prompt": "zoom in whoosh sound effect, approaching fast",
+          "duration": 3.0,
+          "tags": [
+            "zoom",
+            "in",
+            "approach",
+            "whoosh"
+          ]
+        },
+        {
+          "name": "zoom-out",
+          "prompt": "zoom out whoosh sound effect, receding away",
+          "duration": 3.0,
+          "tags": [
+            "zoom",
+            "out",
+            "recede",
+            "whoosh"
+          ]
+        },
+        {
+          "name": "hologram-appear",
+          "prompt": "hologram appearing sound effect, sci-fi materialize",
+          "duration": 3.0,
+          "tags": [
+            "hologram",
+            "appear",
+            "sci-fi",
+            "tech"
+          ]
+        },
+        {
+          "name": "hologram-disappear",
+          "prompt": "hologram disappearing sound effect, dematerialize",
+          "duration": 3.0,
+          "tags": [
+            "hologram",
+            "disappear",
+            "dematerialize"
+          ]
+        },
+        {
+          "name": "digital-wipe",
+          "prompt": "digital screen wipe sound effect, transition swipe",
+          "duration": 3.0,
+          "tags": [
+            "digital",
+            "wipe",
+            "screen",
+            "swipe"
+          ]
+        },
+        {
+          "name": "cinematic-riser",
+          "prompt": "cinematic riser sound effect, building tension",
+          "duration": 3.0,
+          "tags": [
+            "cinematic",
+            "riser",
+            "tension",
+            "build"
+          ]
+        },
+        {
+          "name": "reverse-cymbal",
+          "prompt": "reverse cymbal crash sound effect, backwards buildup",
+          "duration": 3.0,
+          "tags": [
+            "reverse",
+            "cymbal",
+            "crash",
+            "buildup"
+          ]
+        },
+        {
+          "name": "trailer-boom",
+          "prompt": "movie trailer boom sound, deep bass hit",
+          "duration": 3.0,
+          "tags": [
+            "trailer",
+            "boom",
+            "movie",
+            "bass"
+          ]
+        },
+        {
+          "name": "snap-cut",
+          "prompt": "snap finger sound effect, quick transition snap",
+          "duration": 3.0,
+          "tags": [
+            "snap",
+            "finger",
+            "quick",
+            "cut"
+          ]
+        },
+        {
+          "name": "time-freeze",
+          "prompt": "time freeze sound effect, motion stop with reverb",
+          "duration": 3.0,
+          "tags": [
+            "time",
+            "freeze",
+            "stop",
+            "reverb"
+          ]
+        },
+        {
+          "name": "speed-ramp",
+          "prompt": "speed ramp sound effect, slow motion transition",
+          "duration": 3.0,
+          "tags": [
+            "speed",
+            "ramp",
+            "slow",
+            "motion"
+          ]
+        }
+      ]
+    },
+    "emotional": {
+      "description": "Emotional moments and storytelling sounds",
+      "sounds": [
+        {
+          "name": "victory-fanfare",
+          "prompt": "short victory fanfare sound, success celebration",
+          "duration": 3.0,
+          "tags": [
+            "victory",
+            "fanfare",
+            "success",
+            "win"
+          ]
+        },
+        {
+          "name": "achievement-unlock",
+          "prompt": "achievement unlock sound effect, game reward",
+          "duration": 3.0,
+          "tags": [
+            "achievement",
+            "unlock",
+            "game",
+            "reward"
+          ]
+        },
+        {
+          "name": "level-up",
+          "prompt": "level up sound effect, power up success",
+          "duration": 3.0,
+          "tags": [
+            "level",
+            "up",
+            "power",
+            "success"
+          ]
+        },
+        {
+          "name": "sad-trombone",
+          "prompt": "sad trombone fail sound effect, comedic failure",
+          "duration": 3.0,
+          "tags": [
+            "sad",
+            "trombone",
+            "fail",
+            "comedy"
+          ]
+        },
+        {
+          "name": "game-over",
+          "prompt": "game over sound effect, defeat loss",
+          "duration": 3.0,
+          "tags": [
+            "game",
+            "over",
+            "defeat",
+            "loss"
+          ]
+        },
+        {
+          "name": "error-sound",
+          "prompt": "error sound effect, system failure beep",
+          "duration": 3.0,
+          "tags": [
+            "error",
+            "failure",
+            "beep",
+            "system"
+          ]
+        },
+        {
+          "name": "suspense-drone",
+          "prompt": "suspense drone sound, tense atmosphere",
+          "duration": 3.0,
+          "tags": [
+            "suspense",
+            "drone",
+            "tense",
+            "atmosphere"
+          ]
+        },
+        {
+          "name": "heartbeat-pulse",
+          "prompt": "heartbeat pulse sound effect, nervous tension",
+          "duration": 3.0,
+          "tags": [
+            "heartbeat",
+            "pulse",
+            "nervous",
+            "tension"
+          ]
+        },
+        {
+          "name": "epic-orchestral",
+          "prompt": "epic orchestral swell sound, heroic moment",
+          "duration": 3.0,
+          "tags": [
+            "epic",
+            "orchestral",
+            "heroic",
+            "swell"
+          ]
+        },
+        {
+          "name": "triumphant-horns",
+          "prompt": "triumphant horn fanfare, victory theme",
+          "duration": 3.0,
+          "tags": [
+            "triumphant",
+            "horns",
+            "fanfare",
+            "theme"
+          ]
+        }
+      ]
+    },
+    "engagement": {
+      "description": "Engagement sounds for calls-to-action and viewer interaction",
+      "sounds": [
+        {
+          "name": "bell-notification",
+          "prompt": "notification bell ding sound, alert chime",
+          "duration": 3.0,
+          "tags": [
+            "bell",
+            "notification",
+            "ding",
+            "alert"
+          ]
+        },
+        {
+          "name": "subscribe-click",
+          "prompt": "button click sound effect, satisfying tap",
+          "duration": 3.0,
+          "tags": [
+            "subscribe",
+            "click",
+            "button",
+            "tap"
+          ]
+        },
+        {
+          "name": "like-sound",
+          "prompt": "positive like sound effect, approval chime",
+          "duration": 3.0,
+          "tags": [
+            "like",
+            "positive",
+            "approval",
+            "chime"
+          ]
+        },
+        {
+          "name": "countdown-beep",
+          "prompt": "countdown timer beep sound, short tick",
+          "duration": 3.0,
+          "tags": [
+            "countdown",
+            "timer",
+            "beep",
+            "tick"
+          ]
+        },
+        {
+          "name": "countdown-final",
+          "prompt": "countdown final beep sound, urgent alert",
+          "duration": 3.0,
+          "tags": [
+            "countdown",
+            "final",
+            "urgent",
+            "beep"
+          ]
+        },
+        {
+          "name": "time-running-out",
+          "prompt": "time running out ticking sound, urgent timer",
+          "duration": 3.0,
+          "tags": [
+            "time",
+            "running",
+            "ticking",
+            "urgent"
+          ]
+        },
+        {
+          "name": "pop-up",
+          "prompt": "pop-up appear sound effect, graphic element",
+          "duration": 3.0,
+          "tags": [
+            "pop",
+            "up",
+            "appear",
+            "graphic"
+          ]
+        },
+        {
+          "name": "text-appear",
+          "prompt": "text appearing sound effect, typing reveal",
+          "duration": 3.0,
+          "tags": [
+            "text",
+            "appear",
+            "typing",
+            "reveal"
+          ]
+        },
+        {
+          "name": "cash-register",
+          "prompt": "cash register cha-ching sound, money sale",
+          "duration": 3.0,
+          "tags": [
+            "cash",
+            "register",
+            "money",
+            "sale"
+          ]
+        },
+        {
+          "name": "magic-sparkle",
+          "prompt": "magic sparkle sound effect, fairy dust twinkle",
+          "duration": 3.0,
+          "tags": [
+            "magic",
+            "sparkle",
+            "fairy",
+            "twinkle"
+          ]
+        }
+      ]
+    }
+  }
+}

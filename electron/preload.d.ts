@@ -5,7 +5,20 @@ export interface ElectronAPI {
     getVideoMetadata: (videoPath: string) => Promise<VideoMetadata>;
     renderVideo: (options: RenderOptions) => Promise<string>;
     analyzeVideo: (videoPath: string, audioPath: string) => Promise<VideoAnalysis>;
-    generateSFX: (prompt: string, duration: number) => Promise<string>;
+    generateSFX: (prompt: string, duration: number, modelType?: 'audiogen' | 'musicgen') => Promise<string>;
+    elevenlabsGenerate: (prompt: string, duration: number | undefined, apiKey: string) => Promise<{
+        success: boolean;
+        filePath?: string;
+        duration?: number;
+        creditsUsed?: number;
+        error?: string;
+    }>;
+    elevenlabsValidateKey: (apiKey: string) => Promise<{
+        valid: boolean;
+    }>;
+    elevenlabsGetCredits: (apiKey: string) => Promise<{
+        credits: number | null;
+    }>;
     readFile: (filePath: string) => Promise<string>;
     writeFile: (filePath: string, content: string) => Promise<boolean>;
     createProject: (options: {
@@ -22,7 +35,7 @@ export interface ElectronAPI {
     openProjectFile: () => Promise<string | null>;
     getRecentProjects: () => Promise<any[]>;
     removeRecentProject: (projectPath: string) => Promise<boolean>;
-    copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports') => Promise<string>;
+    copyAssetToProject: (sourcePath: string, projectPath: string, assetType: 'source' | 'sfx' | 'exports' | 'audio' | 'music') => Promise<string>;
     resolveProjectPath: (projectPath: string, relativePath: string) => Promise<string>;
     getProjectSFXFiles: (projectPath: string) => Promise<string[]>;
     getProjectExports: (projectPath: string) => Promise<string[]>;
@@ -45,6 +58,8 @@ export interface ElectronAPI {
         filePath?: string;
         error?: string;
     }>;
+    setUnsavedChanges: (hasChanges: boolean) => Promise<boolean>;
+    getUnsavedChanges: () => Promise<boolean>;
 }
 export interface VideoMetadata {
     format: {
@@ -70,7 +85,10 @@ export interface VideoAnalysis {
     suggestedSFX: Array<{
         timestamp: number;
         prompt: string;
-        reason: string;
+        reason?: string;
+        visual_context?: string;
+        action_context?: string;
+        confidence?: number;
     }>;
     transcription: Array<{
         text: string;
@@ -101,5 +119,11 @@ export interface RenderOptions {
 declare global {
     interface Window {
         electronAPI: ElectronAPI;
+        electron: {
+            ipcRenderer: {
+                on: (channel: string, func: (...args: any[]) => void) => void;
+                removeListener: (channel: string, func: (...args: any[]) => void) => void;
+            };
+        };
     }
 }

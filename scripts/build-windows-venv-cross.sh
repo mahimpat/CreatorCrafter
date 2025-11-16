@@ -23,9 +23,9 @@ mkdir -p "$OUTPUT_DIR"
 
 SITE_PACKAGES="$VENV_NAME/Lib/site-packages"
 
-# Download Windows Python 3.11 embeddable
-echo "[1/12] Downloading Windows Python 3.11..."
-PYTHON_URL="https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
+# Download Windows Python 3.9 embeddable
+echo "[1/12] Downloading Windows Python 3.9..."
+PYTHON_URL="https://www.python.org/ftp/python/3.9.13/python-3.9.13-embed-amd64.zip"
 wget -q --show-progress "$PYTHON_URL" -O python-embed.zip
 
 echo "Extracting Python..."
@@ -68,13 +68,13 @@ download_package() {
 
     mkdir -p "$temp_dir"
 
-    # Download Windows wheels for Python 3.11
+    # Download Windows wheels for Python 3.9
     pip download \
         --only-binary=:all: \
         --platform win_amd64 \
-        --python-version 311 \
+        --python-version 39 \
         --implementation cp \
-        --abi cp311 \
+        --abi cp39 \
         "$package" \
         -d "$temp_dir" \
         2>/dev/null || true

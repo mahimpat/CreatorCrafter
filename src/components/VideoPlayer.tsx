@@ -7,6 +7,7 @@ import './VideoPlayer.css'
 function VideoPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const sfxAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const audioTrackRefs = useRef<Map<string, HTMLAudioElement>>(new Map())
   const {
     videoPath,
     videoMetadata,
@@ -17,7 +18,8 @@ function VideoPlayer() {
     setIsPlaying,
     subtitles,
     textOverlays,
-    sfxTracks
+    sfxTracks,
+    audioTracks
   } = useProject()
 
   const [volume, setVolume] = useState(1)
@@ -87,8 +89,13 @@ function VideoPlayer() {
     const video = videoRef.current
     if (!video) return
 
-    video.volume = isMuted ? 0 : volume
-  }, [volume, isMuted])
+    // Mute video's original audio if we have audio tracks (we'll play them separately)
+    if (audioTracks && audioTracks.length > 0) {
+      video.volume = 0
+    } else {
+      video.volume = isMuted ? 0 : volume
+    }
+  }, [volume, isMuted, audioTracks])
 
   // Update active subtitle based on current time
   useEffect(() => {
@@ -131,6 +138,31 @@ function VideoPlayer() {
     })
   }, [sfxTracks, volume, isMuted])
 
+  // Create audio elements for audio tracks
+  useEffect(() => {
+    const audioMap = audioTrackRefs.current
+
+    // Remove audio elements for deleted audio tracks
+    audioMap.forEach((audio, trackId) => {
+      if (!audioTracks.find(track => track.id === trackId)) {
+        audio.pause()
+        audio.remove()
+        audioMap.delete(trackId)
+      }
+    })
+
+    // Create audio elements for new audio tracks
+    audioTracks.forEach(track => {
+      if (!audioMap.has(track.id)) {
+        const audio = new Audio()
+        audio.src = `localfile://${track.path}`
+        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+        audio.preload = 'auto'
+        audioMap.set(track.id, audio)
+      }
+    })
+  }, [audioTracks, volume, isMuted])
+
   // Handle SFX playback based on current time and video state
   useEffect(() => {
     const audioMap = sfxAudioRefs.current
@@ -144,7 +176,7 @@ function VideoPlayer() {
 
       if (shouldBePlaying && audio.paused) {
         // Calculate the position within the SFX track
-        const audioTime = currentTime - track.start
+        const audioTime = currentTime - track.start + (track.trimStart || 0)
         audio.currentTime = Math.max(0, audioTime)
         audio.volume = track.volume * volume * (isMuted ? 0 : 1)
         audio.play().catch(console.error)
@@ -152,7 +184,7 @@ function VideoPlayer() {
         audio.pause()
       } else if (shouldBePlaying && !audio.paused) {
         // Sync audio time with video time
-        const expectedAudioTime = currentTime - track.start
+        const expectedAudioTime = currentTime - track.start + (track.trimStart || 0)
         if (Math.abs(audio.currentTime - expectedAudioTime) > 0.1) {
           audio.currentTime = Math.max(0, expectedAudioTime)
         }
@@ -160,11 +192,46 @@ function VideoPlayer() {
     })
   }, [currentTime, isPlaying, sfxTracks, volume, isMuted])
 
+  // Handle audio track playback based on current time and video state
+  useEffect(() => {
+    const audioMap = audioTrackRefs.current
+
+    audioTracks.forEach(track => {
+      const audio = audioMap.get(track.id)
+      if (!audio) return
+
+      const trackEnd = track.start + track.duration
+      const shouldBePlaying = isPlaying && currentTime >= track.start && currentTime < trackEnd
+
+      if (shouldBePlaying && audio.paused) {
+        // Calculate the position within the audio track (accounting for trimStart from splits)
+        const audioTime = currentTime - track.start + (track.trimStart || 0)
+        audio.currentTime = Math.max(0, audioTime)
+        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+        audio.play().catch(console.error)
+      } else if (!shouldBePlaying && !audio.paused) {
+        audio.pause()
+      } else if (shouldBePlaying && !audio.paused) {
+        // Sync audio time with video time
+        const expectedAudioTime = currentTime - track.start + (track.trimStart || 0)
+        if (Math.abs(audio.currentTime - expectedAudioTime) > 0.1) {
+          audio.currentTime = Math.max(0, expectedAudioTime)
+        }
+      }
+    })
+  }, [currentTime, isPlaying, audioTracks, volume, isMuted])
+
   // Pause all SFX when video is paused
   useEffect(() => {
-    const audioMap = sfxAudioRefs.current
+    const sfxMap = sfxAudioRefs.current
+    const audioMap = audioTrackRefs.current
 
     if (!isPlaying) {
+      sfxMap.forEach(audio => {
+        if (!audio.paused) {
+          audio.pause()
+        }
+      })
       audioMap.forEach(audio => {
         if (!audio.paused) {
           audio.pause()
@@ -185,10 +252,30 @@ function VideoPlayer() {
     })
   }, [volume, isMuted, sfxTracks])
 
+  // Update audio track volume when main volume changes
+  useEffect(() => {
+    const audioMap = audioTrackRefs.current
+
+    audioMap.forEach((audio, trackId) => {
+      const track = audioTracks.find(t => t.id === trackId)
+      if (track) {
+        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+      }
+    })
+  }, [volume, isMuted, audioTracks])
+
   // Cleanup audio elements on unmount
   useEffect(() => {
     return () => {
-      const audioMap = sfxAudioRefs.current
+      const sfxMap = sfxAudioRefs.current
+      const audioMap = audioTrackRefs.current
+
+      sfxMap.forEach(audio => {
+        audio.pause()
+        audio.remove()
+      })
+      sfxMap.clear()
+
       audioMap.forEach(audio => {
         audio.pause()
         audio.remove()

@@ -1,10 +1,6 @@
-# AI/ML Dependencies
-# Install torch first, then audiocraft
-torch>=2.2.0
-torchaudio>=2.2.0
-audiocraft
+# AI/ML Dependencies (Lightweight - ElevenLabs used for SFX)
 openai-whisper
-transformers>=4.30.0  # For CLIP vision model
+transformers>=4.30.0  # For BLIP vision model in scene analysis
 
 # Video Processing
 opencv-python==4.8.1.78
@@ -15,6 +11,14 @@ scenedetect[opencv]>=0.6.0  # Scene detection for smart analysis
 librosa>=0.10.0
 soundfile>=0.12.0
 
+# NLP for Caption Styling
+spacy>=3.7.0
+# Note: After pip install, run: python -m spacy download en_core_web_sm
+
 # Utilities
 Pillow>=10.0.0
 scipy>=1.11.0  # For enhanced peak detection in event_detector
+
+# REMOVED FOR THIS RELEASE (saves ~4GB disk space and installation time):
+# - torch, torchaudio, audiocraft (using ElevenLabs API instead)
+# - rembg, onnxruntime (thumbnail generation disabled)

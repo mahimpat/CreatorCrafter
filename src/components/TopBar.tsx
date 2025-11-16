@@ -14,6 +14,7 @@ export default function TopBar({ onExport }: TopBarProps) {
     videoPath,
     setIsAnalyzing,
     setAnalysis,
+    setUnifiedAnalysis,
     subtitles,
     sfxTracks,
     textOverlays,
@@ -24,7 +25,8 @@ export default function TopBar({ onExport }: TopBarProps) {
     isSaving,
     saveProject,
     saveProjectAs,
-    closeProject
+    closeProject,
+    videoTimelineClips
   } = useProject()
 
   const [showFileMenu, setShowFileMenu] = useState(false)
@@ -121,31 +123,26 @@ export default function TopBar({ onExport }: TopBarProps) {
     try {
       setIsAnalyzing(true)
 
-      // Try to extract audio (may fail if video has no audio track)
-      let audioPath = ''
-      try {
-        audioPath = await window.electronAPI.extractAudio(videoPath)
-      } catch (audioError: any) {
-        console.warn('Audio extraction failed:', audioError?.message)
+      // Use unified analysis (combines thumbnail, transcription, visual scenes, and SFX suggestions)
+      const result = await window.electronAPI.unifiedAnalyze(videoPath)
 
-        // Check if it's specifically a "no audio track" error
-        if (audioError?.message?.includes('no audio track')) {
-          console.log('Video has no audio - proceeding with visual-only analysis')
-          toast.dismiss(loadingToast)
-          toast.loading('Video has no audio - performing visual-only analysis...')
-          // Continue without audio - visual analysis will still work
-        } else {
-          // Other FFmpeg errors should stop the process
-          throw audioError
-        }
+      if (result.success) {
+        setAnalysis(null)  // Clear old "Analyze Timeline" results
+        setUnifiedAnalysis(result)
+        toast.dismiss(loadingToast)
+
+        // Show summary of what was analyzed
+        const summary = []
+        if (result.thumbnail_candidates?.length > 0) summary.push(`${result.thumbnail_candidates.length} thumbnail candidates`)
+        if (result.transcription?.length > 0) summary.push(`${result.transcription.length} transcript segments`)
+        if (result.sfx_suggestions?.length > 0) summary.push(`${result.sfx_suggestions.length} SFX suggestions`)
+
+        toast.success(`Video analyzed! Found: ${summary.join(', ') || 'basic analysis'}`, {
+          duration: 5000
+        })
+      } else {
+        throw new Error(result.error || 'Analysis failed')
       }
-
-      // Analyze video (with or without audio)
-      const analysis = await window.electronAPI.analyzeVideo(videoPath, audioPath)
-
-      setAnalysis(analysis)
-      toast.dismiss(loadingToast)
-      toast.success('Video analyzed successfully!')
     } catch (error) {
       console.error('Error analyzing video:', error)
       toast.dismiss(loadingToast)
@@ -287,7 +284,14 @@ export default function TopBar({ onExport }: TopBarProps) {
       </div>
 
       <div className="top-bar-right">
-        <button className="btn-secondary" onClick={handleAnalyzeVideo}>
+        <button
+          className="btn-secondary"
+          onClick={handleAnalyzeVideo}
+          disabled={videoTimelineClips.length > 0}
+          title={videoTimelineClips.length > 0
+            ? "Timeline has clips - use 'Analyze Timeline' button in the timeline toolbar instead"
+            : "Analyze the source video for captions and SFX suggestions"}
+        >
           <Search size={16} />
           <span>Analyze Video</span>
         </button>

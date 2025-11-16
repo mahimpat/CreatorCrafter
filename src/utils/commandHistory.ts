@@ -120,8 +120,10 @@ export interface SFXTrack {
   path: string
   start: number
   duration: number
+  originalDuration: number
   volume: number
   prompt?: string
+  trimStart?: number
 }
 
 export interface Subtitle {

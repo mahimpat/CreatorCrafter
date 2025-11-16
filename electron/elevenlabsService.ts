@@ -225,7 +225,10 @@ if __name__ == "__main__":
         python.stderr.on('data', (data) => {
           const output = data.toString()
           errorOutput += output
-          console.error('ElevenLabs stderr:', output)
+          // Only log actual progress/warnings, not debug output
+          if (output.includes('Generating sound effect') || output.includes('Duration') || output.includes('⚠️')) {
+            console.log(output.trim())
+          }
         })
 
         python.on('close', (code) => {
@@ -285,11 +288,23 @@ def validate_key(api_key):
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        print(f"Status: {response.status_code}", file=sys.stderr)
-        print(f"Response: {response.text}", file=sys.stderr)
+
+        # Check if it's a free tier key (missing_permissions error)
+        if response.status_code == 401:
+            try:
+                error_data = response.json()
+                if error_data.get("detail", {}).get("status") == "missing_permissions":
+                    print("⚠️  You are using a free tier API key.", file=sys.stderr)
+                    print("⚠️  Free tier is suitable for testing only.", file=sys.stderr)
+                    print("⚠️  For commercial use or video distribution, please upgrade to a paid plan.", file=sys.stderr)
+                    # Free tier can still generate sounds, so consider it valid
+                    return True
+            except:
+                pass
+
         return response.status_code == 200
     except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
+        print(f"⚠️  Validation error: {str(e)}", file=sys.stderr)
         return False
 
 if __name__ == "__main__":
@@ -322,15 +337,21 @@ if __name__ == "__main__":
         })
 
         python.stderr.on('data', (data) => {
-          stderrOutput += data.toString()
-          console.error('ElevenLabs validation stderr:', data.toString())
+          const message = data.toString()
+          stderrOutput += message
+          // Only log warnings, not raw API errors
+          if (message.includes('⚠️')) {
+            console.warn(message.trim())
+          }
         })
 
         python.on('close', (code) => {
-          console.log('Validation output:', output.trim())
-          console.log('Validation stderr:', stderrOutput)
-          console.log('Exit code:', code)
           const isValid = output.trim() === 'valid'
+          if (isValid) {
+            console.log('✓ ElevenLabs API key validated successfully')
+          } else {
+            console.warn('✗ ElevenLabs API key validation failed')
+          }
           resolve(isValid)
         })
 

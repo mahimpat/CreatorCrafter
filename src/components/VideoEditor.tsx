@@ -11,18 +11,27 @@ import MediaOverlayProperties from './MediaOverlayProperties'
 import TopBar from './TopBar'
 import AnalysisPanel from './AnalysisPanel'
 import ExportDialog from './ExportDialog'
+// DISABLED FOR THIS RELEASE - Thumbnail generation feature hidden
+// import ThumbnailGenerator from './ThumbnailGenerator'
+import BrandKitManager from './BrandKitManager'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import './VideoEditor.css'
 
 export default function VideoEditor() {
-  const { isAnalyzing } = useProject()
+  const { isAnalyzing, selectedClipIds, mediaOverlays } = useProject()
+  // DISABLED FOR THIS RELEASE - Removed 'thumbnails' from tool options
   const [selectedTool, setSelectedTool] = useState<'subtitles' | 'sfx' | 'overlays'>('subtitles')
   const [isAssetsOpen, setIsAssetsOpen] = useState(true)
-  const [leftPanelTab, setLeftPanelTab] = useState<'project' | 'media' | 'overlays'>('media')
+  const [leftPanelTab, setLeftPanelTab] = useState<'project' | 'media' | 'overlays' | 'brandkits'>('media')
   const [showExportDialog, setShowExportDialog] = useState(false)
 
   // Enable auto-save
   useAutoSave()
+
+  // Check if a media overlay is selected
+  const hasMediaOverlaySelected = selectedClipIds.some(id =>
+    mediaOverlays.some(overlay => overlay.id === id)
+  )
 
   return (
     <div className="video-editor">
@@ -51,6 +60,12 @@ export default function VideoEditor() {
               >
                 Project
               </button>
+              <button
+                className={`tab-btn ${leftPanelTab === 'brandkits' ? 'active' : ''}`}
+                onClick={() => setLeftPanelTab('brandkits')}
+              >
+                Brand Kits
+              </button>
             </div>
             <button
               className="collapse-btn"
@@ -65,6 +80,8 @@ export default function VideoEditor() {
               <MediaBin />
             ) : leftPanelTab === 'overlays' ? (
               <OverlayLibrary />
+            ) : leftPanelTab === 'brandkits' ? (
+              <BrandKitManager />
             ) : (
               <ProjectManager />
             )}
@@ -113,9 +130,20 @@ export default function VideoEditor() {
             >
               Overlays
             </button>
+            {/* DISABLED FOR THIS RELEASE - Thumbnail generation feature hidden
+            <button
+              className={`tool-btn ${selectedTool === 'thumbnails' ? 'active' : ''}`}
+              onClick={() => setSelectedTool('thumbnails')}
+            >
+              Thumbnails
+            </button>
+            */}
           </div>
 
-          {selectedTool === 'overlays' ? (
+          {/* DISABLED FOR THIS RELEASE - ThumbnailGenerator component hidden
+          {selectedTool === 'thumbnails' ? (
+            <ThumbnailGenerator />
+          ) : */ hasMediaOverlaySelected ? (
             <MediaOverlayProperties />
           ) : (
             <SidePanel selectedTool={selectedTool} />

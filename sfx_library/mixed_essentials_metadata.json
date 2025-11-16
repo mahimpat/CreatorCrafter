@@ -1,0 +1,319 @@
+{
+  "version": "3.0.0",
+  "name": "Mixed Essentials Pack",
+  "generated_at": "2025-11-15T22:45:51.535472",
+  "total_sounds": 26,
+  "categories": {
+    "cartoon": {
+      "description": "Cartoon and comedy sound effects",
+      "sounds": [
+        {
+          "name": "slide-whistle",
+          "prompt": "cartoon slide whistle sound effect, descending pitch",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "comedy",
+            "whistle",
+            "slide"
+          ]
+        },
+        {
+          "name": "spring-boing",
+          "prompt": "cartoon spring boing sound effect, bouncy jump",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "spring",
+            "boing",
+            "bounce"
+          ]
+        },
+        {
+          "name": "slip-fall",
+          "prompt": "cartoon slip and fall sound effect, comedic accident",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "slip",
+            "fall",
+            "comedy"
+          ]
+        },
+        {
+          "name": "bonk-hit",
+          "prompt": "cartoon bonk hit sound effect, comedic impact on head",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "bonk",
+            "hit",
+            "comedy"
+          ]
+        },
+        {
+          "name": "splat-impact",
+          "prompt": "cartoon splat sound effect, wet impact",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "splat",
+            "wet",
+            "impact"
+          ]
+        },
+        {
+          "name": "pop-burst",
+          "prompt": "cartoon pop sound effect, bubble burst",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "pop",
+            "bubble",
+            "burst"
+          ]
+        }
+      ]
+    },
+    "cinematic": {
+      "description": "Cinematic and dramatic sound effects",
+      "sounds": [
+        {
+          "name": "thunder-boom",
+          "prompt": "massive thunder boom sound effect, dramatic storm",
+          "duration": 3.0,
+          "tags": [
+            "thunder",
+            "boom",
+            "storm",
+            "dramatic"
+          ]
+        },
+        {
+          "name": "lightning-strike",
+          "prompt": "lightning strike crack sound effect, electric bolt",
+          "duration": 3.0,
+          "tags": [
+            "lightning",
+            "strike",
+            "electric",
+            "crack"
+          ]
+        },
+        {
+          "name": "earthquake-rumble",
+          "prompt": "earthquake rumble sound effect, ground shaking",
+          "duration": 3.0,
+          "tags": [
+            "earthquake",
+            "rumble",
+            "shake",
+            "ground"
+          ]
+        },
+        {
+          "name": "meteor-impact",
+          "prompt": "meteor impact explosion sound, massive crash",
+          "duration": 3.0,
+          "tags": [
+            "meteor",
+            "impact",
+            "explosion",
+            "crash"
+          ]
+        },
+        {
+          "name": "avalanche-crash",
+          "prompt": "avalanche crashing sound effect, snow tumbling down mountain",
+          "duration": 3.0,
+          "tags": [
+            "avalanche",
+            "crash",
+            "snow",
+            "mountain"
+          ]
+        }
+      ]
+    },
+    "music": {
+      "description": "Music elements and beat components",
+      "sounds": [
+        {
+          "name": "kick-drum-hit",
+          "prompt": "deep kick drum hit sound, 808 bass drum",
+          "duration": 3.0,
+          "tags": [
+            "kick",
+            "drum",
+            "bass",
+            "beat"
+          ]
+        },
+        {
+          "name": "snare-hit",
+          "prompt": "snare drum hit sound effect, crisp snare",
+          "duration": 3.0,
+          "tags": [
+            "snare",
+            "drum",
+            "hit",
+            "beat"
+          ]
+        },
+        {
+          "name": "bass-drop-heavy",
+          "prompt": "heavy bass drop sound effect, dubstep sub bass",
+          "duration": 3.0,
+          "tags": [
+            "bass",
+            "drop",
+            "dubstep",
+            "heavy"
+          ]
+        },
+        {
+          "name": "synth-stab",
+          "prompt": "synth stab sound effect, electronic hit",
+          "duration": 3.0,
+          "tags": [
+            "synth",
+            "stab",
+            "electronic",
+            "hit"
+          ]
+        },
+        {
+          "name": "riser-buildup",
+          "prompt": "tension riser sound effect, musical buildup",
+          "duration": 3.0,
+          "tags": [
+            "riser",
+            "buildup",
+            "tension",
+            "music"
+          ]
+        }
+      ]
+    },
+    "nature_sounds": {
+      "description": "Nature and animal sounds",
+      "sounds": [
+        {
+          "name": "dog-bark",
+          "prompt": "dog barking sound effect, medium sized dog",
+          "duration": 3.0,
+          "tags": [
+            "dog",
+            "bark",
+            "animal",
+            "pet"
+          ]
+        },
+        {
+          "name": "cat-meow",
+          "prompt": "cat meowing sound effect, house cat",
+          "duration": 3.0,
+          "tags": [
+            "cat",
+            "meow",
+            "animal",
+            "pet"
+          ]
+        },
+        {
+          "name": "water-splash",
+          "prompt": "water splash sound effect, large splash in pool",
+          "duration": 3.0,
+          "tags": [
+            "water",
+            "splash",
+            "pool",
+            "liquid"
+          ]
+        },
+        {
+          "name": "fire-crackle",
+          "prompt": "fire crackling sound effect, campfire burning",
+          "duration": 3.0,
+          "tags": [
+            "fire",
+            "crackle",
+            "campfire",
+            "burn"
+          ]
+        },
+        {
+          "name": "thunder-rumble",
+          "prompt": "distant thunder rumble sound, storm approaching",
+          "duration": 3.0,
+          "tags": [
+            "thunder",
+            "rumble",
+            "storm",
+            "weather"
+          ]
+        }
+      ]
+    },
+    "technology": {
+      "description": "Modern tech and digital sounds",
+      "sounds": [
+        {
+          "name": "phone-buzz",
+          "prompt": "phone vibration buzz sound effect, mobile phone vibrate",
+          "duration": 3.0,
+          "tags": [
+            "phone",
+            "buzz",
+            "vibrate",
+            "mobile"
+          ]
+        },
+        {
+          "name": "glitch-digital",
+          "prompt": "digital glitch sound effect, technology malfunction",
+          "duration": 3.0,
+          "tags": [
+            "glitch",
+            "digital",
+            "tech",
+            "error"
+          ]
+        },
+        {
+          "name": "swipe-screen",
+          "prompt": "touchscreen swipe sound effect, finger swipe on phone",
+          "duration": 3.0,
+          "tags": [
+            "swipe",
+            "screen",
+            "touch",
+            "phone"
+          ]
+        },
+        {
+          "name": "notification-ping",
+          "prompt": "notification ping sound effect, app alert tone",
+          "duration": 3.0,
+          "tags": [
+            "notification",
+            "ping",
+            "alert",
+            "app"
+          ]
+        },
+        {
+          "name": "robot-beep",
+          "prompt": "robot beep sound effect, mechanical electronic beep",
+          "duration": 3.0,
+          "tags": [
+            "robot",
+            "beep",
+            "mechanical",
+            "tech"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -14,6 +14,27 @@ export interface Subtitle {
     backgroundColor: string
     position: 'top' | 'center' | 'bottom'
   }
+  // AI-powered caption styling
+  words?: Array<{
+    text: string
+    start: number
+    end: number
+    emphasized?: boolean  // Auto-detected emphasis (numbers, power words, ALL CAPS)
+    emphasisType?: 'number' | 'caps' | 'keyword' | 'entity'  // Why it's emphasized
+  }>
+  animation?: {
+    type: 'none' | 'karaoke' | 'pop' | 'slide'
+    duration?: number  // Animation duration per word in ms
+  }
+  template?: 'dynamic' | 'impact' | 'minimal' | 'energetic' | 'professional' | 'custom'  // Applied style template
+  emphasisColor?: string  // Override color for emphasized words
+  sentimentColors?: {
+    positive: string
+    negative: string
+    neutral: string
+    question: string
+  }
+  sentiment?: 'positive' | 'negative' | 'neutral' | 'question'  // Overall sentiment of caption
 }
 
 export interface SFXTrack {
@@ -21,8 +42,24 @@ export interface SFXTrack {
   path: string
   start: number
   duration: number
+  originalDuration: number  // Store original duration to prevent enlarging beyond source
   volume: number
   prompt?: string
+  trimStart?: number  // Offset in source audio file for playback (used when splitting)
+  clipStart?: number  // Alias for trimStart - start offset in source file
+  clipEnd?: number    // End offset in source file
+}
+
+export interface AudioTrack {
+  id: string
+  path: string
+  start: number
+  duration: number
+  originalDuration: number
+  volume: number
+  trimStart?: number  // Offset in source audio file for playback (used when splitting)
+  clipStart?: number  // Alias for trimStart - start offset in source file
+  clipEnd?: number    // End offset in source file
 }
 
 export interface SFXLibraryItem {
@@ -108,6 +145,81 @@ export interface MediaOverlay {
   zIndex: number // Higher = on top
 }
 
+// Unified Analysis Types
+export interface ThumbnailCandidate {
+  timestamp: number
+  frame_number: number
+  score: number
+  has_faces: boolean
+  face_count: number
+  sharpness: number
+  contrast: number
+  vibrancy: number
+}
+
+export interface TranscriptionSegment {
+  text: string
+  start: number
+  end: number
+  confidence: number
+}
+
+export interface VisualScene {
+  timestamp: number
+  description: string
+  type: string
+}
+
+export interface SFXSuggestion {
+  timestamp: number
+  prompt: string
+  reason: string
+  audio_context?: string
+  visual_context?: string
+  confidence: number
+  type?: 'primary' | 'enhancement'  // primary = needed, enhancement = optional
+  audio_present?: boolean
+  motion_verified?: boolean
+  event_type?: string
+}
+
+export interface MusicSuggestion {
+  timestamp: number
+  duration: number
+  scene_id: number
+  prompt: string
+  description: string
+  mood: string
+  energy_level: number
+  genre: string
+  tempo: string
+  confidence: number
+}
+
+export interface EventData {
+  type: 'motion_peak' | 'scene_transition'
+  timestamp: number
+  frame?: number
+  intensity?: number
+  category?: string
+  from_mood?: string
+  to_mood?: string
+}
+
+export interface UnifiedAnalysisResult {
+  success: boolean
+  video_path: string
+  analyzed_at: number  // timestamp in milliseconds
+  thumbnail_candidates: ThumbnailCandidate[]
+  transcription: TranscriptionSegment[]
+  visual_scenes: VisualScene[]
+  events: EventData[]
+  sfx_suggestions: SFXSuggestion[]
+  music_suggestions: MusicSuggestion[]
+  error?: string
+}
+
+// Legacy type for backwards compatibility
 export interface VideoAnalysisResult {
   scenes: Array<{
     timestamp: number
@@ -147,6 +259,7 @@ interface ProjectState {
   videoPath: string | null
   videoMetadata: any | null
   originalAudioPath: string | null
+  audioTracks: AudioTrack[]  // Editable audio segments
   currentTime: number
   duration: number
   isPlaying: boolean
@@ -154,7 +267,8 @@ interface ProjectState {
   sfxTracks: SFXTrack[]
   sfxLibrary: SFXLibraryItem[]
   textOverlays: TextOverlay[]
-  analysis: VideoAnalysisResult | null
+  analysis: VideoAnalysisResult | null  // Legacy
+  unifiedAnalysis: UnifiedAnalysisResult | null  // New unified system
   isAnalyzing: boolean
   // Multi-video support
   videoClips: VideoClip[]
@@ -189,12 +303,18 @@ interface ProjectContextType extends ProjectState {
   addSFXTrack: (track: SFXTrack) => void
   updateSFXTrack: (id: string, track: Partial<SFXTrack>) => void
   deleteSFXTrack: (id: string) => void
+  splitSFXTrack: (id: string, splitTime: number) => void
   addSFXToLibrary: (item: SFXLibraryItem) => void
   removeSFXFromLibrary: (id: string) => void
+  addAudioTrack: (track: AudioTrack) => void
+  updateAudioTrack: (id: string, track: Partial<AudioTrack>) => void
+  deleteAudioTrack: (id: string) => void
+  splitAudioTrack: (id: string, splitTime: number) => void
   addTextOverlay: (overlay: TextOverlay) => void
   updateTextOverlay: (id: string, overlay: Partial<TextOverlay>) => void
   deleteTextOverlay: (id: string) => void
   setAnalysis: (analysis: VideoAnalysisResult | null) => void
+  setUnifiedAnalysis: (analysis: UnifiedAnalysisResult | null) => void
   setIsAnalyzing: (analyzing: boolean) => void
   // Video clip management
   importVideoClip: (path: string) => Promise<void>
@@ -236,6 +356,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     videoPath: null,
     videoMetadata: null,
     originalAudioPath: null,
+    audioTracks: [],
     currentTime: 0,
     duration: 0,
     isPlaying: false,
@@ -244,6 +365,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     sfxLibrary: [],
     textOverlays: [],
     analysis: null,
+    unifiedAnalysis: null,
     isAnalyzing: false,
     videoClips: [],
     videoTimelineClips: [],
@@ -282,7 +404,22 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }
 
   const setOriginalAudioPath = (path: string | null) => {
-    setState(prev => ({ ...prev, originalAudioPath: path }))
+    setState(prev => {
+      if (path && prev.duration > 0) {
+        // Initialize audio tracks with a single segment spanning the entire duration
+        const audioTrack: AudioTrack = {
+          id: `audio-${Date.now()}`,
+          path,
+          start: 0,
+          duration: prev.duration,
+          originalDuration: prev.duration,
+          volume: 1,
+          trimStart: 0
+        }
+        return { ...prev, originalAudioPath: path, audioTracks: [audioTrack] }
+      }
+      return { ...prev, originalAudioPath: path, audioTracks: [] }
+    })
   }
 
   const setCurrentTime = (time: number) => {
@@ -290,7 +427,22 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }
 
   const setDuration = (duration: number) => {
-    setState(prev => ({ ...prev, duration }))
+    setState(prev => {
+      // If we have an audio path but no tracks, initialize them now
+      if (prev.originalAudioPath && prev.audioTracks.length === 0 && duration > 0) {
+        const audioTrack: AudioTrack = {
+          id: `audio-${Date.now()}`,
+          path: prev.originalAudioPath,
+          start: 0,
+          duration,
+          originalDuration: duration,
+          volume: 1,
+          trimStart: 0
+        }
+        return { ...prev, duration, audioTracks: [audioTrack] }
+      }
+      return { ...prev, duration }
+    })
   }
 
   const setIsPlaying = (playing: boolean) => {
@@ -322,9 +474,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }
 
   const addSFXTrack = (track: SFXTrack) => {
+    // Ensure originalDuration is set (for backward compatibility)
+    const trackWithOriginal = {
+      ...track,
+      originalDuration: track.originalDuration || track.duration
+    }
     setState(prev => ({
       ...prev,
-      sfxTracks: [...prev.sfxTracks, track],
+      sfxTracks: [...prev.sfxTracks, trackWithOriginal],
       hasUnsavedChanges: true
     }))
   }
@@ -343,6 +500,115 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       sfxTracks: prev.sfxTracks.filter(t => t.id !== id),
       hasUnsavedChanges: true
     }))
+  }
+
+  const splitSFXTrack = (id: string, splitTime: number) => {
+    setState(prev => {
+      const trackToSplit = prev.sfxTracks.find(t => t.id === id)
+      if (!trackToSplit) return prev
+
+      // Calculate split position relative to track start
+      const relativeTime = splitTime - trackToSplit.start
+
+      // Ensure split time is within track bounds
+      if (relativeTime <= 0 || relativeTime >= trackToSplit.duration) {
+        return prev
+      }
+
+      // Create two new tracks
+      const leftTrack: SFXTrack = {
+        ...trackToSplit,
+        id: `sfx-${Date.now()}-left`,
+        duration: relativeTime,
+        // Keep same start time
+      }
+
+      const rightTrack: SFXTrack = {
+        ...trackToSplit,
+        id: `sfx-${Date.now()}-right`,
+        start: splitTime,
+        duration: trackToSplit.duration - relativeTime,
+        // Trimstart is used for audio playback offset
+        trimStart: (trackToSplit.trimStart || 0) + relativeTime,
+      }
+
+      // Remove original track and add the two new tracks
+      return {
+        ...prev,
+        sfxTracks: [
+          ...prev.sfxTracks.filter(t => t.id !== id),
+          leftTrack,
+          rightTrack
+        ],
+        hasUnsavedChanges: true
+      }
+    })
+  }
+
+  // Audio track management functions
+  const addAudioTrack = (track: AudioTrack) => {
+    setState(prev => ({
+      ...prev,
+      audioTracks: [...prev.audioTracks, track],
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const updateAudioTrack = (id: string, track: Partial<AudioTrack>) => {
+    setState(prev => ({
+      ...prev,
+      audioTracks: prev.audioTracks.map(t => (t.id === id ? { ...t, ...track } : t)),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const deleteAudioTrack = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      audioTracks: prev.audioTracks.filter(t => t.id !== id),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const splitAudioTrack = (id: string, splitTime: number) => {
+    setState(prev => {
+      const trackToSplit = prev.audioTracks.find(t => t.id === id)
+      if (!trackToSplit) return prev
+
+      // Calculate split position relative to track start
+      const relativeTime = splitTime - trackToSplit.start
+
+      // Ensure split time is within track bounds
+      if (relativeTime <= 0 || relativeTime >= trackToSplit.duration) {
+        return prev
+      }
+
+      // Create two new tracks
+      const leftTrack: AudioTrack = {
+        ...trackToSplit,
+        id: `audio-${Date.now()}-left`,
+        duration: relativeTime,
+      }
+
+      const rightTrack: AudioTrack = {
+        ...trackToSplit,
+        id: `audio-${Date.now()}-right`,
+        start: splitTime,
+        duration: trackToSplit.duration - relativeTime,
+        trimStart: (trackToSplit.trimStart || 0) + relativeTime,
+      }
+
+      // Remove original track and add the two new tracks
+      return {
+        ...prev,
+        audioTracks: [
+          ...prev.audioTracks.filter(t => t.id !== id),
+          leftTrack,
+          rightTrack
+        ],
+        hasUnsavedChanges: true
+      }
+    })
   }
 
   const addSFXToLibrary = (item: SFXLibraryItem) => {
@@ -387,6 +653,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const setAnalysis = (analysis: VideoAnalysisResult | null) => {
     setState(prev => ({ ...prev, analysis }))
+  }
+
+  const setUnifiedAnalysis = (analysis: UnifiedAnalysisResult | null) => {
+    setState(prev => ({ ...prev, unifiedAnalysis: analysis }))
   }
 
   const setIsAnalyzing = (analyzing: boolean) => {
@@ -719,7 +989,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         videoTimelineClips: [],
         mediaOverlayAssets: [],
         mediaOverlays: [],
+        audioTracks: [],
         analysis: null,
+        unifiedAnalysis: null,
         isAnalyzing: false,
         selectedClipIds: [],
         snappingEnabled: true,
@@ -755,8 +1027,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           duration: state.duration,
           subtitles: state.subtitles,
           sfxTracks: state.sfxTracks,
+          sfxLibrary: state.sfxLibrary,
           textOverlays: state.textOverlays,
-          analysis: state.analysis
+          analysis: state.analysis,
+          unifiedAnalysis: state.unifiedAnalysis
         },
         createdAt
       )
@@ -847,7 +1121,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         videoTimelineClips: deserialized.videoTimelineClips || [],
         mediaOverlayAssets: deserialized.mediaOverlayAssets || [],
         mediaOverlays: deserialized.mediaOverlays || [],
+        audioTracks: deserialized.audioTracks || [],
         analysis: deserialized.analysis,
+        unifiedAnalysis: deserialized.unifiedAnalysis || null,
         isAnalyzing: false,
         selectedClipIds: [],
         snappingEnabled: true,
@@ -874,6 +1150,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       videoPath: null,
       videoMetadata: null,
       originalAudioPath: null,
+      audioTracks: [],
       currentTime: 0,
       duration: 0,
       isPlaying: false,
@@ -882,6 +1159,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       sfxLibrary: [],
       textOverlays: [],
       analysis: null,
+      unifiedAnalysis: null,
       isAnalyzing: false,
       videoClips: [],
       videoTimelineClips: [],
@@ -924,12 +1202,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         addSFXTrack,
         updateSFXTrack,
         deleteSFXTrack,
+        splitSFXTrack,
         addSFXToLibrary,
         removeSFXFromLibrary,
+        addAudioTrack,
+        updateAudioTrack,
+        deleteAudioTrack,
+        splitAudioTrack,
         addTextOverlay,
         updateTextOverlay,
         deleteTextOverlay,
         setAnalysis,
+        setUnifiedAnalysis,
         setIsAnalyzing,
         importVideoClip,
         addVideoClip,

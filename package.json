@@ -13,6 +13,7 @@
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
     "build:dir": "tsc && vite build && electron-builder --dir",
+    "build:win": "tsc && vite build && electron-builder --win --dir",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && electron .\"",
     "electron:build": "vite build && electron-builder",
@@ -82,37 +83,6 @@
       {
         "from": "requirements.txt",
         "to": "requirements.txt"
-      },
-      {
-        "from": "requirements-windows.txt",
-        "to": "requirements-windows.txt"
-      },
-      {
-        "from": "windows-hotfix-v3.bat",
-        "to": "../windows-hotfix-v3.bat"
-      },
-      {
-        "from": "fix-audiocraft-only.bat",
-        "to": "../fix-audiocraft-only.bat"
-      },
-      {
-        "from": "fix-av-package.bat",
-        "to": "../fix-av-package.bat"
-      },
-      {
-        "from": "diagnose-audiocraft.bat",
-        "to": "../diagnose-audiocraft.bat"
-      },
-      {
-        "from": "build/ffmpeg/bin",
-        "to": "ffmpeg",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "scripts/dist/python-env-windows-x64-v1.0.0.zip",
-        "to": "python-env.zip"
       }
     ],
     "mac": {

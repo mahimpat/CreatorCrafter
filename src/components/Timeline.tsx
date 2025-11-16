@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { Film, Volume2, MessageSquare, Type, Eye, Lock, Music, Undo2, Redo2, Magnet, Trash2, Hand, Image } from 'lucide-react'
+import { Film, Volume2, MessageSquare, Type, Eye, Lock, Music, Undo2, Redo2, Magnet, Trash2, Hand, Image, Scissors, Sparkles } from 'lucide-react'
 import './Timeline.css'
 
 export default function Timeline() {
@@ -13,16 +13,24 @@ export default function Timeline() {
     setCurrentTime,
     originalAudioPath,
     subtitles,
+    addSubtitle,
     updateSubtitle,
     deleteSFXTrack,
+    splitSFXTrack,
     deleteSubtitle,
     deleteTextOverlay,
     sfxTracks,
     addSFXTrack,
     updateSFXTrack,
+    audioTracks,
+    deleteAudioTrack,
+    updateAudioTrack,
+    splitAudioTrack,
     textOverlays,
     updateTextOverlay,
     analysis,
+    setAnalysis,
+    setUnifiedAnalysis,
     selectedClipIds,
     selectClip,
     clearSelection,
@@ -46,11 +54,17 @@ export default function Timeline() {
 
   const [draggedItem, setDraggedItem] = useState<{
     id: string
-    type: 'subtitle' | 'sfx' | 'overlay' | 'video' | 'media-overlay'
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay'
+  } | null>(null)
+  const [potentialDrag, setPotentialDrag] = useState<{
+    id: string
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay'
+    startX: number
+    startY: number
   } | null>(null)
   const [resizingItem, setResizingItem] = useState<{
     id: string
-    type: 'subtitle' | 'sfx' | 'overlay' | 'video' | 'media-overlay'
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay'
     edge: 'left' | 'right'
     originalStart: number
     originalEnd: number
@@ -60,6 +74,11 @@ export default function Timeline() {
   const [zoom, setZoom] = useState(1)
   const [isDraggingToDelete, setIsDraggingToDelete] = useState(false)
   const [isOverBin, setIsOverBin] = useState(false)
+  const [isAnalyzingTimeline, setIsAnalyzingTimeline] = useState(false)
+  const [analysisProgress, setAnalysisProgress] = useState<string>('')
+
+  // Drag threshold in pixels - must move this far before starting drag
+  const DRAG_THRESHOLD = 5
 
   // Snapping helper function
   const applySnapping = (time: number, excludeId?: string): number => {
@@ -88,6 +107,13 @@ export default function Timeline() {
     })
 
     sfxTracks.forEach(track => {
+      if (track.id !== excludeId) {
+        snapPoints.push(track.start)
+        snapPoints.push(track.start + track.duration)
+      }
+    })
+
+    audioTracks.forEach(track => {
       if (track.id !== excludeId) {
         snapPoints.push(track.start)
         snapPoints.push(track.start + track.duration)
@@ -134,15 +160,28 @@ export default function Timeline() {
   }
 
   // Synchronize vertical scrolling between labels and scroll area
+  // Use flag to prevent infinite loop
+  const isScrollingSyncRef = useRef(false)
+
   const handleLabelsScroll = () => {
+    if (isScrollingSyncRef.current) return
     if (labelsRef.current && scrollAreaRef.current) {
+      isScrollingSyncRef.current = true
       scrollAreaRef.current.scrollTop = labelsRef.current.scrollTop
+      requestAnimationFrame(() => {
+        isScrollingSyncRef.current = false
+      })
     }
   }
 
   const handleScrollAreaScroll = () => {
+    if (isScrollingSyncRef.current) return
     if (labelsRef.current && scrollAreaRef.current) {
+      isScrollingSyncRef.current = true
       labelsRef.current.scrollTop = scrollAreaRef.current.scrollTop
+      requestAnimationFrame(() => {
+        isScrollingSyncRef.current = false
+      })
     }
   }
 
@@ -222,20 +261,28 @@ export default function Timeline() {
 
     // Clear selection when clicking on empty timeline
     clearSelection()
+
+    // Clear potential drag (in case of click without drag)
+    setPotentialDrag(null)
+  }
+
+  const handleTrackItemClick = (e: React.MouseEvent) => {
+    // Prevent click from bubbling to timeline (which would clear selection)
+    e.stopPropagation()
   }
 
   const handleTrackItemMouseDown = (
     e: React.MouseEvent,
     id: string,
-    type: 'subtitle' | 'sfx' | 'overlay' | 'video' | 'media-overlay',
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay',
     itemWidth: number
   ) => {
     e.stopPropagation()
 
-    // Detect if clicking on edge (12px from left or right for easier grabbing)
+    // Detect if clicking on edge (16px from left or right for easier grabbing)
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const clickX = e.clientX - rect.left
-    const edgeThreshold = 12
+    const edgeThreshold = 16 // Increased for easier interaction
 
     const isLeftEdge = clickX <= edgeThreshold
     const isRightEdge = clickX >= rect.width - edgeThreshold
@@ -267,8 +314,15 @@ export default function Timeline() {
         const track = sfxTracks.find(t => t.id === id)
         if (track) {
           originalStart = track.start
-          originalDuration = track.duration
-          originalEnd = originalStart + originalDuration
+          originalDuration = track.originalDuration  // Use max source duration
+          originalEnd = originalStart + track.duration  // Current end position
+        }
+      } else if (type === 'audio') {
+        const track = audioTracks.find(t => t.id === id)
+        if (track) {
+          originalStart = track.start
+          originalDuration = track.originalDuration  // Use max source duration
+          originalEnd = originalStart + track.duration  // Current end position
         }
       } else if (type === 'subtitle') {
         const subtitle = subtitles.find(s => s.id === id)
@@ -302,9 +356,14 @@ export default function Timeline() {
     const isMultiSelect = e.metaKey || e.ctrlKey
     selectClip(id, isMultiSelect)
 
-    // Only start dragging if not multi-selecting
+    // Set up potential drag (will only become actual drag if mouse moves beyond threshold)
     if (!isMultiSelect) {
-      setDraggedItem({ id, type })
+      setPotentialDrag({
+        id,
+        type,
+        startX: e.clientX,
+        startY: e.clientY
+      })
     }
   }
 
@@ -350,6 +409,7 @@ export default function Timeline() {
             path: item.path,
             start: dropTime,
             duration: item.duration,
+            originalDuration: item.duration,  // Store original duration
             volume: 1,
             prompt: item.prompt
           }
@@ -373,6 +433,19 @@ export default function Timeline() {
     const rect = timelineRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const newTime = Math.max(0, Math.min(safeDuration, x / pixelsPerSecond))
+
+    // Check if we should convert potential drag to actual drag
+    if (potentialDrag && !draggedItem) {
+      const deltaX = Math.abs(e.clientX - potentialDrag.startX)
+      const deltaY = Math.abs(e.clientY - potentialDrag.startY)
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+
+      // Only start dragging if moved beyond threshold
+      if (distance > DRAG_THRESHOLD) {
+        setDraggedItem({ id: potentialDrag.id, type: potentialDrag.type })
+        setPotentialDrag(null)
+      }
+    }
 
     // Handle resizing
     if (resizingItem) {
@@ -408,10 +481,39 @@ export default function Timeline() {
             duration: newDuration
           })
         } else if (resizingItem.type === 'sfx') {
-          updateSFXTrack(resizingItem.id, {
-            start: newStart,
-            duration: newDuration
-          })
+          // When trimming from left, we need to adjust the clip offset in the source file
+          const track = sfxTracks.find(t => t.id === resizingItem.id)
+          if (track) {
+            const trimAmount = newStart - resizingItem.originalStart
+            const newClipStart = Math.max(0, (track.clipStart || 0) + trimAmount)
+
+            // Constrain duration to not exceed remaining source duration
+            const remainingSourceDuration = resizingItem.originalDuration - newClipStart
+            const constrainedDuration = Math.min(newDuration, remainingSourceDuration)
+
+            updateSFXTrack(resizingItem.id, {
+              start: newStart,
+              duration: constrainedDuration,
+              clipStart: newClipStart
+            })
+          }
+        } else if (resizingItem.type === 'audio') {
+          // When trimming from left, we need to adjust the clip offset in the source file
+          const track = audioTracks.find(t => t.id === resizingItem.id)
+          if (track) {
+            const trimAmount = newStart - resizingItem.originalStart
+            const newClipStart = Math.max(0, (track.clipStart || 0) + trimAmount)
+
+            // Constrain duration to not exceed remaining source duration
+            const remainingSourceDuration = resizingItem.originalDuration - newClipStart
+            const constrainedDuration = Math.min(newDuration, remainingSourceDuration)
+
+            updateAudioTrack(resizingItem.id, {
+              start: newStart,
+              duration: constrainedDuration,
+              clipStart: newClipStart
+            })
+          }
         } else if (resizingItem.type === 'subtitle') {
           updateSubtitle(resizingItem.id, {
             start: newStart,
@@ -450,9 +552,31 @@ export default function Timeline() {
             duration: newDuration
           })
         } else if (resizingItem.type === 'sfx') {
-          updateSFXTrack(resizingItem.id, {
-            duration: newDuration
-          })
+          // When trimming from right, adjust the clip end point
+          const track = sfxTracks.find(t => t.id === resizingItem.id)
+          if (track) {
+            const clipStart = track.clipStart || 0
+            const newClipEnd = Math.min(resizingItem.originalDuration, clipStart + newDuration)
+            const constrainedDuration = newClipEnd - clipStart
+
+            updateSFXTrack(resizingItem.id, {
+              duration: constrainedDuration,
+              clipEnd: newClipEnd
+            })
+          }
+        } else if (resizingItem.type === 'audio') {
+          // When trimming from right, adjust the clip end point
+          const track = audioTracks.find(t => t.id === resizingItem.id)
+          if (track) {
+            const clipStart = track.clipStart || 0
+            const newClipEnd = Math.min(resizingItem.originalDuration, clipStart + newDuration)
+            const constrainedDuration = newClipEnd - clipStart
+
+            updateAudioTrack(resizingItem.id, {
+              duration: constrainedDuration,
+              clipEnd: newClipEnd
+            })
+          }
         } else if (resizingItem.type === 'subtitle') {
           updateSubtitle(resizingItem.id, {
             end: newEnd
@@ -468,32 +592,62 @@ export default function Timeline() {
 
     // Handle dragging
     if (draggedItem) {
-      // Apply snapping to drag position
-      const snappedTime = applySnapping(newTime, draggedItem.id)
+      // Constrain to timeline boundaries (0 to safeDuration)
+      const constrainedTime = Math.max(0, Math.min(newTime, safeDuration))
+
+      // Apply snapping to constrained drag position
+      const snappedTime = applySnapping(constrainedTime, draggedItem.id)
 
       // Update the position based on item type
       if (draggedItem.type === 'video') {
-        updateVideoTimelineClip(draggedItem.id, { start: snappedTime })
+        const clip = videoTimelineClips.find(c => c.id === draggedItem.id)
+        if (clip) {
+          // Ensure clip doesn't extend beyond timeline
+          const maxStart = safeDuration - clip.duration
+          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+          updateVideoTimelineClip(draggedItem.id, { start: finalStart })
+        }
       } else if (draggedItem.type === 'media-overlay') {
-        updateMediaOverlay(draggedItem.id, { start: snappedTime })
+        const overlay = mediaOverlays.find(o => o.id === draggedItem.id)
+        if (overlay) {
+          const maxStart = safeDuration - overlay.duration
+          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+          updateMediaOverlay(draggedItem.id, { start: finalStart })
+        }
       } else if (draggedItem.type === 'sfx') {
-        updateSFXTrack(draggedItem.id, { start: snappedTime })
+        const track = sfxTracks.find(t => t.id === draggedItem.id)
+        if (track) {
+          const maxStart = safeDuration - track.duration
+          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+          updateSFXTrack(draggedItem.id, { start: finalStart })
+        }
+      } else if (draggedItem.type === 'audio') {
+        const track = audioTracks.find(t => t.id === draggedItem.id)
+        if (track) {
+          const maxStart = safeDuration - track.duration
+          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+          updateAudioTrack(draggedItem.id, { start: finalStart })
+        }
       } else if (draggedItem.type === 'subtitle') {
         const subtitle = subtitles.find(s => s.id === draggedItem.id)
         if (subtitle) {
           const duration = subtitle.end - subtitle.start
+          const maxStart = safeDuration - duration
+          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
           updateSubtitle(draggedItem.id, {
-            start: snappedTime,
-            end: snappedTime + duration
+            start: finalStart,
+            end: finalStart + duration
           })
         }
       } else if (draggedItem.type === 'overlay') {
         const overlay = textOverlays.find(o => o.id === draggedItem.id)
         if (overlay) {
           const duration = overlay.end - overlay.start
+          const maxStart = safeDuration - duration
+          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
           updateTextOverlay(draggedItem.id, {
-            start: snappedTime,
-            end: snappedTime + duration
+            start: finalStart,
+            end: finalStart + duration
           })
         }
       }
@@ -510,6 +664,8 @@ export default function Timeline() {
         deleteMediaOverlay(draggedItem.id)
       } else if (draggedItem.type === 'sfx') {
         deleteSFXTrack(draggedItem.id)
+      } else if (draggedItem.type === 'audio') {
+        deleteAudioTrack(draggedItem.id)
       } else if (draggedItem.type === 'subtitle') {
         deleteSubtitle(draggedItem.id)
       } else if (draggedItem.type === 'overlay') {
@@ -517,19 +673,173 @@ export default function Timeline() {
       }
     }
 
-    // Reset all drag states
+    // Reset all drag/resize states
     setDraggedItem(null)
+    setPotentialDrag(null) // Clear potential drag
     setResizingItem(null)
+    // Always clear snap guide when mouse is released
     setSnapGuide(null)
     setIsDraggingToDelete(false)
     setIsOverBin(false)
+  }
+
+  // Split the selected clip at playhead position
+  const handleSplitAtPlayhead = () => {
+    // Must have exactly one clip selected
+    if (selectedClipIds.length !== 1) return
+
+    const selectedId = selectedClipIds[0]
+
+    // Try to find in SFX tracks
+    const sfx = sfxTracks.find(t => t.id === selectedId)
+    if (sfx) {
+      const playheadRelativePos = currentTime - sfx.start
+      // Check if playhead is within the selected track bounds with margin
+      if (playheadRelativePos > 0.2 && playheadRelativePos < (sfx.duration - 0.2)) {
+        splitSFXTrack(selectedId, currentTime)
+      }
+      return
+    }
+
+    // Try to find in audio tracks
+    const audio = audioTracks.find(t => t.id === selectedId)
+    if (audio) {
+      const playheadRelativePos = currentTime - audio.start
+      // Check if playhead is within the selected track bounds with margin
+      if (playheadRelativePos > 0.2 && playheadRelativePos < (audio.duration - 0.2)) {
+        splitAudioTrack(selectedId, currentTime)
+      }
+      return
+    }
+  }
+
+  // Check if split button should be enabled
+  // Requires: exactly 1 clip selected AND playhead over that clip
+  const canSplitAtPlayhead = () => {
+    if (selectedClipIds.length !== 1) return false
+
+    const selectedId = selectedClipIds[0]
+
+    // Check if selected clip is an SFX track
+    const sfx = sfxTracks.find(t => t.id === selectedId)
+    if (sfx) {
+      const playheadRelativePos = currentTime - sfx.start
+      return playheadRelativePos > 0.2 && playheadRelativePos < (sfx.duration - 0.2)
+    }
+
+    // Check if selected clip is an audio track
+    const audio = audioTracks.find(t => t.id === selectedId)
+    if (audio) {
+      const playheadRelativePos = currentTime - audio.start
+      return playheadRelativePos > 0.2 && playheadRelativePos < (audio.duration - 0.2)
+    }
+
+    return false
+  }
+
+  // Analyze the entire timeline composition
+  const handleAnalyzeTimeline = async () => {
+    if (videoTimelineClips.length === 0) {
+      alert('Please add video clips to the timeline first')
+      return
+    }
+
+    setIsAnalyzingTimeline(true)
+    setAnalysisProgress('Preparing timeline export...')
+
+    try {
+      // Step 1: Create timeline composition data
+      const timelineComposition = videoTimelineClips.map(clip => {
+        const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
+        if (!sourceClip) return null
+
+        return {
+          videoPath: sourceClip.path,
+          start: clip.start,
+          duration: clip.duration,
+          clipStart: clip.clipStart,
+          clipEnd: clip.clipEnd
+        }
+      }).filter(Boolean)
+
+      setAnalysisProgress('Generating timeline preview...')
+
+      // Step 2: Call backend to analyze timeline
+      const result = await window.electronAPI.analyzeTimeline(timelineComposition)
+
+      setAnalysisProgress('Processing analysis results...')
+
+      // Step 3: Map results to timeline
+      // The backend returns results with timestamps relative to timeline start (0)
+      // These can be directly used as they match our timeline positions
+
+      // Save analysis results to global state so Auto-Generate button works
+      // Clear unifiedAnalysis so timeline analysis takes priority in UI
+      if (result.success) {
+        setUnifiedAnalysis(null)  // Clear old "Analyze Video" results
+        setAnalysis({
+          scenes: [],
+          suggestedSFX: result.suggestedSFX || [],
+          transcription: (result.subtitles || []).map((sub: any) => ({
+            text: sub.text,
+            start: sub.start,
+            end: sub.end,
+            confidence: 1.0  // Timeline analysis doesn't provide confidence, default to 1.0
+          }))
+        })
+      }
+
+      let addedCount = 0
+
+      if (result.subtitles && result.subtitles.length > 0) {
+        // Import subtitles as captions on the timeline
+        result.subtitles.forEach((subtitle: any) => {
+          const newSubtitle = {
+            id: `subtitle-timeline-${Date.now()}-${Math.random()}`,
+            text: subtitle.text,
+            start: subtitle.start,
+            end: subtitle.end,
+            style: {
+              fontSize: 48,
+              fontFamily: 'Arial',
+              color: '#FFFFFF',
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              position: 'bottom' as const
+            }
+          }
+          addSubtitle(newSubtitle)
+          addedCount++
+        })
+      }
+
+      // Note: SFX suggestions are stored in analysis for manual review
+      // Users can click suggestions to add them to timeline
+
+      const message = addedCount > 0
+        ? `Added ${addedCount} captions from timeline!`
+        : 'Timeline analyzed - no captions found'
+
+      setAnalysisProgress(message)
+      setTimeout(() => {
+        setAnalysisProgress('')
+        setIsAnalyzingTimeline(false)
+      }, 3000)
+
+    } catch (error) {
+      console.error('Timeline analysis error:', error)
+      setAnalysisProgress('Analysis failed')
+      setTimeout(() => {
+        setAnalysisProgress('')
+        setIsAnalyzingTimeline(false)
+      }, 3000)
+    }
   }
 
   // Start dragging for delete (when item is dragged from track)
   const handleItemDragStart = (
     e: React.DragEvent,
     id: string,
-    type: 'subtitle' | 'sfx' | 'overlay' | 'video' | 'media-overlay'
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay'
   ) => {
     e.stopPropagation()
     setDraggedItem({ id, type })
@@ -566,6 +876,8 @@ export default function Timeline() {
         deleteMediaOverlay(id)
       } else if (type === 'sfx') {
         deleteSFXTrack(id)
+      } else if (type === 'audio') {
+        deleteAudioTrack(id)
       } else if (type === 'subtitle') {
         deleteSubtitle(id)
       } else if (type === 'overlay') {
@@ -654,6 +966,15 @@ export default function Timeline() {
             <Trash2 size={16} />
             <span>{isOverBin ? 'Drop to Delete' : 'Delete'}</span>
           </button>
+          <button
+            className="toolbar-btn"
+            onClick={handleSplitAtPlayhead}
+            disabled={!canSplitAtPlayhead()}
+            title="Split clip at playhead (S) - Select a clip, then position playhead over it"
+          >
+            <Scissors size={16} />
+            <span>Split</span>
+          </button>
         </div>
 
         <div className="toolbar-divider" />
@@ -672,9 +993,23 @@ export default function Timeline() {
         <div className="toolbar-divider" />
 
         <div className="toolbar-section">
+          <button
+            className={`toolbar-btn ${isAnalyzingTimeline ? 'analyzing' : ''}`}
+            onClick={handleAnalyzeTimeline}
+            disabled={isAnalyzingTimeline || videoTimelineClips.length === 0}
+            title="Analyze timeline composition - Generate captions and SFX for your edit"
+          >
+            <Sparkles size={16} />
+            <span>{isAnalyzingTimeline ? analysisProgress : 'Analyze Timeline'}</span>
+          </button>
+        </div>
+
+        <div className="toolbar-divider" />
+
+        <div className="toolbar-section">
           <div className="toolbar-info">
             <Hand size={14} />
-            <span className="toolbar-hint">Hover clip edges to trim • Drag to move • Drag to Delete btn to remove</span>
+            <span className="toolbar-hint">Click to select • Hover edges to trim • Select clip + position playhead to Split • Drag to Delete to remove</span>
           </div>
         </div>
       </div>
@@ -802,6 +1137,7 @@ export default function Timeline() {
                           width: `${displayWidth}px`
                         }}
                         draggable
+                        onClick={handleTrackItemClick}
                         onDragStart={(e) => handleItemDragStart(e, clip.id, 'video')}
                         onMouseDown={(e) => handleTrackItemMouseDown(e, clip.id, 'video', displayWidth)}
                         title={`${sourceClip.name} - ${clip.start.toFixed(2)}s`}
@@ -817,22 +1153,44 @@ export default function Timeline() {
               </div>
             </div>
 
-            {/* Original Audio Track */}
+            {/* Original Audio Track - Now editable */}
             <div className="track audio-track">
               <div className="track-content">
-                {originalAudioPath ? (
-                  <div
-                    className="audio-clip"
-                    style={{
-                      width: `${timelineWidth}px`,
-                      height: '60px'
-                    }}
-                  >
-                    <div className="item-content">
-                      <span className="item-icon"><Volume2 size={14} /></span>
-                      <span className="clip-label">Original Audio</span>
-                    </div>
-                    <div className="waveform"></div>
+                {audioTracks.length > 0 ? (
+                  audioTracks.map(audio => {
+                    const startPos = audio.start * pixelsPerSecond
+                    const width = audio.duration * pixelsPerSecond
+                    const displayWidth = Math.max(width, 60)
+                    const isResizing = resizingItem?.id === audio.id
+                    const resizingClass = isResizing ? `resizing-${resizingItem.edge}` : ''
+                    const isSelected = selectedClipIds.includes(audio.id)
+
+                    return (
+                      <div
+                        key={audio.id}
+                        className={`track-item audio-item ${draggedItem?.id === audio.id ? 'dragging' : ''} ${isSelected ? 'selected' : ''} ${resizingClass}`}
+                        style={{
+                          left: `${startPos}px`,
+                          width: `${displayWidth}px`,
+                          height: '60px'
+                        }}
+                        draggable
+                        onClick={handleTrackItemClick}
+                        onDragStart={(e) => handleItemDragStart(e, audio.id, 'audio')}
+                        onMouseDown={(e) => handleTrackItemMouseDown(e, audio.id, 'audio', displayWidth)}
+                        title={`Original Audio - ${audio.start.toFixed(2)}s`}
+                      >
+                        <div className="item-content">
+                          <span className="item-icon"><Volume2 size={14} /></span>
+                          <span className="clip-label">Original Audio</span>
+                        </div>
+                        <div className="waveform"></div>
+                      </div>
+                    )
+                  })
+                ) : originalAudioPath ? (
+                  <div className="empty-track-message">
+                    Loading audio track...
                   </div>
                 ) : (
                   <div className="empty-track-message">
@@ -880,16 +1238,18 @@ export default function Timeline() {
                       const displayWidth = Math.max(width, 60)
                       const isResizing = resizingItem?.id === sfx.id
                       const resizingClass = isResizing ? `resizing-${resizingItem.edge}` : ''
+                      const isSelected = selectedClipIds.includes(sfx.id)
 
                       return (
                         <div
                           key={sfx.id}
-                          className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''} ${selectedClipIds.includes(sfx.id) ? 'selected' : ''} ${resizingClass}`}
+                          className={`track-item sfx-item ${draggedItem?.id === sfx.id ? 'dragging' : ''} ${isSelected ? 'selected' : ''} ${resizingClass}`}
                           style={{
                             left: `${startPos}px`,
                             width: `${displayWidth}px`
                           }}
                           draggable
+                          onClick={handleTrackItemClick}
                           onDragStart={(e) => handleItemDragStart(e, sfx.id, 'sfx')}
                           onMouseDown={(e) => handleTrackItemMouseDown(e, sfx.id, 'sfx', displayWidth)}
                           title={`${sfx.prompt || 'SFX'} - ${sfx.start.toFixed(2)}s`}
@@ -939,6 +1299,7 @@ export default function Timeline() {
                         width: `${displayWidth}px`
                       }}
                       draggable
+                      onClick={handleTrackItemClick}
                       onDragStart={(e) => handleItemDragStart(e, subtitle.id, 'subtitle')}
                       onMouseDown={(e) => handleTrackItemMouseDown(e, subtitle.id, 'subtitle', displayWidth)}
                       title={subtitle.text}
@@ -972,6 +1333,7 @@ export default function Timeline() {
                         width: `${displayWidth}px`
                       }}
                       draggable
+                      onClick={handleTrackItemClick}
                       onDragStart={(e) => handleItemDragStart(e, overlay.id, 'overlay')}
                       onMouseDown={(e) => handleTrackItemMouseDown(e, overlay.id, 'overlay', displayWidth)}
                       title={overlay.text}
@@ -1013,6 +1375,7 @@ export default function Timeline() {
                           width: `${displayWidth}px`
                         }}
                         draggable
+                        onClick={handleTrackItemClick}
                         onDragStart={(e) => handleItemDragStart(e, overlay.id, 'media-overlay')}
                         onMouseDown={(e) => handleTrackItemMouseDown(e, overlay.id, 'media-overlay', displayWidth)}
                         title={`${asset.name} - ${overlay.start.toFixed(2)}s`}

@@ -97,3 +97,25 @@
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+
+/* Caption Styling Button */
+.btn-style-captions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  color: white;
+  transition: all 0.2s;
+}
+
+.btn-style-captions:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-style-captions:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}

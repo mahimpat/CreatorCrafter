@@ -1,4 +1,4 @@
-import { Subtitle, SFXTrack, TextOverlay, VideoAnalysisResult } from '../context/ProjectContext'
+import { Subtitle, SFXTrack, TextOverlay, VideoAnalysisResult, SFXLibraryItem, UnifiedAnalysisResult } from '../context/ProjectContext'
 
 /**
  * Project file structure stored in project.json
@@ -19,8 +19,11 @@ export interface ProjectFile {
   }
   subtitles: Subtitle[]
   sfxTracks: ProjectSFXTrack[] // SFX tracks with relative paths
+  sfxLibrary?: ProjectSFXTrack[] // SFX library items with relative paths
   textOverlays: TextOverlay[]
-  analysis: VideoAnalysisResult | null
+  audioTracks?: ProjectSFXTrack[] // Audio track segments with relative paths
+  analysis: VideoAnalysisResult | null  // Legacy analysis (deprecated)
+  unifiedAnalysis?: UnifiedAnalysisResult | null  // New unified analysis system
 }
 
 /**

@@ -1,0 +1,171 @@
+{
+  "version": "4.0.0",
+  "name": "Final Touches Pack",
+  "generated_at": "2025-11-15T22:50:30.839729",
+  "total_sounds": 13,
+  "categories": {
+    "vehicles": {
+      "description": "Vehicle and transportation sounds",
+      "sounds": [
+        {
+          "name": "car-honk",
+          "prompt": "car horn honk sound effect, vehicle beep",
+          "duration": 3.0,
+          "tags": [
+            "car",
+            "horn",
+            "honk",
+            "vehicle"
+          ]
+        },
+        {
+          "name": "car-engine-start",
+          "prompt": "car engine starting sound effect, ignition turn on",
+          "duration": 3.0,
+          "tags": [
+            "car",
+            "engine",
+            "start",
+            "ignition"
+          ]
+        },
+        {
+          "name": "motorcycle-rev",
+          "prompt": "motorcycle engine revving sound, bike acceleration",
+          "duration": 3.0,
+          "tags": [
+            "motorcycle",
+            "rev",
+            "bike",
+            "engine"
+          ]
+        },
+        {
+          "name": "airplane-flyby",
+          "prompt": "airplane flying by sound effect, jet passing overhead",
+          "duration": 3.0,
+          "tags": [
+            "airplane",
+            "jet",
+            "flyby",
+            "sky"
+          ]
+        }
+      ]
+    },
+    "horror": {
+      "description": "Horror and scary sound effects",
+      "sounds": [
+        {
+          "name": "creepy-ambience",
+          "prompt": "creepy horror ambience sound, eerie atmosphere",
+          "duration": 3.0,
+          "tags": [
+            "creepy",
+            "horror",
+            "eerie",
+            "ambience"
+          ]
+        },
+        {
+          "name": "scream-horror",
+          "prompt": "horror scream sound effect, terrified woman screaming",
+          "duration": 3.0,
+          "tags": [
+            "scream",
+            "horror",
+            "scared",
+            "fear"
+          ]
+        },
+        {
+          "name": "music-box-creepy",
+          "prompt": "creepy music box sound, haunted toy playing slowly",
+          "duration": 3.0,
+          "tags": [
+            "music",
+            "box",
+            "creepy",
+            "haunted"
+          ]
+        }
+      ]
+    },
+    "sports": {
+      "description": "Sports and action sounds",
+      "sounds": [
+        {
+          "name": "crowd-cheer",
+          "prompt": "crowd cheering sound effect, stadium audience applause",
+          "duration": 3.0,
+          "tags": [
+            "crowd",
+            "cheer",
+            "applause",
+            "stadium"
+          ]
+        },
+        {
+          "name": "whistle-blow",
+          "prompt": "referee whistle blow sound effect, sports whistle",
+          "duration": 3.0,
+          "tags": [
+            "whistle",
+            "blow",
+            "referee",
+            "sports"
+          ]
+        },
+        {
+          "name": "basketball-bounce",
+          "prompt": "basketball bouncing sound effect, ball dribbling on court",
+          "duration": 3.0,
+          "tags": [
+            "basketball",
+            "bounce",
+            "dribble",
+            "ball"
+          ]
+        }
+      ]
+    },
+    "food": {
+      "description": "Food and cooking sounds",
+      "sounds": [
+        {
+          "name": "sizzle-cooking",
+          "prompt": "food sizzling sound effect, frying pan cooking",
+          "duration": 3.0,
+          "tags": [
+            "sizzle",
+            "cooking",
+            "fry",
+            "food"
+          ]
+        },
+        {
+          "name": "knife-chop",
+          "prompt": "knife chopping vegetables sound, cutting on board",
+          "duration": 3.0,
+          "tags": [
+            "knife",
+            "chop",
+            "cut",
+            "cooking"
+          ]
+        },
+        {
+          "name": "liquid-pour",
+          "prompt": "liquid pouring sound effect, water into glass",
+          "duration": 3.0,
+          "tags": [
+            "pour",
+            "liquid",
+            "water",
+            "drink"
+          ]
+        }
+      ]
+    }
+  }
+}

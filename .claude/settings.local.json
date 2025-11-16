@@ -14,7 +14,16 @@
       "Bash(npm run electron:build:win:*)",
       "Bash(tee:*)",
       "Bash(npm run build:*)",
-      "Bash(unzip:*)"
+      "Bash(unzip:*)",
+      "WebSearch",
+      "Bash(npm run type-check:*)",
+      "Bash(cat:*)",
+      "Bash(python3:*)",
+      "Bash(sudo apt-get update:*)",
+      "Bash(./build-windows-installer-linux.sh)",
+      "Bash(python:*)",
+      "Bash(pkill:*)",
+      "Bash(xargs:*)"
     ],
     "deny": [],
     "ask": []

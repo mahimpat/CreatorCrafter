@@ -1,0 +1,111 @@
+{
+  "version": "5.0.0",
+  "name": "Bonus Pack - Final Edition",
+  "generated_at": "2025-11-15T22:53:24.619328",
+  "total_sounds": 8,
+  "categories": {
+    "gaming": {
+      "description": "Gaming and esports sound effects",
+      "sounds": [
+        {
+          "name": "coin-collect",
+          "prompt": "video game coin collect sound effect, arcade pickup",
+          "duration": 3.0,
+          "tags": [
+            "game",
+            "coin",
+            "collect",
+            "pickup"
+          ]
+        },
+        {
+          "name": "power-up",
+          "prompt": "video game power up sound effect, level boost",
+          "duration": 3.0,
+          "tags": [
+            "game",
+            "power",
+            "up",
+            "boost"
+          ]
+        },
+        {
+          "name": "game-start",
+          "prompt": "video game start sound effect, ready fight",
+          "duration": 3.0,
+          "tags": [
+            "game",
+            "start",
+            "fight",
+            "begin"
+          ]
+        }
+      ]
+    },
+    "everyday": {
+      "description": "Common everyday household sounds",
+      "sounds": [
+        {
+          "name": "phone-ring",
+          "prompt": "landline phone ringing sound effect, telephone ring",
+          "duration": 3.0,
+          "tags": [
+            "phone",
+            "ring",
+            "telephone",
+            "call"
+          ]
+        },
+        {
+          "name": "doorbell-ring",
+          "prompt": "doorbell ringing sound effect, house door chime",
+          "duration": 3.0,
+          "tags": [
+            "doorbell",
+            "ring",
+            "door",
+            "chime"
+          ]
+        },
+        {
+          "name": "alarm-clock",
+          "prompt": "alarm clock ringing sound effect, morning wake up",
+          "duration": 3.0,
+          "tags": [
+            "alarm",
+            "clock",
+            "ring",
+            "wake"
+          ]
+        }
+      ]
+    },
+    "bonus_music": {
+      "description": "Additional music production elements",
+      "sounds": [
+        {
+          "name": "vinyl-scratch",
+          "prompt": "DJ vinyl scratch sound effect, turntable scrubbing",
+          "duration": 3.0,
+          "tags": [
+            "vinyl",
+            "scratch",
+            "dj",
+            "turntable"
+          ]
+        },
+        {
+          "name": "cowbell-hit",
+          "prompt": "cowbell percussion hit sound, more cowbell",
+          "duration": 3.0,
+          "tags": [
+            "cowbell",
+            "percussion",
+            "hit",
+            "music"
+          ]
+        }
+      ]
+    }
+  }
+}

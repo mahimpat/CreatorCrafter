@@ -141,6 +141,7 @@ export default function FreesoundLibrary() {
         path: sfxPath,
         start: currentTime,
         duration: sound.duration,
+        originalDuration: sound.duration,  // Store original duration
         volume: 1,
         prompt: sound.name
       })

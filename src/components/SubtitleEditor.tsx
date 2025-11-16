@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { Subtitle } from '../context/ProjectContext'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Trash2, Wand2 } from 'lucide-react'
+import { CaptionStyling } from './CaptionStyling'
 import './SubtitleEditor.css'
 
 export default function SubtitleEditor() {
@@ -15,6 +16,7 @@ export default function SubtitleEditor() {
   } = useProject()
 
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [showCaptionStyling, setShowCaptionStyling] = useState(false)
   const [newSubtitle, setNewSubtitle] = useState({
     text: '',
     start: 0,
@@ -68,10 +70,25 @@ export default function SubtitleEditor() {
     <div className="subtitle-editor">
       <div className="editor-header">
         <h3>Subtitles & Captions</h3>
-        <button className="btn-small" onClick={handleAutoGenerateFromTranscription}>
-          Auto-Generate
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn-small" onClick={handleAutoGenerateFromTranscription}>
+            Auto-Generate
+          </button>
+          <button
+            className="btn-small btn-style-captions"
+            onClick={() => setShowCaptionStyling(true)}
+            disabled={subtitles.length === 0}
+            title="Apply AI-powered styling to captions"
+          >
+            <Wand2 size={14} />
+            Style Captions
+          </button>
+        </div>
       </div>
+
+      {showCaptionStyling && (
+        <CaptionStyling onClose={() => setShowCaptionStyling(false)} />
+      )}
 
       <div className="add-subtitle">
         <textarea

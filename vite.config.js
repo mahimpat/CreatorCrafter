@@ -41,6 +41,21 @@ export default defineConfig({
         }
     },
     server: {
-        port: 5173
+        port: 5173,
+        watch: {
+            // Exclude directories that shouldn't be watched
+            ignored: [
+                '**/node_modules/**',
+                '**/.venv/**',
+                '**/venv/**',
+                '**/dist/**',
+                '**/dist-electron/**',
+                '**/build/**',
+                '**/release/**',
+                '**/.git/**',
+                '**/python/**/*.pyc',
+                '**/__pycache__/**'
+            ]
+        }
     }
 });

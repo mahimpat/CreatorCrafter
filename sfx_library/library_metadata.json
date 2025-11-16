@@ -1,0 +1,1787 @@
+{
+  "version": "5.0.0 - COMPLETE EDITION",
+  "generated_at": "2025-11-15T22:10:59.951898",
+  "total_sounds": 157,
+  "categories": {
+    "transitions": {
+      "description": "Transition effects for cuts, scene changes, and motion",
+      "count": 13,
+      "sounds": [
+        {
+          "name": "whoosh-fast",
+          "prompt": "fast whoosh sound effect, swift air movement",
+          "duration": 3.0,
+          "tags": [
+            "whoosh",
+            "fast",
+            "transition"
+          ]
+        },
+        {
+          "name": "whoosh-slow",
+          "prompt": "slow whoosh sound effect, gentle air sweep",
+          "duration": 3.0,
+          "tags": [
+            "whoosh",
+            "slow",
+            "transition"
+          ]
+        },
+        {
+          "name": "whoosh-deep",
+          "prompt": "deep bass whoosh, low frequency air movement",
+          "duration": 3.0,
+          "tags": [
+            "whoosh",
+            "bass",
+            "deep"
+          ]
+        },
+        {
+          "name": "whoosh-rise",
+          "prompt": "rising whoosh sound effect, ascending pitch",
+          "duration": 3.0,
+          "tags": [
+            "whoosh",
+            "rise",
+            "up"
+          ]
+        },
+        {
+          "name": "whoosh-fall",
+          "prompt": "falling whoosh sound effect, descending pitch",
+          "duration": 3.0,
+          "tags": [
+            "whoosh",
+            "fall",
+            "down"
+          ]
+        },
+        {
+          "name": "swoosh-left",
+          "prompt": "swoosh sound panning left to right",
+          "duration": 3.0,
+          "tags": [
+            "swoosh",
+            "pan",
+            "transition"
+          ]
+        },
+        {
+          "name": "swoosh-right",
+          "prompt": "swoosh sound panning right to left",
+          "duration": 3.0,
+          "tags": [
+            "swoosh",
+            "pan",
+            "transition"
+          ]
+        },
+        {
+          "name": "swoosh-quick",
+          "prompt": "quick swoosh sound effect, rapid movement",
+          "duration": 3.0,
+          "tags": [
+            "swoosh",
+            "quick",
+            "fast"
+          ]
+        },
+        {
+          "name": "riser-tension",
+          "prompt": "tension building riser sound effect",
+          "duration": 3.0,
+          "tags": [
+            "riser",
+            "tension",
+            "build"
+          ]
+        },
+        {
+          "name": "riser-dramatic",
+          "prompt": "dramatic riser sound effect, epic buildup",
+          "duration": 3.0,
+          "tags": [
+            "riser",
+            "dramatic",
+            "epic"
+          ]
+        },
+        {
+          "name": "riser-subtle",
+          "prompt": "subtle ambient riser, gentle buildup",
+          "duration": 3.0,
+          "tags": [
+            "riser",
+            "subtle",
+            "ambient"
+          ]
+        },
+        {
+          "name": "transition-hit",
+          "prompt": "transition hit sound effect, punchy impact",
+          "duration": 3.0,
+          "tags": [
+            "hit",
+            "transition",
+            "impact"
+          ]
+        },
+        {
+          "name": "transition-boom",
+          "prompt": "boom transition sound effect, deep impact",
+          "duration": 3.0,
+          "tags": [
+            "boom",
+            "transition",
+            "bass"
+          ]
+        }
+      ]
+    },
+    "foley": {
+      "description": "Foley sounds for human actions and object interactions",
+      "count": 14,
+      "sounds": [
+        {
+          "name": "footstep-concrete",
+          "prompt": "single footstep on concrete floor",
+          "duration": 3.0,
+          "tags": [
+            "footstep",
+            "concrete",
+            "walk"
+          ]
+        },
+        {
+          "name": "footstep-wood",
+          "prompt": "single footstep on wooden floor, creaky",
+          "duration": 3.0,
+          "tags": [
+            "footstep",
+            "wood",
+            "walk"
+          ]
+        },
+        {
+          "name": "footstep-gravel",
+          "prompt": "footstep on gravel, crunchy texture",
+          "duration": 3.0,
+          "tags": [
+            "footstep",
+            "gravel",
+            "crunch"
+          ]
+        },
+        {
+          "name": "door-open",
+          "prompt": "door opening sound effect, wooden door creaking",
+          "duration": 3.0,
+          "tags": [
+            "door",
+            "open",
+            "creak"
+          ]
+        },
+        {
+          "name": "door-close",
+          "prompt": "door closing sound effect, solid close",
+          "duration": 3.0,
+          "tags": [
+            "door",
+            "close",
+            "slam"
+          ]
+        },
+        {
+          "name": "door-knock",
+          "prompt": "knocking on wooden door, three knocks",
+          "duration": 3.0,
+          "tags": [
+            "door",
+            "knock",
+            "wood"
+          ]
+        },
+        {
+          "name": "paper-rustle",
+          "prompt": "paper rustling sound effect, pages turning",
+          "duration": 3.0,
+          "tags": [
+            "paper",
+            "rustle",
+            "foley"
+          ]
+        },
+        {
+          "name": "cloth-movement",
+          "prompt": "clothing fabric movement, cloth rustle",
+          "duration": 3.0,
+          "tags": [
+            "cloth",
+            "fabric",
+            "rustle"
+          ]
+        },
+        {
+          "name": "keyboard-typing",
+          "prompt": "keyboard typing sound, mechanical keys",
+          "duration": 3.0,
+          "tags": [
+            "keyboard",
+            "typing",
+            "tech"
+          ]
+        },
+        {
+          "name": "pen-writing",
+          "prompt": "pen writing on paper sound",
+          "duration": 3.0,
+          "tags": [
+            "pen",
+            "writing",
+            "paper"
+          ]
+        },
+        {
+          "name": "glass-clink",
+          "prompt": "wine glasses clinking together",
+          "duration": 3.0,
+          "tags": [
+            "glass",
+            "clink",
+            "toast"
+          ]
+        },
+        {
+          "name": "cup-place",
+          "prompt": "coffee cup placed on table",
+          "duration": 3.0,
+          "tags": [
+            "cup",
+            "place",
+            "ceramic"
+          ]
+        },
+        {
+          "name": "keys-jingle",
+          "prompt": "keys jingling sound effect, metal clanking",
+          "duration": 3.0,
+          "tags": [
+            "keys",
+            "jingle",
+            "metal"
+          ]
+        },
+        {
+          "name": "coins-drop",
+          "prompt": "coins dropping on hard surface",
+          "duration": 3.0,
+          "tags": [
+            "coins",
+            "drop",
+            "metal"
+          ]
+        }
+      ]
+    },
+    "impacts": {
+      "description": "Impact sounds for punches, hits, crashes, and collisions",
+      "count": 9,
+      "sounds": [
+        {
+          "name": "punch-hard",
+          "prompt": "hard punch impact sound effect, powerful hit",
+          "duration": 3.0,
+          "tags": [
+            "punch",
+            "hit",
+            "impact"
+          ]
+        },
+        {
+          "name": "punch-soft",
+          "prompt": "soft punch sound effect, light hit",
+          "duration": 3.0,
+          "tags": [
+            "punch",
+            "hit",
+            "soft"
+          ]
+        },
+        {
+          "name": "slap-face",
+          "prompt": "face slap sound effect, sharp impact",
+          "duration": 3.0,
+          "tags": [
+            "slap",
+            "hit",
+            "sharp"
+          ]
+        },
+        {
+          "name": "thud-heavy",
+          "prompt": "heavy thud sound, large object falling",
+          "duration": 3.0,
+          "tags": [
+            "thud",
+            "heavy",
+            "fall"
+          ]
+        },
+        {
+          "name": "thud-body",
+          "prompt": "body thud sound effect, person falling",
+          "duration": 3.0,
+          "tags": [
+            "thud",
+            "body",
+            "fall"
+          ]
+        },
+        {
+          "name": "crash-glass",
+          "prompt": "glass breaking and shattering sound",
+          "duration": 3.0,
+          "tags": [
+            "crash",
+            "glass",
+            "shatter"
+          ]
+        },
+        {
+          "name": "crash-metal",
+          "prompt": "metal crash sound effect, metallic collision",
+          "duration": 3.0,
+          "tags": [
+            "crash",
+            "metal",
+            "collision"
+          ]
+        },
+        {
+          "name": "explosion-big",
+          "prompt": "large explosion sound effect, powerful blast",
+          "duration": 3.0,
+          "tags": [
+            "explosion",
+            "blast",
+            "boom"
+          ]
+        },
+        {
+          "name": "explosion-small",
+          "prompt": "small explosion sound, firecracker pop",
+          "duration": 3.0,
+          "tags": [
+            "explosion",
+            "pop",
+            "small"
+          ]
+        }
+      ]
+    },
+    "ui": {
+      "description": "UI sounds for clicks, notifications, and interface feedback",
+      "count": 11,
+      "sounds": [
+        {
+          "name": "click-soft",
+          "prompt": "soft button click sound, gentle tap",
+          "duration": 3.0,
+          "tags": [
+            "click",
+            "button",
+            "ui"
+          ]
+        },
+        {
+          "name": "click-hard",
+          "prompt": "hard button click, mechanical switch",
+          "duration": 3.0,
+          "tags": [
+            "click",
+            "button",
+            "mechanical"
+          ]
+        },
+        {
+          "name": "click-tech",
+          "prompt": "futuristic tech click sound, digital beep",
+          "duration": 3.0,
+          "tags": [
+            "click",
+            "tech",
+            "digital"
+          ]
+        },
+        {
+          "name": "pop-bubble",
+          "prompt": "bubble pop sound effect, light pop",
+          "duration": 3.0,
+          "tags": [
+            "pop",
+            "bubble",
+            "ui"
+          ]
+        },
+        {
+          "name": "pop-cork",
+          "prompt": "cork pop sound, champagne opening",
+          "duration": 3.0,
+          "tags": [
+            "pop",
+            "cork",
+            "celebration"
+          ]
+        },
+        {
+          "name": "notification-bell",
+          "prompt": "notification bell sound, gentle chime",
+          "duration": 3.0,
+          "tags": [
+            "notification",
+            "bell",
+            "alert"
+          ]
+        },
+        {
+          "name": "notification-ping",
+          "prompt": "notification ping sound, digital alert",
+          "duration": 3.0,
+          "tags": [
+            "notification",
+            "ping",
+            "alert"
+          ]
+        },
+        {
+          "name": "notification-success",
+          "prompt": "success notification sound, positive chime",
+          "duration": 3.0,
+          "tags": [
+            "notification",
+            "success",
+            "positive"
+          ]
+        },
+        {
+          "name": "notification-error",
+          "prompt": "error notification sound, negative beep",
+          "duration": 3.0,
+          "tags": [
+            "notification",
+            "error",
+            "negative"
+          ]
+        },
+        {
+          "name": "beep-short",
+          "prompt": "short beep sound, single tone",
+          "duration": 3.0,
+          "tags": [
+            "beep",
+            "short",
+            "tone"
+          ]
+        },
+        {
+          "name": "beep-countdown",
+          "prompt": "countdown beep sound, timer tick",
+          "duration": 3.0,
+          "tags": [
+            "beep",
+            "countdown",
+            "timer"
+          ]
+        }
+      ]
+    },
+    "ambient": {
+      "description": "Ambient background sounds and room tones",
+      "count": 7,
+      "sounds": [
+        {
+          "name": "room-quiet",
+          "prompt": "quiet room tone, subtle ambient noise",
+          "duration": 3.0,
+          "tags": [
+            "ambient",
+            "room",
+            "quiet"
+          ]
+        },
+        {
+          "name": "room-office",
+          "prompt": "office ambient sound, keyboard typing and murmurs",
+          "duration": 3.0,
+          "tags": [
+            "ambient",
+            "office",
+            "work"
+          ]
+        },
+        {
+          "name": "wind-gentle",
+          "prompt": "gentle wind sound, soft breeze",
+          "duration": 3.0,
+          "tags": [
+            "nature",
+            "wind",
+            "outdoor"
+          ]
+        },
+        {
+          "name": "rain-light",
+          "prompt": "light rain sound, gentle rainfall",
+          "duration": 3.0,
+          "tags": [
+            "nature",
+            "rain",
+            "weather"
+          ]
+        },
+        {
+          "name": "birds-morning",
+          "prompt": "morning birds chirping, peaceful nature",
+          "duration": 3.0,
+          "tags": [
+            "nature",
+            "birds",
+            "morning"
+          ]
+        },
+        {
+          "name": "city-traffic",
+          "prompt": "distant city traffic ambient sound",
+          "duration": 3.0,
+          "tags": [
+            "urban",
+            "traffic",
+            "city"
+          ]
+        },
+        {
+          "name": "cafe-ambience",
+          "prompt": "coffee shop ambient sound, people chatting",
+          "duration": 3.0,
+          "tags": [
+            "urban",
+            "cafe",
+            "people"
+          ]
+        }
+      ]
+    },
+    "movement": {
+      "description": "Movement sounds for swipes, slides, and mechanical actions",
+      "count": 6,
+      "sounds": [
+        {
+          "name": "swipe-left",
+          "prompt": "swipe sound effect, quick motion left",
+          "duration": 3.0,
+          "tags": [
+            "swipe",
+            "motion",
+            "ui"
+          ]
+        },
+        {
+          "name": "swipe-up",
+          "prompt": "swipe up sound effect, upward motion",
+          "duration": 3.0,
+          "tags": [
+            "swipe",
+            "motion",
+            "up"
+          ]
+        },
+        {
+          "name": "slide-drawer",
+          "prompt": "drawer sliding open sound, smooth motion",
+          "duration": 3.0,
+          "tags": [
+            "slide",
+            "drawer",
+            "furniture"
+          ]
+        },
+        {
+          "name": "slide-zipper",
+          "prompt": "zipper sliding sound effect",
+          "duration": 3.0,
+          "tags": [
+            "slide",
+            "zipper",
+            "clothing"
+          ]
+        },
+        {
+          "name": "gear-turn",
+          "prompt": "mechanical gear turning sound, clockwork",
+          "duration": 3.0,
+          "tags": [
+            "mechanical",
+            "gear",
+            "clockwork"
+          ]
+        },
+        {
+          "name": "motor-start",
+          "prompt": "electric motor starting sound effect",
+          "duration": 3.0,
+          "tags": [
+            "mechanical",
+            "motor",
+            "electric"
+          ]
+        }
+      ]
+    },
+    "attention": {
+      "description": "Attention-grabbing sounds for hooks and dramatic moments",
+      "sounds": [
+        {
+          "name": "record-scratch",
+          "prompt": "vinyl record scratch sound effect, dramatic stop",
+          "duration": 3.0,
+          "tags": [
+            "record",
+            "scratch",
+            "stop",
+            "dramatic"
+          ]
+        },
+        {
+          "name": "rewind",
+          "prompt": "tape rewind sound effect, fast backwards",
+          "duration": 3.0,
+          "tags": [
+            "rewind",
+            "tape",
+            "backwards"
+          ]
+        },
+        {
+          "name": "fast-forward",
+          "prompt": "fast forward sound effect, VCR tape speeding up",
+          "duration": 3.0,
+          "tags": [
+            "fast",
+            "forward",
+            "speed"
+          ]
+        },
+        {
+          "name": "air-horn",
+          "prompt": "air horn blast sound effect, loud party horn",
+          "duration": 3.0,
+          "tags": [
+            "air",
+            "horn",
+            "blast",
+            "loud"
+          ]
+        },
+        {
+          "name": "dramatic-hit",
+          "prompt": "dramatic orchestral hit sound, epic impact",
+          "duration": 3.0,
+          "tags": [
+            "dramatic",
+            "orchestral",
+            "epic",
+            "impact"
+          ]
+        },
+        {
+          "name": "bass-drop",
+          "prompt": "massive bass drop sound effect, dubstep style",
+          "duration": 3.0,
+          "tags": [
+            "bass",
+            "drop",
+            "dubstep",
+            "heavy"
+          ]
+        },
+        {
+          "name": "shock-sfx",
+          "prompt": "shock sound effect, dramatic surprise sting",
+          "duration": 3.0,
+          "tags": [
+            "shock",
+            "surprise",
+            "sting"
+          ]
+        },
+        {
+          "name": "suspense-hit",
+          "prompt": "suspense thriller hit sound, tense impact",
+          "duration": 3.0,
+          "tags": [
+            "suspense",
+            "thriller",
+            "tense"
+          ]
+        },
+        {
+          "name": "jump-scare",
+          "prompt": "jump scare sound effect, sudden loud scary noise",
+          "duration": 3.0,
+          "tags": [
+            "jump",
+            "scare",
+            "scary",
+            "sudden"
+          ]
+        },
+        {
+          "name": "cartoon-boing",
+          "prompt": "cartoon boing sound effect, bouncy spring",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "boing",
+            "bounce",
+            "spring"
+          ]
+        },
+        {
+          "name": "wrong-answer",
+          "prompt": "wrong answer buzzer sound, game show fail",
+          "duration": 3.0,
+          "tags": [
+            "wrong",
+            "buzzer",
+            "fail",
+            "game"
+          ]
+        },
+        {
+          "name": "clown-horn",
+          "prompt": "clown horn honk sound effect, funny bike horn",
+          "duration": 3.0,
+          "tags": [
+            "clown",
+            "horn",
+            "honk",
+            "funny"
+          ]
+        },
+        {
+          "name": "glitch-impact",
+          "prompt": "digital glitch impact sound effect, technology malfunction",
+          "duration": 3.0,
+          "tags": [
+            "glitch",
+            "digital",
+            "tech",
+            "impact"
+          ]
+        },
+        {
+          "name": "laser-zap",
+          "prompt": "laser zap sound effect, sci-fi energy blast",
+          "duration": 3.0,
+          "tags": [
+            "laser",
+            "zap",
+            "sci-fi",
+            "energy"
+          ]
+        },
+        {
+          "name": "explosion-boom",
+          "prompt": "cinematic explosion boom, big movie blast",
+          "duration": 3.0,
+          "tags": [
+            "explosion",
+            "boom",
+            "cinematic",
+            "blast"
+          ]
+        }
+      ]
+    },
+    "creator_transitions": {
+      "description": "Modern transitions for jump cuts and scene changes",
+      "sounds": [
+        {
+          "name": "jump-cut",
+          "prompt": "quick jump cut whoosh sound, fast transition",
+          "duration": 3.0,
+          "tags": [
+            "jump",
+            "cut",
+            "whoosh",
+            "fast"
+          ]
+        },
+        {
+          "name": "glitch-transition",
+          "prompt": "digital glitch transition sound effect, data corruption",
+          "duration": 3.0,
+          "tags": [
+            "glitch",
+            "transition",
+            "digital",
+            "data"
+          ]
+        },
+        {
+          "name": "tape-stop",
+          "prompt": "tape stop sound effect, slowing down to halt",
+          "duration": 3.0,
+          "tags": [
+            "tape",
+            "stop",
+            "slow",
+            "halt"
+          ]
+        },
+        {
+          "name": "quick-swipe",
+          "prompt": "quick swipe whoosh sound, fast swish",
+          "duration": 3.0,
+          "tags": [
+            "swipe",
+            "whoosh",
+            "quick",
+            "swish"
+          ]
+        },
+        {
+          "name": "zoom-in",
+          "prompt": "zoom in whoosh sound effect, approaching fast",
+          "duration": 3.0,
+          "tags": [
+            "zoom",
+            "in",
+            "approach",
+            "whoosh"
+          ]
+        },
+        {
+          "name": "zoom-out",
+          "prompt": "zoom out whoosh sound effect, receding away",
+          "duration": 3.0,
+          "tags": [
+            "zoom",
+            "out",
+            "recede",
+            "whoosh"
+          ]
+        },
+        {
+          "name": "hologram-appear",
+          "prompt": "hologram appearing sound effect, sci-fi materialize",
+          "duration": 3.0,
+          "tags": [
+            "hologram",
+            "appear",
+            "sci-fi",
+            "tech"
+          ]
+        },
+        {
+          "name": "hologram-disappear",
+          "prompt": "hologram disappearing sound effect, dematerialize",
+          "duration": 3.0,
+          "tags": [
+            "hologram",
+            "disappear",
+            "dematerialize"
+          ]
+        },
+        {
+          "name": "digital-wipe",
+          "prompt": "digital screen wipe sound effect, transition swipe",
+          "duration": 3.0,
+          "tags": [
+            "digital",
+            "wipe",
+            "screen",
+            "swipe"
+          ]
+        },
+        {
+          "name": "cinematic-riser",
+          "prompt": "cinematic riser sound effect, building tension",
+          "duration": 3.0,
+          "tags": [
+            "cinematic",
+            "riser",
+            "tension",
+            "build"
+          ]
+        },
+        {
+          "name": "reverse-cymbal",
+          "prompt": "reverse cymbal crash sound effect, backwards buildup",
+          "duration": 3.0,
+          "tags": [
+            "reverse",
+            "cymbal",
+            "crash",
+            "buildup"
+          ]
+        },
+        {
+          "name": "trailer-boom",
+          "prompt": "movie trailer boom sound, deep bass hit",
+          "duration": 3.0,
+          "tags": [
+            "trailer",
+            "boom",
+            "movie",
+            "bass"
+          ]
+        },
+        {
+          "name": "snap-cut",
+          "prompt": "snap finger sound effect, quick transition snap",
+          "duration": 3.0,
+          "tags": [
+            "snap",
+            "finger",
+            "quick",
+            "cut"
+          ]
+        },
+        {
+          "name": "time-freeze",
+          "prompt": "time freeze sound effect, motion stop with reverb",
+          "duration": 3.0,
+          "tags": [
+            "time",
+            "freeze",
+            "stop",
+            "reverb"
+          ]
+        },
+        {
+          "name": "speed-ramp",
+          "prompt": "speed ramp sound effect, slow motion transition",
+          "duration": 3.0,
+          "tags": [
+            "speed",
+            "ramp",
+            "slow",
+            "motion"
+          ]
+        }
+      ]
+    },
+    "emotional": {
+      "description": "Emotional moments and storytelling sounds",
+      "sounds": [
+        {
+          "name": "victory-fanfare",
+          "prompt": "short victory fanfare sound, success celebration",
+          "duration": 3.0,
+          "tags": [
+            "victory",
+            "fanfare",
+            "success",
+            "win"
+          ]
+        },
+        {
+          "name": "achievement-unlock",
+          "prompt": "achievement unlock sound effect, game reward",
+          "duration": 3.0,
+          "tags": [
+            "achievement",
+            "unlock",
+            "game",
+            "reward"
+          ]
+        },
+        {
+          "name": "level-up",
+          "prompt": "level up sound effect, power up success",
+          "duration": 3.0,
+          "tags": [
+            "level",
+            "up",
+            "power",
+            "success"
+          ]
+        },
+        {
+          "name": "sad-trombone",
+          "prompt": "sad trombone fail sound effect, comedic failure",
+          "duration": 3.0,
+          "tags": [
+            "sad",
+            "trombone",
+            "fail",
+            "comedy"
+          ]
+        },
+        {
+          "name": "game-over",
+          "prompt": "game over sound effect, defeat loss",
+          "duration": 3.0,
+          "tags": [
+            "game",
+            "over",
+            "defeat",
+            "loss"
+          ]
+        },
+        {
+          "name": "error-sound",
+          "prompt": "error sound effect, system failure beep",
+          "duration": 3.0,
+          "tags": [
+            "error",
+            "failure",
+            "beep",
+            "system"
+          ]
+        },
+        {
+          "name": "suspense-drone",
+          "prompt": "suspense drone sound, tense atmosphere",
+          "duration": 3.0,
+          "tags": [
+            "suspense",
+            "drone",
+            "tense",
+            "atmosphere"
+          ]
+        },
+        {
+          "name": "heartbeat-pulse",
+          "prompt": "heartbeat pulse sound effect, nervous tension",
+          "duration": 3.0,
+          "tags": [
+            "heartbeat",
+            "pulse",
+            "nervous",
+            "tension"
+          ]
+        },
+        {
+          "name": "epic-orchestral",
+          "prompt": "epic orchestral swell sound, heroic moment",
+          "duration": 3.0,
+          "tags": [
+            "epic",
+            "orchestral",
+            "heroic",
+            "swell"
+          ]
+        },
+        {
+          "name": "triumphant-horns",
+          "prompt": "triumphant horn fanfare, victory theme",
+          "duration": 3.0,
+          "tags": [
+            "triumphant",
+            "horns",
+            "fanfare",
+            "theme"
+          ]
+        }
+      ]
+    },
+    "engagement": {
+      "description": "Engagement sounds for calls-to-action and viewer interaction",
+      "sounds": [
+        {
+          "name": "bell-notification",
+          "prompt": "notification bell ding sound, alert chime",
+          "duration": 3.0,
+          "tags": [
+            "bell",
+            "notification",
+            "ding",
+            "alert"
+          ]
+        },
+        {
+          "name": "subscribe-click",
+          "prompt": "button click sound effect, satisfying tap",
+          "duration": 3.0,
+          "tags": [
+            "subscribe",
+            "click",
+            "button",
+            "tap"
+          ]
+        },
+        {
+          "name": "like-sound",
+          "prompt": "positive like sound effect, approval chime",
+          "duration": 3.0,
+          "tags": [
+            "like",
+            "positive",
+            "approval",
+            "chime"
+          ]
+        },
+        {
+          "name": "countdown-beep",
+          "prompt": "countdown timer beep sound, short tick",
+          "duration": 3.0,
+          "tags": [
+            "countdown",
+            "timer",
+            "beep",
+            "tick"
+          ]
+        },
+        {
+          "name": "countdown-final",
+          "prompt": "countdown final beep sound, urgent alert",
+          "duration": 3.0,
+          "tags": [
+            "countdown",
+            "final",
+            "urgent",
+            "beep"
+          ]
+        },
+        {
+          "name": "time-running-out",
+          "prompt": "time running out ticking sound, urgent timer",
+          "duration": 3.0,
+          "tags": [
+            "time",
+            "running",
+            "ticking",
+            "urgent"
+          ]
+        },
+        {
+          "name": "pop-up",
+          "prompt": "pop-up appear sound effect, graphic element",
+          "duration": 3.0,
+          "tags": [
+            "pop",
+            "up",
+            "appear",
+            "graphic"
+          ]
+        },
+        {
+          "name": "text-appear",
+          "prompt": "text appearing sound effect, typing reveal",
+          "duration": 3.0,
+          "tags": [
+            "text",
+            "appear",
+            "typing",
+            "reveal"
+          ]
+        },
+        {
+          "name": "cash-register",
+          "prompt": "cash register cha-ching sound, money sale",
+          "duration": 3.0,
+          "tags": [
+            "cash",
+            "register",
+            "money",
+            "sale"
+          ]
+        },
+        {
+          "name": "magic-sparkle",
+          "prompt": "magic sparkle sound effect, fairy dust twinkle",
+          "duration": 3.0,
+          "tags": [
+            "magic",
+            "sparkle",
+            "fairy",
+            "twinkle"
+          ]
+        }
+      ]
+    },
+    "cartoon": {
+      "description": "Cartoon and comedy sound effects",
+      "sounds": [
+        {
+          "name": "slide-whistle",
+          "prompt": "cartoon slide whistle sound effect, descending pitch",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "comedy",
+            "whistle",
+            "slide"
+          ]
+        },
+        {
+          "name": "spring-boing",
+          "prompt": "cartoon spring boing sound effect, bouncy jump",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "spring",
+            "boing",
+            "bounce"
+          ]
+        },
+        {
+          "name": "slip-fall",
+          "prompt": "cartoon slip and fall sound effect, comedic accident",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "slip",
+            "fall",
+            "comedy"
+          ]
+        },
+        {
+          "name": "bonk-hit",
+          "prompt": "cartoon bonk hit sound effect, comedic impact on head",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "bonk",
+            "hit",
+            "comedy"
+          ]
+        },
+        {
+          "name": "splat-impact",
+          "prompt": "cartoon splat sound effect, wet impact",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "splat",
+            "wet",
+            "impact"
+          ]
+        },
+        {
+          "name": "pop-burst",
+          "prompt": "cartoon pop sound effect, bubble burst",
+          "duration": 3.0,
+          "tags": [
+            "cartoon",
+            "pop",
+            "bubble",
+            "burst"
+          ]
+        }
+      ]
+    },
+    "cinematic": {
+      "description": "Cinematic and dramatic sound effects",
+      "sounds": [
+        {
+          "name": "thunder-boom",
+          "prompt": "massive thunder boom sound effect, dramatic storm",
+          "duration": 3.0,
+          "tags": [
+            "thunder",
+            "boom",
+            "storm",
+            "dramatic"
+          ]
+        },
+        {
+          "name": "lightning-strike",
+          "prompt": "lightning strike crack sound effect, electric bolt",
+          "duration": 3.0,
+          "tags": [
+            "lightning",
+            "strike",
+            "electric",
+            "crack"
+          ]
+        },
+        {
+          "name": "earthquake-rumble",
+          "prompt": "earthquake rumble sound effect, ground shaking",
+          "duration": 3.0,
+          "tags": [
+            "earthquake",
+            "rumble",
+            "shake",
+            "ground"
+          ]
+        },
+        {
+          "name": "meteor-impact",
+          "prompt": "meteor impact explosion sound, massive crash",
+          "duration": 3.0,
+          "tags": [
+            "meteor",
+            "impact",
+            "explosion",
+            "crash"
+          ]
+        },
+        {
+          "name": "avalanche-crash",
+          "prompt": "avalanche crashing sound effect, snow tumbling down mountain",
+          "duration": 3.0,
+          "tags": [
+            "avalanche",
+            "crash",
+            "snow",
+            "mountain"
+          ]
+        }
+      ]
+    },
+    "music": {
+      "description": "Music elements and beat components",
+      "sounds": [
+        {
+          "name": "kick-drum-hit",
+          "prompt": "deep kick drum hit sound, 808 bass drum",
+          "duration": 3.0,
+          "tags": [
+            "kick",
+            "drum",
+            "bass",
+            "beat"
+          ]
+        },
+        {
+          "name": "snare-hit",
+          "prompt": "snare drum hit sound effect, crisp snare",
+          "duration": 3.0,
+          "tags": [
+            "snare",
+            "drum",
+            "hit",
+            "beat"
+          ]
+        },
+        {
+          "name": "bass-drop-heavy",
+          "prompt": "heavy bass drop sound effect, dubstep sub bass",
+          "duration": 3.0,
+          "tags": [
+            "bass",
+            "drop",
+            "dubstep",
+            "heavy"
+          ]
+        },
+        {
+          "name": "synth-stab",
+          "prompt": "synth stab sound effect, electronic hit",
+          "duration": 3.0,
+          "tags": [
+            "synth",
+            "stab",
+            "electronic",
+            "hit"
+          ]
+        },
+        {
+          "name": "riser-buildup",
+          "prompt": "tension riser sound effect, musical buildup",
+          "duration": 3.0,
+          "tags": [
+            "riser",
+            "buildup",
+            "tension",
+            "music"
+          ]
+        }
+      ]
+    },
+    "nature_sounds": {
+      "description": "Nature and animal sounds",
+      "sounds": [
+        {
+          "name": "dog-bark",
+          "prompt": "dog barking sound effect, medium sized dog",
+          "duration": 3.0,
+          "tags": [
+            "dog",
+            "bark",
+            "animal",
+            "pet"
+          ]
+        },
+        {
+          "name": "cat-meow",
+          "prompt": "cat meowing sound effect, house cat",
+          "duration": 3.0,
+          "tags": [
+            "cat",
+            "meow",
+            "animal",
+            "pet"
+          ]
+        },
+        {
+          "name": "water-splash",
+          "prompt": "water splash sound effect, large splash in pool",
+          "duration": 3.0,
+          "tags": [
+            "water",
+            "splash",
+            "pool",
+            "liquid"
+          ]
+        },
+        {
+          "name": "fire-crackle",
+          "prompt": "fire crackling sound effect, campfire burning",
+          "duration": 3.0,
+          "tags": [
+            "fire",
+            "crackle",
+            "campfire",
+            "burn"
+          ]
+        },
+        {
+          "name": "thunder-rumble",
+          "prompt": "distant thunder rumble sound, storm approaching",
+          "duration": 3.0,
+          "tags": [
+            "thunder",
+            "rumble",
+            "storm",
+            "weather"
+          ]
+        }
+      ]
+    },
+    "technology": {
+      "description": "Modern tech and digital sounds",
+      "sounds": [
+        {
+          "name": "phone-buzz",
+          "prompt": "phone vibration buzz sound effect, mobile phone vibrate",
+          "duration": 3.0,
+          "tags": [
+            "phone",
+            "buzz",
+            "vibrate",
+            "mobile"
+          ]
+        },
+        {
+          "name": "glitch-digital",
+          "prompt": "digital glitch sound effect, technology malfunction",
+          "duration": 3.0,
+          "tags": [
+            "glitch",
+            "digital",
+            "tech",
+            "error"
+          ]
+        },
+        {
+          "name": "swipe-screen",
+          "prompt": "touchscreen swipe sound effect, finger swipe on phone",
+          "duration": 3.0,
+          "tags": [
+            "swipe",
+            "screen",
+            "touch",
+            "phone"
+          ]
+        },
+        {
+          "name": "notification-ping",
+          "prompt": "notification ping sound effect, app alert tone",
+          "duration": 3.0,
+          "tags": [
+            "notification",
+            "ping",
+            "alert",
+            "app"
+          ]
+        },
+        {
+          "name": "robot-beep",
+          "prompt": "robot beep sound effect, mechanical electronic beep",
+          "duration": 3.0,
+          "tags": [
+            "robot",
+            "beep",
+            "mechanical",
+            "tech"
+          ]
+        }
+      ]
+    },
+    "vehicles": {
+      "description": "Vehicle and transportation sounds",
+      "sounds": [
+        {
+          "name": "car-honk",
+          "prompt": "car horn honk sound effect, vehicle beep",
+          "duration": 3.0,
+          "tags": [
+            "car",
+            "horn",
+            "honk",
+            "vehicle"
+          ]
+        },
+        {
+          "name": "car-engine-start",
+          "prompt": "car engine starting sound effect, ignition turn on",
+          "duration": 3.0,
+          "tags": [
+            "car",
+            "engine",
+            "start",
+            "ignition"
+          ]
+        },
+        {
+          "name": "motorcycle-rev",
+          "prompt": "motorcycle engine revving sound, bike acceleration",
+          "duration": 3.0,
+          "tags": [
+            "motorcycle",
+            "rev",
+            "bike",
+            "engine"
+          ]
+        },
+        {
+          "name": "airplane-flyby",
+          "prompt": "airplane flying by sound effect, jet passing overhead",
+          "duration": 3.0,
+          "tags": [
+            "airplane",
+            "jet",
+            "flyby",
+            "sky"
+          ]
+        }
+      ]
+    },
+    "horror": {
+      "description": "Horror and scary sound effects",
+      "sounds": [
+        {
+          "name": "creepy-ambience",
+          "prompt": "creepy horror ambience sound, eerie atmosphere",
+          "duration": 3.0,
+          "tags": [
+            "creepy",
+            "horror",
+            "eerie",
+            "ambience"
+          ]
+        },
+        {
+          "name": "scream-horror",
+          "prompt": "horror scream sound effect, terrified woman screaming",
+          "duration": 3.0,
+          "tags": [
+            "scream",
+            "horror",
+            "scared",
+            "fear"
+          ]
+        },
+        {
+          "name": "music-box-creepy",
+          "prompt": "creepy music box sound, haunted toy playing slowly",
+          "duration": 3.0,
+          "tags": [
+            "music",
+            "box",
+            "creepy",
+            "haunted"
+          ]
+        }
+      ]
+    },
+    "sports": {
+      "description": "Sports and action sounds",
+      "sounds": [
+        {
+          "name": "crowd-cheer",
+          "prompt": "crowd cheering sound effect, stadium audience applause",
+          "duration": 3.0,
+          "tags": [
+            "crowd",
+            "cheer",
+            "applause",
+            "stadium"
+          ]
+        },
+        {
+          "name": "whistle-blow",
+          "prompt": "referee whistle blow sound effect, sports whistle",
+          "duration": 3.0,
+          "tags": [
+            "whistle",
+            "blow",
+            "referee",
+            "sports"
+          ]
+        },
+        {
+          "name": "basketball-bounce",
+          "prompt": "basketball bouncing sound effect, ball dribbling on court",
+          "duration": 3.0,
+          "tags": [
+            "basketball",
+            "bounce",
+            "dribble",
+            "ball"
+          ]
+        }
+      ]
+    },
+    "food": {
+      "description": "Food and cooking sounds",
+      "sounds": [
+        {
+          "name": "sizzle-cooking",
+          "prompt": "food sizzling sound effect, frying pan cooking",
+          "duration": 3.0,
+          "tags": [
+            "sizzle",
+            "cooking",
+            "fry",
+            "food"
+          ]
+        },
+        {
+          "name": "knife-chop",
+          "prompt": "knife chopping vegetables sound, cutting on board",
+          "duration": 3.0,
+          "tags": [
+            "knife",
+            "chop",
+            "cut",
+            "cooking"
+          ]
+        },
+        {
+          "name": "liquid-pour",
+          "prompt": "liquid pouring sound effect, water into glass",
+          "duration": 3.0,
+          "tags": [
+            "pour",
+            "liquid",
+            "water",
+            "drink"
+          ]
+        }
+      ]
+    },
+    "gaming": {
+      "description": "Gaming and esports sound effects",
+      "sounds": [
+        {
+          "name": "coin-collect",
+          "prompt": "video game coin collect sound effect, arcade pickup",
+          "duration": 3.0,
+          "tags": [
+            "game",
+            "coin",
+            "collect",
+            "pickup"
+          ]
+        },
+        {
+          "name": "power-up",
+          "prompt": "video game power up sound effect, level boost",
+          "duration": 3.0,
+          "tags": [
+            "game",
+            "power",
+            "up",
+            "boost"
+          ]
+        },
+        {
+          "name": "game-start",
+          "prompt": "video game start sound effect, ready fight",
+          "duration": 3.0,
+          "tags": [
+            "game",
+            "start",
+            "fight",
+            "begin"
+          ]
+        }
+      ]
+    },
+    "everyday": {
+      "description": "Common everyday household sounds",
+      "sounds": [
+        {
+          "name": "phone-ring",
+          "prompt": "landline phone ringing sound effect, telephone ring",
+          "duration": 3.0,
+          "tags": [
+            "phone",
+            "ring",
+            "telephone",
+            "call"
+          ]
+        },
+        {
+          "name": "doorbell-ring",
+          "prompt": "doorbell ringing sound effect, house door chime",
+          "duration": 3.0,
+          "tags": [
+            "doorbell",
+            "ring",
+            "door",
+            "chime"
+          ]
+        },
+        {
+          "name": "alarm-clock",
+          "prompt": "alarm clock ringing sound effect, morning wake up",
+          "duration": 3.0,
+          "tags": [
+            "alarm",
+            "clock",
+            "ring",
+            "wake"
+          ]
+        }
+      ]
+    },
+    "bonus_music": {
+      "description": "Additional music production elements",
+      "sounds": [
+        {
+          "name": "vinyl-scratch",
+          "prompt": "DJ vinyl scratch sound effect, turntable scrubbing",
+          "duration": 3.0,
+          "tags": [
+            "vinyl",
+            "scratch",
+            "dj",
+            "turntable"
+          ]
+        },
+        {
+          "name": "cowbell-hit",
+          "prompt": "cowbell percussion hit sound, more cowbell",
+          "duration": 3.0,
+          "tags": [
+            "cowbell",
+            "percussion",
+            "hit",
+            "music"
+          ]
+        }
+      ]
+    }
+  },
+  "name": "Complete Professional SFX Library - 157 Sounds",
+  "description": "Professional sound effects library with 22 categories covering every content creation need"
+}

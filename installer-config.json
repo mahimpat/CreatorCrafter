@@ -1,0 +1,27 @@
+{
+  "pythonEnv": {
+    "version": "1.0.0",
+    "url": "GOOGLE_DRIVE_DOWNLOAD_URL_PLACEHOLDER",
+    "filename": "python-env-windows-x64-v1.0.0.zip",
+    "sha256": "db106dba2bbe10a8c3fd1c907277659726e0a6355ca839ec5978e746d7254d4f",
+    "size_mb": 393,
+    "description": "Pre-built Python 3.11.9 environment with PyTorch, AudioCraft, and all dependencies"
+  },
+  "instructions": {
+    "upload_to_google_drive": [
+      "1. Go to https://drive.google.com",
+      "2. Upload: scripts/dist/python-env-windows-x64-v1.0.0.zip",
+      "3. Right-click file -> Share -> 'Anyone with the link'",
+      "4. Copy sharing link (looks like: https://drive.google.com/file/d/FILE_ID/view?usp=sharing)",
+      "5. Extract FILE_ID from the link",
+      "6. Create direct download URL: https://drive.google.com/uc?export=download&id=FILE_ID",
+      "7. Update 'url' field above with the direct download URL",
+      "8. Rebuild installer: npm run electron:build:win"
+    ],
+    "alternative_github_releases": [
+      "cd ~/CreatorCrafter",
+      "gh release create v1.0.0-python-env --title 'Python Environment v1.0.0' --notes 'Pre-built Windows Python environment' scripts/dist/python-env-windows-x64-v1.0.0.zip",
+      "URL will be: https://github.com/YOUR_USERNAME/CreatorCrafter/releases/download/v1.0.0-python-env/python-env-windows-x64-v1.0.0.zip"
+    ]
+  }
+}

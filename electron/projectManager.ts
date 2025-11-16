@@ -9,6 +9,7 @@ const ASSETS_DIR = 'assets'
 const SOURCE_DIR = 'assets/source'
 const SFX_DIR = 'assets/sfx'
 const EXPORTS_DIR = 'assets/exports'
+const THUMBNAILS_DIR = 'assets/thumbnails'
 const RECENT_PROJECTS_FILE = 'recent-projects.json'
 const MAX_RECENT_PROJECTS = 10
 
@@ -30,6 +31,7 @@ export async function createProjectStructure(projectPath: string): Promise<void>
   await fs.mkdir(path.join(projectPath, SOURCE_DIR), { recursive: true })
   await fs.mkdir(path.join(projectPath, SFX_DIR), { recursive: true })
   await fs.mkdir(path.join(projectPath, EXPORTS_DIR), { recursive: true })
+  await fs.mkdir(path.join(projectPath, THUMBNAILS_DIR), { recursive: true })
 }
 
 /**
@@ -69,7 +71,7 @@ export async function loadProject(projectPath: string): Promise<any> {
 export async function copyAssetToProject(
   sourcePath: string,
   projectPath: string,
-  assetType: 'source' | 'sfx' | 'exports'
+  assetType: 'source' | 'sfx' | 'exports' | 'thumbnails'
 ): Promise<string> {
   const fileName = path.basename(sourcePath)
   const destDir = path.join(projectPath, ASSETS_DIR, assetType)

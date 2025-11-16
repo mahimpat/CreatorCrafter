@@ -13,8 +13,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     analyzeVideo: function (videoPath, audioPath) {
         return ipcRenderer.invoke('ai:analyzeVideo', videoPath, audioPath);
     },
-    generateSFX: function (prompt, duration) {
-        return ipcRenderer.invoke('audiocraft:generate', prompt, duration);
+    generateSFX: function (prompt, duration, modelType) {
+        return ipcRenderer.invoke('audiocraft:generate', prompt, duration, modelType || 'audiogen');
+    },
+    // ElevenLabs APIs
+    elevenlabsGenerate: function (prompt, duration, apiKey) {
+        return ipcRenderer.invoke('elevenlabs:generate', prompt, duration, apiKey);
+    },
+    elevenlabsValidateKey: function (apiKey) {
+        return ipcRenderer.invoke('elevenlabs:validateKey', apiKey);
+    },
+    elevenlabsGetCredits: function (apiKey) {
+        return ipcRenderer.invoke('elevenlabs:getCredits', apiKey);
     },
     // File system APIs
     readFile: function (filePath) { return ipcRenderer.invoke('fs:readFile', filePath); },
@@ -76,5 +86,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     freesoundDownloadPreview: function (previewUrl, outputPath) {
         return ipcRenderer.invoke('freesound:downloadPreview', previewUrl, outputPath);
+    },
+    // App state management
+    setUnsavedChanges: function (hasChanges) {
+        return ipcRenderer.invoke('app:setUnsavedChanges', hasChanges);
+    },
+    getUnsavedChanges: function () {
+        return ipcRenderer.invoke('app:getUnsavedChanges');
+    }
+});
+// Expose electron object for IPC event listeners (needed for progress tracking)
+contextBridge.exposeInMainWorld('electron', {
+    ipcRenderer: {
+        on: function (channel, func) {
+            var validChannels = ['render-progress', 'render-speed'];
+            if (validChannels.includes(channel)) {
+                ipcRenderer.on(channel, func);
+            }
+        },
+        removeListener: function (channel, func) {
+            var validChannels = ['render-progress', 'render-speed'];
+            if (validChannels.includes(channel)) {
+                ipcRenderer.removeListener(channel, func);
+            }
+        }
     }
 });
