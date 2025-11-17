@@ -29,6 +29,9 @@ export default function Timeline() {
     splitAudioTrack,
     textOverlays,
     updateTextOverlay,
+    animationTracks,
+    updateAnimationTrack,
+    deleteAnimationTrack,
     analysis,
     unifiedAnalysis,
     setAnalysis,
@@ -59,17 +62,17 @@ export default function Timeline() {
 
   const [draggedItem, setDraggedItem] = useState<{
     id: string
-    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay'
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation'
   } | null>(null)
   const [potentialDrag, setPotentialDrag] = useState<{
     id: string
-    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay'
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation'
     startX: number
     startY: number
   } | null>(null)
   const [resizingItem, setResizingItem] = useState<{
     id: string
-    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay'
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation'
     edge: 'left' | 'right'
     originalStart: number
     originalEnd: number
@@ -143,6 +146,13 @@ export default function Timeline() {
       if (overlay.id !== excludeId) {
         snapPoints.push(overlay.start)
         snapPoints.push(overlay.start + overlay.duration)
+      }
+    })
+
+    animationTracks.forEach(track => {
+      if (track.id !== excludeId) {
+        snapPoints.push(track.start)
+        snapPoints.push(track.start + track.duration)
       }
     })
 
@@ -279,7 +289,7 @@ export default function Timeline() {
   const handleTrackItemMouseDown = (
     e: React.MouseEvent,
     id: string,
-    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay',
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation',
     itemWidth: number
   ) => {
     e.stopPropagation()
@@ -342,6 +352,13 @@ export default function Timeline() {
           originalStart = overlay.start
           originalEnd = overlay.end
           originalDuration = originalEnd - originalStart
+        }
+      } else if (type === 'animation') {
+        const track = animationTracks.find(t => t.id === id)
+        if (track) {
+          originalStart = track.start
+          originalDuration = track.duration
+          originalEnd = originalStart + originalDuration
         }
       }
 
@@ -529,6 +546,12 @@ export default function Timeline() {
             start: newStart,
             end: resizingItem.originalEnd
           })
+        } else if (resizingItem.type === 'animation') {
+          const newDuration = resizingItem.originalEnd - newStart
+          updateAnimationTrack(resizingItem.id, {
+            start: newStart,
+            duration: newDuration
+          })
         }
       } else if (resizingItem.edge === 'right') {
         // Trim from end - adjust end time while keeping start fixed
@@ -589,6 +612,11 @@ export default function Timeline() {
         } else if (resizingItem.type === 'overlay') {
           updateTextOverlay(resizingItem.id, {
             end: newEnd
+          })
+        } else if (resizingItem.type === 'animation') {
+          const newDuration = newEnd - resizingItem.originalStart
+          updateAnimationTrack(resizingItem.id, {
+            duration: newDuration
           })
         }
       }
@@ -655,6 +683,13 @@ export default function Timeline() {
             end: finalStart + duration
           })
         }
+      } else if (draggedItem.type === 'animation') {
+        const track = animationTracks.find(t => t.id === draggedItem.id)
+        if (track) {
+          const maxStart = safeDuration - track.duration
+          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+          updateAnimationTrack(draggedItem.id, { start: finalStart })
+        }
       }
     }
   }
@@ -675,6 +710,8 @@ export default function Timeline() {
         deleteSubtitle(draggedItem.id)
       } else if (draggedItem.type === 'overlay') {
         deleteTextOverlay(draggedItem.id)
+      } else if (draggedItem.type === 'animation') {
+        deleteAnimationTrack(draggedItem.id)
       }
     }
 
@@ -844,7 +881,7 @@ export default function Timeline() {
   const handleItemDragStart = (
     e: React.DragEvent,
     id: string,
-    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay'
+    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation'
   ) => {
     e.stopPropagation()
     setDraggedItem({ id, type })
@@ -887,6 +924,8 @@ export default function Timeline() {
         deleteSubtitle(id)
       } else if (type === 'overlay') {
         deleteTextOverlay(id)
+      } else if (type === 'animation') {
+        deleteAnimationTrack(id)
       }
     } catch (error) {
       console.error('Error deleting item:', error)
@@ -1070,6 +1109,16 @@ export default function Timeline() {
           <div className="track-label">
             <span className="track-icon"><Image size={16} /></span>
             <span className="track-name">Media Overlays</span>
+            <div className="track-controls">
+              <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
+              <button className="track-btn" title="Lock track"><Lock size={14} /></button>
+            </div>
+          </div>
+
+          {/* Animation Track Label */}
+          <div className="track-label">
+            <span className="track-icon"><Sparkles size={16} /></span>
+            <span className="track-name">Animations</span>
             <div className="track-controls">
               <button className="track-btn" title="Toggle visibility"><Eye size={14} /></button>
               <button className="track-btn" title="Lock track"><Lock size={14} /></button>
@@ -1405,6 +1454,46 @@ export default function Timeline() {
                             {asset.type === 'image' ? <Image size={14} /> : <Film size={14} />}
                           </span>
                           <span className="item-label">{asset.name}</span>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Animation Track */}
+            <div className="track animation-track">
+              <div className="track-content">
+                {animationTracks.length === 0 ? (
+                  <div className="empty-track-message">
+                    Add Lottie animations from Animations tab
+                  </div>
+                ) : (
+                  animationTracks.map(track => {
+                    const startPos = track.start * pixelsPerSecond
+                    const width = track.duration * pixelsPerSecond
+                    const displayWidth = Math.max(width, 60)
+                    const isResizing = resizingItem?.id === track.id
+                    const resizingClass = isResizing ? `resizing-${resizingItem.edge}` : ''
+
+                    return (
+                      <div
+                        key={track.id}
+                        className={`track-item animation-item ${draggedItem?.id === track.id ? 'dragging' : ''} ${selectedClipIds.includes(track.id) ? 'selected' : ''} ${resizingClass}`}
+                        style={{
+                          left: `${startPos}px`,
+                          width: `${displayWidth}px`
+                        }}
+                        draggable
+                        onClick={handleTrackItemClick}
+                        onDragStart={(e) => handleItemDragStart(e, track.id, 'animation')}
+                        onMouseDown={(e) => handleTrackItemMouseDown(e, track.id, 'animation', displayWidth)}
+                        title={`${track.name} - ${track.start.toFixed(2)}s`}
+                      >
+                        <div className="item-content">
+                          <span className="item-icon"><Sparkles size={14} /></span>
+                          <span className="item-label">{track.name}</span>
                         </div>
                       </div>
                     )

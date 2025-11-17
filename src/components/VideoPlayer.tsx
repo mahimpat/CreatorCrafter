@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback, memo } from 'react'
 import { useProject } from '../context/ProjectContext'
 import { Play, Pause, Volume2, VolumeX } from 'lucide-react'
 import MediaOverlayCanvas from './MediaOverlayCanvas'
+import AnimationCanvas from './AnimationCanvas'
 import './VideoPlayer.css'
 
 function VideoPlayer() {
@@ -356,6 +357,13 @@ function VideoPlayer() {
 
             {/* Media Overlay Canvas */}
             <MediaOverlayCanvas
+              videoRef={videoRef}
+              videoWidth={videoDimensions.width}
+              videoHeight={videoDimensions.height}
+            />
+
+            {/* Animation Canvas for Lottie animations */}
+            <AnimationCanvas
               videoRef={videoRef}
               videoWidth={videoDimensions.width}
               videoHeight={videoDimensions.height}
