@@ -1,0 +1,262 @@
+.animation-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.animation-tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 2px solid #334155;
+  padding-bottom: 0.5rem;
+}
+
+.animation-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+}
+
+.animation-tab:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.animation-tab.active {
+  background: #3b82f6;
+  color: white;
+}
+
+.animation-tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0;
+}
+
+.add-animation {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.animation-timing,
+.animation-position {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.animation-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.animation-actions button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.library-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.category-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.category-btn {
+  padding: 0.4rem 0.8rem;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.category-btn:hover {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.category-btn.active {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.animation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.animation-item {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: all 0.2s;
+}
+
+.animation-item:hover {
+  border-color: #3b82f6;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(59, 130, 246, 0.2);
+}
+
+.animation-preview {
+  aspect-ratio: 1;
+  background: #0f172a;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.animation-placeholder {
+  color: #475569;
+}
+
+.animation-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.animation-info strong {
+  color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.animation-duration {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.animation-item .btn-small {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.tracks-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.animation-tracks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.track-item {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  transition: all 0.2s;
+}
+
+.track-item:hover {
+  border-color: #3b82f6;
+}
+
+.track-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.track-content p {
+  margin: 0;
+}
+
+.track-time,
+.track-props {
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.track-item .delete-btn {
+  background: #dc2626;
+  border: none;
+  color: white;
+  padding: 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.track-item .delete-btn:hover {
+  background: #b91c1c;
+}
+
+.empty-message {
+  text-align: center;
+  color: #64748b;
+  padding: 2rem 1rem;
+}
+
+.empty-message p {
+  margin: 0.5rem 0;
+}
+
+.help-text {
+  padding: 0.75rem;
+  background: #1e293b;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  border-left: 3px solid #3b82f6;
+}
+
+.help-text p {
+  margin: 0;
+}
+
+.help-text a {
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.help-text a:hover {
+  text-decoration: underline;
+}

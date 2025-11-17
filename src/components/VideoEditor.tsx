@@ -20,7 +20,7 @@ import './VideoEditor.css'
 export default function VideoEditor() {
   const { isAnalyzing, selectedClipIds, mediaOverlays } = useProject()
   // DISABLED FOR THIS RELEASE - Removed 'thumbnails' from tool options
-  const [selectedTool, setSelectedTool] = useState<'subtitles' | 'sfx' | 'overlays'>('subtitles')
+  const [selectedTool, setSelectedTool] = useState<'subtitles' | 'sfx' | 'overlays' | 'animations'>('subtitles')
   const [isAssetsOpen, setIsAssetsOpen] = useState(true)
   const [leftPanelTab, setLeftPanelTab] = useState<'project' | 'media' | 'overlays' | 'brandkits'>('media')
   const [showExportDialog, setShowExportDialog] = useState(false)
@@ -129,6 +129,12 @@ export default function VideoEditor() {
               onClick={() => setSelectedTool('overlays')}
             >
               Overlays
+            </button>
+            <button
+              className={`tool-btn ${selectedTool === 'animations' ? 'active' : ''}`}
+              onClick={() => setSelectedTool('animations')}
+            >
+              Animations
             </button>
             {/* DISABLED FOR THIS RELEASE - Thumbnail generation feature hidden
             <button

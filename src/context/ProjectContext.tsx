@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useRef, ReactNode } from 'react'
 import { serializeProject, deserializeProject } from '../utils/projectSerializer'
 import { CommandHistory } from '../utils/commandHistory'
+import { AnimationTrack } from '../types/animation'
 
 export interface Subtitle {
   id: string
@@ -267,6 +268,7 @@ interface ProjectState {
   sfxTracks: SFXTrack[]
   sfxLibrary: SFXLibraryItem[]
   textOverlays: TextOverlay[]
+  animationTracks: AnimationTrack[]  // Lottie-based motion graphics
   analysis: VideoAnalysisResult | null  // Legacy
   unifiedAnalysis: UnifiedAnalysisResult | null  // New unified system
   isAnalyzing: boolean
@@ -313,6 +315,9 @@ interface ProjectContextType extends ProjectState {
   addTextOverlay: (overlay: TextOverlay) => void
   updateTextOverlay: (id: string, overlay: Partial<TextOverlay>) => void
   deleteTextOverlay: (id: string) => void
+  addAnimationTrack: (track: AnimationTrack) => void
+  updateAnimationTrack: (id: string, track: Partial<AnimationTrack>) => void
+  deleteAnimationTrack: (id: string) => void
   setAnalysis: (analysis: VideoAnalysisResult | null) => void
   setUnifiedAnalysis: (analysis: UnifiedAnalysisResult | null) => void
   setIsAnalyzing: (analyzing: boolean) => void
@@ -364,6 +369,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     sfxTracks: [],
     sfxLibrary: [],
     textOverlays: [],
+    animationTracks: [],
     analysis: null,
     unifiedAnalysis: null,
     isAnalyzing: false,
@@ -647,6 +653,31 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setState(prev => ({
       ...prev,
       textOverlays: prev.textOverlays.filter(o => o.id !== id),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  // Animation Track Management
+  const addAnimationTrack = (track: AnimationTrack) => {
+    setState(prev => ({
+      ...prev,
+      animationTracks: [...prev.animationTracks, track],
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const updateAnimationTrack = (id: string, track: Partial<AnimationTrack>) => {
+    setState(prev => ({
+      ...prev,
+      animationTracks: prev.animationTracks.map(t => (t.id === id ? { ...t, ...track } : t)),
+      hasUnsavedChanges: true
+    }))
+  }
+
+  const deleteAnimationTrack = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      animationTracks: prev.animationTracks.filter(t => t.id !== id),
       hasUnsavedChanges: true
     }))
   }
@@ -1117,6 +1148,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         sfxTracks: deserialized.sfxTracks,
         sfxLibrary: deserialized.sfxLibrary || [],
         textOverlays: deserialized.textOverlays,
+        animationTracks: deserialized.animationTracks || [],
         videoClips: deserialized.videoClips || [],
         videoTimelineClips: deserialized.videoTimelineClips || [],
         mediaOverlayAssets: deserialized.mediaOverlayAssets || [],
@@ -1158,6 +1190,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       sfxTracks: [],
       sfxLibrary: [],
       textOverlays: [],
+      animationTracks: [],
       analysis: null,
       unifiedAnalysis: null,
       isAnalyzing: false,
@@ -1212,6 +1245,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         addTextOverlay,
         updateTextOverlay,
         deleteTextOverlay,
+        addAnimationTrack,
+        updateAnimationTrack,
+        deleteAnimationTrack,
         setAnalysis,
         setUnifiedAnalysis,
         setIsAnalyzing,

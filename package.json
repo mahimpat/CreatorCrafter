@@ -31,8 +31,10 @@
     "postinstall": "echo 'Skipping model download during npm install. Run: npm run setup'"
   },
   "dependencies": {
+    "@lottiefiles/dotlottie-web": "^0.56.0",
     "axios": "^1.12.2",
     "dotenv": "^17.2.3",
+    "lottie-web": "^5.13.0",
     "lucide-react": "^0.548.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
