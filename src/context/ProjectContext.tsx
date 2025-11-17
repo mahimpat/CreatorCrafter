@@ -1016,6 +1016,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         sfxTracks: [],
         sfxLibrary: [],
         textOverlays: [],
+        animationTracks: [],
         videoClips: [],
         videoTimelineClips: [],
         mediaOverlayAssets: [],

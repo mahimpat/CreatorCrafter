@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useProject } from '../context/ProjectContext'
 import type { SFXTrack } from '../context/ProjectContext'
 import { Trash2, Wand2, Library, Music, Settings, ChevronDown, ChevronUp, Folder } from 'lucide-react'
@@ -29,6 +29,15 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   return intersection.size / union.size
 }
 
+interface LibrarySound {
+  name: string
+  prompt: string
+  duration: number
+  tags: string[]
+  category: string
+  filePath: string
+}
+
 export default function SFXEditor() {
   const { sfxTracks, addSFXTrack, deleteSFXTrack, sfxLibrary, addSFXToLibrary, removeSFXFromLibrary, currentTime, analysis, unifiedAnalysis, projectPath } = useProject()
 
@@ -50,6 +59,10 @@ export default function SFXEditor() {
   const [creditsRemaining, setCreditsRemaining] = useState<number | null>(null)
   const [processedSuggestions, setProcessedSuggestions] = useState<Set<string>>(new Set())
 
+  // SFX Library (built-in library) state
+  const [builtInLibrary, setBuiltInLibrary] = useState<LibrarySound[]>([])
+  const lastProcessedAnalysisRef = useRef<number>(0)
+
   // Load settings from localStorage on mount
   useEffect(() => {
     const savedApiKey = localStorage.getItem('elevenlabs-api-key')
@@ -61,47 +74,92 @@ export default function SFXEditor() {
     }
   }, [])
 
-  // Auto-insert matching library items when suggestions change
+  // Load built-in SFX Library on mount
   useEffect(() => {
+    const loadBuiltInLibrary = async () => {
+      try {
+        const result = await window.electronAPI.loadSFXLibrary()
+
+        if (result.success) {
+          // Flatten all sounds with category info
+          const sounds: LibrarySound[] = []
+          Object.entries(result.metadata.categories).forEach(([category, categoryData]: [string, any]) => {
+            categoryData.sounds.forEach((sound: any) => {
+              sounds.push({
+                ...sound,
+                category,
+                filePath: `sfx_library/${category}/${sound.name}.wav`
+              })
+            })
+          })
+
+          setBuiltInLibrary(sounds)
+          console.log(`Loaded ${sounds.length} sounds from built-in SFX library`)
+        }
+      } catch (err) {
+        console.error('Failed to load built-in SFX library:', err)
+      }
+    }
+
+    loadBuiltInLibrary()
+  }, [])
+
+  // Auto-insert matching library items ONCE after analysis completes
+  useEffect(() => {
+    // Only process if we have suggestions and they're from a new analysis
     if (!sfxSuggestions || sfxSuggestions.length === 0) return
-    if (!sfxLibrary || sfxLibrary.length === 0) return
+    if (!builtInLibrary || builtInLibrary.length === 0) return
+
+    // Create a timestamp for this analysis (use first suggestion timestamp as ID)
+    const analysisTimestamp = sfxSuggestions[0]?.timestamp || 0
+
+    // Skip if we've already processed this analysis
+    if (lastProcessedAnalysisRef.current === analysisTimestamp) return
+
+    // Mark this analysis as processed
+    lastProcessedAnalysisRef.current = analysisTimestamp
+
+    console.log(`Processing ${sfxSuggestions.length} suggestions against ${builtInLibrary.length} library sounds`)
 
     // Process each suggestion
+    let insertedCount = 0
     sfxSuggestions.forEach((suggestion) => {
-      // Create unique key for this suggestion
-      const suggestionKey = `${suggestion.timestamp}-${suggestion.prompt}`
-
-      // Skip if already processed
-      if (processedSuggestions.has(suggestionKey)) return
-
       // Check if there's a matching library item
-      const libraryMatch = findMatchingLibraryItem(suggestion.prompt)
+      const libraryMatch = findMatchingBuiltInLibraryItem(suggestion.prompt)
 
       if (libraryMatch) {
-        // Auto-insert the matching SFX from library
-        const track: SFXTrack = {
-          id: `sfx-${Date.now()}-${Math.random()}`,
-          path: libraryMatch.path,
-          start: suggestion.timestamp,
-          duration: libraryMatch.duration,
-          originalDuration: libraryMatch.duration,
-          volume: 1,
-          prompt: libraryMatch.prompt
-        }
+        // Get absolute path to the sound file
+        window.electronAPI.getSFXLibraryPath(libraryMatch.filePath).then((result) => {
+          if (result.success) {
+            // Auto-insert the matching SFX from library
+            const track: SFXTrack = {
+              id: `sfx-${Date.now()}-${Math.random()}`,
+              path: result.path,
+              start: suggestion.timestamp,
+              duration: libraryMatch.duration,
+              originalDuration: libraryMatch.duration,
+              volume: 1,
+              prompt: libraryMatch.prompt
+            }
 
-        addSFXTrack(track)
+            addSFXTrack(track)
+            insertedCount++
 
-        // Mark as processed
-        setProcessedSuggestions(prev => new Set(prev).add(suggestionKey))
-
-        // Show toast notification
-        toast.success(`Auto-inserted "${libraryMatch.prompt}" from library at ${suggestion.timestamp.toFixed(2)}s`, {
-          duration: 3000,
-          icon: '✓'
+            // Show toast notification
+            toast.success(`✓ Auto-inserted "${libraryMatch.name}" from SFX Library at ${suggestion.timestamp.toFixed(2)}s`, {
+              duration: 3000
+            })
+          }
+        }).catch(err => {
+          console.error('Failed to get SFX library path:', err)
         })
       }
     })
-  }, [sfxSuggestions, sfxLibrary])
+
+    if (insertedCount > 0) {
+      console.log(`Auto-inserted ${insertedCount} SFX from library`)
+    }
+  }, [sfxSuggestions, builtInLibrary])
 
   // Save settings to localStorage
   const saveSettings = (apiKey: string) => {
@@ -146,16 +204,16 @@ export default function SFXEditor() {
     validateApiKey(elevenlabsApiKey)
   }
 
-  // Find matching SFX from library based on prompt similarity
-  const findMatchingLibraryItem = (prompt: string): import('../context/ProjectContext').SFXLibraryItem | null => {
-    if (!sfxLibrary || sfxLibrary.length === 0) return null
+  // Find matching SFX from built-in library based on prompt similarity
+  const findMatchingBuiltInLibraryItem = (prompt: string): LibrarySound | null => {
+    if (!builtInLibrary || builtInLibrary.length === 0) return null
 
     const SIMILARITY_THRESHOLD = 0.7 // 70% similarity required
 
-    let bestMatch: import('../context/ProjectContext').SFXLibraryItem | null = null
+    let bestMatch: LibrarySound | null = null
     let bestScore = 0
 
-    for (const item of sfxLibrary) {
+    for (const item of builtInLibrary) {
       const similarity = calculateSimilarity(prompt, item.prompt)
       if (similarity > bestScore && similarity >= SIMILARITY_THRESHOLD) {
         bestScore = similarity
@@ -166,33 +224,10 @@ export default function SFXEditor() {
     return bestMatch
   }
 
-  // Use existing library SFX for a suggestion
-  const handleUseLibrarySFX = async (
-    suggestion: {
-      timestamp: number;
-      prompt: string;
-      reason?: string;
-    },
-    libraryItem: import('../context/ProjectContext').SFXLibraryItem
-  ) => {
-    try {
-      // Add the existing SFX track at the suggested timestamp
-      const track: SFXTrack = {
-        id: `sfx-${Date.now()}`,
-        path: libraryItem.path,
-        start: suggestion.timestamp,
-        duration: libraryItem.duration,
-        originalDuration: libraryItem.duration,
-        volume: 1,
-        prompt: libraryItem.prompt
-      }
-
-      addSFXTrack(track)
-      toast.success(`Used existing SFX "${libraryItem.prompt}" from library at ${suggestion.timestamp.toFixed(2)}s`)
-    } catch (error: any) {
-      console.error('Error using library SFX:', error)
-      toast.error(error?.message || 'Failed to add SFX from library')
-    }
+  // Check if a suggestion was auto-inserted
+  const wasSuggestionAutoInserted = (suggestion: { timestamp: number; prompt: string }): boolean => {
+    const libraryMatch = findMatchingBuiltInLibraryItem(suggestion.prompt)
+    return libraryMatch !== null
   }
 
   const handleGenerateSFX = async () => {
@@ -572,10 +607,9 @@ export default function SFXEditor() {
             // Use backend prompt directly (no frontend translation needed)
             // Backend now generates high-quality dynamic prompts
 
-            // Check if this suggestion matches an existing library item
-            const libraryMatch = findMatchingLibraryItem(suggestion.prompt)
-            const suggestionKey = `${suggestion.timestamp}-${suggestion.prompt}`
-            const wasAutoInserted = processedSuggestions.has(suggestionKey)
+            // Check if this suggestion matches an existing library item from built-in SFX Library
+            const libraryMatch = findMatchingBuiltInLibraryItem(suggestion.prompt)
+            const wasAutoInserted = libraryMatch !== null
 
             return (
               <div key={index} className="suggestion-item">
@@ -595,9 +629,9 @@ export default function SFXEditor() {
                         {Math.round((suggestion.confidence || 0.7) * 100)}%
                       </span>
                     </div>
-                    {libraryMatch && wasAutoInserted && (
+                    {wasAutoInserted && (
                       <div style={{ marginTop: '0.5rem', fontSize: '0.85em', color: '#22c55e' }}>
-                        ✓ Auto-inserted from library: "{libraryMatch.prompt}"
+                        ✓ Auto-inserted from SFX Library: "{libraryMatch.name}"
                       </div>
                     )}
                   </div>
@@ -606,12 +640,12 @@ export default function SFXEditor() {
                   className="btn-small"
                   onClick={() => handleUseSuggestion(suggestion)}
                   disabled={isGenerating || !elevenlabsApiKey}
-                  title={libraryMatch && wasAutoInserted
+                  title={wasAutoInserted
                     ? "Generate a different version with ElevenLabs"
                     : (elevenlabsApiKey ? "Generate with ElevenLabs" : "Configure API key first")}
                   style={{ background: elevenlabsApiKey ? '#10b981' : '#6b7280' }}
                 >
-                  {isGenerating ? 'Generating...' : 'Generate New'}
+                  {isGenerating ? 'Generating...' : (wasAutoInserted ? 'Generate New' : 'Generate')}
                 </button>
               </div>
             )

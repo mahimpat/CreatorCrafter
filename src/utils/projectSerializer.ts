@@ -1,4 +1,5 @@
 import { Subtitle, SFXTrack, TextOverlay, VideoAnalysisResult, UnifiedAnalysisResult, VideoClip, VideoTimelineClip, MediaOverlayAsset, MediaOverlay, AudioTrack } from '../context/ProjectContext'
+import { AnimationTrack } from '../types/animation'
 import { ProjectFile, PROJECT_VERSION, ProjectSFXTrack } from '../types/project'
 
 // Browser-compatible path utilities (no Node.js path module)
@@ -45,6 +46,7 @@ export function serializeProject(
     sfxTracks: SFXTrack[]
     sfxLibrary?: import('../context/ProjectContext').SFXLibraryItem[]
     textOverlays: TextOverlay[]
+    animationTracks?: AnimationTrack[]
     videoClips?: VideoClip[]
     videoTimelineClips?: VideoTimelineClip[]
     mediaOverlayAssets?: MediaOverlayAsset[]
@@ -137,6 +139,7 @@ export function serializeProject(
     sfxTracks: projectSFXTracks,
     sfxLibrary: projectSFXLibrary,
     textOverlays: state.textOverlays,
+    animationTracks: state.animationTracks,
     videoClips: state.videoClips,
     videoTimelineClips: state.videoTimelineClips,
     mediaOverlayAssets: state.mediaOverlayAssets,
@@ -163,6 +166,7 @@ export function deserializeProject(
   sfxTracks: SFXTrack[]
   sfxLibrary: import('../context/ProjectContext').SFXLibraryItem[]
   textOverlays: TextOverlay[]
+  animationTracks?: AnimationTrack[]
   videoClips?: VideoClip[]
   videoTimelineClips?: VideoTimelineClip[]
   mediaOverlayAssets?: MediaOverlayAsset[]
@@ -255,6 +259,7 @@ export function deserializeProject(
     sfxTracks,
     sfxLibrary,
     textOverlays: projectFile.textOverlays,
+    animationTracks: (projectFile as any).animationTracks || [],
     videoClips: (projectFile as any).videoClips || [],
     videoTimelineClips: (projectFile as any).videoTimelineClips || [],
     mediaOverlayAssets: (projectFile as any).mediaOverlayAssets || [],

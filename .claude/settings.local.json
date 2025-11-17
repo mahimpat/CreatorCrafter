@@ -23,7 +23,8 @@
       "Bash(./build-windows-installer-linux.sh)",
       "Bash(python:*)",
       "Bash(pkill:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []
