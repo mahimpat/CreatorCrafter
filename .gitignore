@@ -61,6 +61,15 @@ temp/
 test_*.mp4
 test_*.mov
 test_*.wav
+test2/
+
+# Build artifacts and installers
+*.exe
+*.zip
+*.dmg
+*.deb
+*.rpm
+*.AppImage
 
 # Environment
 .env
