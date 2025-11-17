@@ -32,6 +32,9 @@ export default function AnimationCanvas({ videoRef, videoWidth, videoHeight }: A
       currentTime >= track.start && currentTime < track.start + track.duration
     )
 
+    console.log('[AnimationCanvas] Active animations:', activeAnimations.length, 'at time:', currentTime)
+    console.log('[AnimationCanvas] All tracks:', animationTracks.length)
+
     const activeIds = new Set(activeAnimations.map(track => track.id))
 
     // Remove animations that are no longer active
@@ -51,18 +54,35 @@ export default function AnimationCanvas({ videoRef, videoWidth, videoHeight }: A
     // Create new animations for newly active tracks
     activeAnimations.forEach(track => {
       if (!animationInstances.current.has(track.id) && track.lottieData) {
+        console.log('[AnimationCanvas] Creating new animation:', track.name, track.id)
+        console.log('[AnimationCanvas] Track data:', {
+          start: track.start,
+          duration: track.duration,
+          position: track.position,
+          scale: track.scale,
+          hasLottieData: !!track.lottieData
+        })
+
         // Create container for this animation
         const animContainer = document.createElement('div')
         animContainer.className = 'lottie-animation-container'
         animContainer.style.position = 'absolute'
         animContainer.style.pointerEvents = 'none'
         animContainer.style.zIndex = String(track.zIndex || 100)
+        animContainer.style.border = '2px solid red' // Debug border
 
         // Position and size the container
         updateAnimationStyle(animContainer, track, videoWidth, videoHeight)
 
         containerRef.current?.appendChild(animContainer)
         animationContainers.current.set(track.id, animContainer)
+
+        console.log('[AnimationCanvas] Container style:', {
+          left: animContainer.style.left,
+          top: animContainer.style.top,
+          width: animContainer.style.width,
+          height: animContainer.style.height
+        })
 
         // Create lottie animation
         try {
@@ -83,8 +103,9 @@ export default function AnimationCanvas({ videoRef, videoWidth, videoHeight }: A
           }
 
           animationInstances.current.set(track.id, anim)
+          console.log('[AnimationCanvas] Animation loaded successfully, totalFrames:', anim.totalFrames)
         } catch (error) {
-          console.error('Failed to load Lottie animation:', error)
+          console.error('[AnimationCanvas] Failed to load Lottie animation:', error)
         }
       }
     })
