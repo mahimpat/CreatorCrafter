@@ -11,6 +11,7 @@ export default function Timeline() {
     currentTime,
     duration,
     setCurrentTime,
+    videoPath,
     originalAudioPath,
     subtitles,
     addSubtitle,
@@ -29,6 +30,7 @@ export default function Timeline() {
     textOverlays,
     updateTextOverlay,
     analysis,
+    unifiedAnalysis,
     setAnalysis,
     setUnifiedAnalysis,
     selectedClipIds,
@@ -51,6 +53,9 @@ export default function Timeline() {
     updateMediaOverlay,
     deleteMediaOverlay,
   } = useProject()
+
+  // Use unified analysis if available, otherwise fall back to legacy analysis
+  const sfxSuggestions = unifiedAnalysis?.sfx_suggestions || analysis?.suggestedSFX || []
 
   const [draggedItem, setDraggedItem] = useState<{
     id: string
@@ -1113,7 +1118,22 @@ export default function Timeline() {
             {/* Video Track */}
             <div className="track video-track">
               <div className="track-content">
-                {videoTimelineClips.length === 0 ? (
+                {/* Show main video if loaded and no timeline clips */}
+                {videoPath && videoTimelineClips.length === 0 ? (
+                  <div
+                    className="track-item video-clip main-video"
+                    style={{
+                      left: '0px',
+                      width: `${safeDuration * pixelsPerSecond}px`
+                    }}
+                    title="Main Video"
+                  >
+                    <div className="item-content">
+                      <span className="item-icon"><Film size={14} /></span>
+                      <span className="item-label">Main Video</span>
+                    </div>
+                  </div>
+                ) : videoTimelineClips.length === 0 ? (
                   <div className="empty-track-message">
                     Drag video clips from Media Bin to add them to timeline
                   </div>
@@ -1210,7 +1230,7 @@ export default function Timeline() {
                   </div>
 
                   {/* AI Suggestions */}
-                  {analysis?.suggestedSFX.map((suggestion, index) => {
+                  {sfxSuggestions.map((suggestion, index) => {
                     const position = suggestion.timestamp * pixelsPerSecond
                     return (
                       <div
@@ -1264,7 +1284,7 @@ export default function Timeline() {
                     })}
 
                     {/* Show AI suggestions on first lane only */}
-                    {laneIndex === 0 && analysis?.suggestedSFX.map((suggestion, index) => {
+                    {laneIndex === 0 && sfxSuggestions.map((suggestion, index) => {
                       const position = suggestion.timestamp * pixelsPerSecond
                       return (
                         <div
