@@ -1006,6 +1006,19 @@ export default function Timeline() {
     try {
       // Step 1: Create timeline composition data
       const timelineComposition = videoTimelineClips.map(clip => {
+        // Handle main video (special case)
+        if (clip.videoClipId === 'main-video') {
+          if (!videoPath) return null
+          return {
+            videoPath: videoPath,
+            start: clip.start,
+            duration: clip.duration,
+            clipStart: clip.clipStart,
+            clipEnd: clip.clipEnd
+          }
+        }
+
+        // Handle media bin clips
         const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
         if (!sourceClip) return null
 
@@ -1017,6 +1030,9 @@ export default function Timeline() {
           clipEnd: clip.clipEnd
         }
       }).filter(Boolean)
+
+      console.log('[Timeline Analysis] Sending composition:', timelineComposition.length, 'clips')
+      console.log('[Timeline Analysis] Composition data:', timelineComposition)
 
       setAnalysisProgress('Generating timeline preview...')
 
