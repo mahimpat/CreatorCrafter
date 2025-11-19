@@ -401,9 +401,13 @@ export default function Timeline() {
     const sfxData = e.dataTransfer.getData('sfx-library-item')
     const videoClipData = e.dataTransfer.getData('video-clip')
 
+    console.log('[Timeline] handleDrop called, videoClipData:', videoClipData)
+
     if (videoClipData) {
       try {
         const videoClip = JSON.parse(videoClipData)
+        console.log('[Timeline] Parsed video clip:', videoClip)
+
         const rect = timelineRef.current?.getBoundingClientRect()
         if (rect) {
           const x = e.clientX - rect.left
@@ -419,6 +423,8 @@ export default function Timeline() {
             clipEnd: videoClip.duration
           }
 
+          console.log('[Timeline] Adding timeline clip:', timelineClip)
+          console.log('[Timeline] Current videoClips:', videoClips)
           addVideoToTimeline(timelineClip)
         }
       } catch (err) {
@@ -1278,7 +1284,10 @@ export default function Timeline() {
                 ) : (
                   videoTimelineClips.map(clip => {
                     const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
-                    if (!sourceClip) return null
+                    if (!sourceClip) {
+                      console.error('[Timeline Render] Could not find source clip for videoClipId:', clip.videoClipId, 'Available clips:', videoClips.map(v => v.id))
+                      return null
+                    }
 
                     const startPos = clip.start * pixelsPerSecond
                     const width = clip.duration * pixelsPerSecond

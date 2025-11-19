@@ -927,7 +927,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         id: `video-${Date.now()}`,
         name: path.split('/').pop() || path.split('\\').pop() || 'Video',
         path: path,
-        duration: metadata.format?.duration || 0,
+        duration: parseFloat(metadata.format?.duration) || 0,  // Ensure duration is a number
         importedAt: Date.now()
       }
 
@@ -958,11 +958,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }
 
   const addVideoToTimeline = (clip: VideoTimelineClip) => {
-    setState(prev => ({
-      ...prev,
-      videoTimelineClips: [...prev.videoTimelineClips, clip],
-      hasUnsavedChanges: true
-    }))
+    console.log('[ProjectContext] addVideoToTimeline called with:', clip)
+    setState(prev => {
+      console.log('[ProjectContext] Current videoTimelineClips:', prev.videoTimelineClips.length)
+      console.log('[ProjectContext] Current videoClips:', prev.videoClips.length, prev.videoClips)
+      const newClips = [...prev.videoTimelineClips, clip]
+      console.log('[ProjectContext] New videoTimelineClips:', newClips.length)
+      return {
+        ...prev,
+        videoTimelineClips: newClips,
+        hasUnsavedChanges: true
+      }
+    })
   }
 
   const updateVideoTimelineClip = (id: string, clip: Partial<VideoTimelineClip>) => {

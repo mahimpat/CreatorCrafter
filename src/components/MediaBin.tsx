@@ -24,8 +24,11 @@ export default function MediaBin() {
   }
 
   const handleDragStart = (e: React.DragEvent, clip: VideoClip) => {
+    console.log('[MediaBin] Drag start for clip:', clip)
     e.dataTransfer.effectAllowed = 'copy'
-    e.dataTransfer.setData('video-clip', JSON.stringify(clip))
+    const clipData = JSON.stringify(clip)
+    e.dataTransfer.setData('video-clip', clipData)
+    console.log('[MediaBin] Set drag data:', clipData)
   }
 
   const formatDuration = (seconds: number): string => {
