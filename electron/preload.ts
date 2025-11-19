@@ -123,7 +123,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSFXLibraryPath: (relativePath: string) =>
     ipcRenderer.invoke('sfxLibrary:getPath', relativePath),
   copySFXToProject: (libraryPath: string, projectPath: string) =>
-    ipcRenderer.invoke('sfxLibrary:copyToProject', libraryPath, projectPath)
+    ipcRenderer.invoke('sfxLibrary:copyToProject', libraryPath, projectPath),
+
+  // Animation Library
+  loadAnimationLibrary: () =>
+    ipcRenderer.invoke('animationLibrary:load'),
+  getAnimationFromLibrary: (category: string, filename: string) =>
+    ipcRenderer.invoke('animationLibrary:getAnimation', category, filename)
 })
 
 // Expose electron object for IPC event listeners (needed for progress tracking)

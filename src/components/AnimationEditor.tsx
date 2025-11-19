@@ -88,12 +88,36 @@ export default function AnimationEditor() {
     handleImportAnimation(file)
   }
 
-  const handleAddFromLibrary = (item: AnimationLibraryItem) => {
+  const handleAddFromLibrary = async (item: AnimationLibraryItem) => {
+    console.log('[AnimationEditor] Adding animation from library:', item.name)
+    console.log('[AnimationEditor] Library item:', item)
+    console.log('[AnimationEditor] Current time:', currentTime)
+
+    let lottieData = item.lottieData
+
+    // If this is a built-in animation, load the data
+    if (item.id.startsWith('builtin-') && !lottieData) {
+      try {
+        const [, category, animId] = item.id.split('-')
+        const result = await window.electronAPI.getAnimationFromLibrary(category, `${animId}.json`)
+        if (result.success && result.data) {
+          lottieData = result.data
+        } else {
+          toast.error('Failed to load animation from library')
+          return
+        }
+      } catch (err) {
+        console.error('Error loading built-in animation:', err)
+        toast.error('Failed to load animation')
+        return
+      }
+    }
+
     const track: AnimationTrack = {
       id: `anim-${Date.now()}`,
       name: item.name,
       source: 'library',
-      lottieData: item.lottieData,
+      lottieData,
       path: item.path,
       url: item.url,
       start: currentTime,
@@ -114,7 +138,10 @@ export default function AnimationEditor() {
       createdAt: Date.now()
     }
 
+    console.log('[AnimationEditor] Created track:', track)
+    console.log('[AnimationEditor] Calling addAnimationTrack...')
     addAnimationTrack(track)
+    console.log('[AnimationEditor] addAnimationTrack called successfully')
     toast.success(`Added "${item.name}" to timeline at ${currentTime.toFixed(2)}s`)
   }
 
@@ -160,17 +187,49 @@ export default function AnimationEditor() {
     }
   }
 
-  // Load library from localStorage
+  // Load built-in library and custom library
   useEffect(() => {
-    const saved = localStorage.getItem('animation-library')
-    if (saved) {
+    const loadLibraries = async () => {
+      const allAnimations: AnimationLibraryItem[] = []
+
+      // Load built-in library
       try {
-        const library = JSON.parse(saved)
-        setAnimationLibrary(library)
+        const result = await window.electronAPI.loadAnimationLibrary()
+        if (result.success && result.metadata) {
+          // Convert metadata to AnimationLibraryItem[]
+          Object.entries(result.metadata.categories).forEach(([categoryKey, categoryData]: [string, any]) => {
+            categoryData.animations.forEach((anim: any) => {
+              const item: AnimationLibraryItem = {
+                id: `builtin-${categoryKey}-${anim.id}`,
+                name: anim.name,
+                category: categoryKey,
+                duration: anim.duration,
+                tags: anim.tags,
+                createdAt: Date.now()
+              }
+              allAnimations.push(item)
+            })
+          })
+        }
       } catch (err) {
-        console.error('Failed to load animation library:', err)
+        console.error('Failed to load built-in animation library:', err)
       }
+
+      // Load custom library from localStorage
+      const saved = localStorage.getItem('animation-library')
+      if (saved) {
+        try {
+          const customLibrary = JSON.parse(saved)
+          allAnimations.push(...customLibrary)
+        } catch (err) {
+          console.error('Failed to load custom animation library:', err)
+        }
+      }
+
+      setAnimationLibrary(allAnimations)
     }
+
+    loadLibraries()
   }, [])
 
   const saveLibraryToStorage = (library: AnimationLibraryItem[]) => {

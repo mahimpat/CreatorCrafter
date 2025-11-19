@@ -1626,6 +1626,66 @@ function registerIpcHandlers() {
       }
     }
   })
+
+  // Animation Library handlers
+  ipcMain.handle('animationLibrary:load', async () => {
+    try {
+      const libraryPath = join(__dirname, '..', 'animation_library', 'animation_library_metadata.json')
+
+      // Import synchronous fs functions
+      const fsSync = require('fs')
+
+      if (!fsSync.existsSync(libraryPath)) {
+        return {
+          success: false,
+          error: 'Animation library not found. Please run the download script first.'
+        }
+      }
+
+      const metadata = JSON.parse(fsSync.readFileSync(libraryPath, 'utf-8'))
+
+      return {
+        success: true,
+        metadata
+      }
+    } catch (error: any) {
+      console.error('Error loading animation library:', error)
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  })
+
+  ipcMain.handle('animationLibrary:getAnimation', async (_, category: string, filename: string) => {
+    try {
+      const animationPath = join(__dirname, '..', 'animation_library', category, filename)
+
+      // Import synchronous fs functions
+      const fsSync = require('fs')
+
+      if (!fsSync.existsSync(animationPath)) {
+        return {
+          success: false,
+          error: 'Animation file not found'
+        }
+      }
+
+      const animationData = JSON.parse(fsSync.readFileSync(animationPath, 'utf-8'))
+
+      return {
+        success: true,
+        data: animationData,
+        path: animationPath
+      }
+    } catch (error: any) {
+      console.error('Error loading animation:', error)
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  })
 }
 
 interface RenderOptions {

@@ -199,6 +199,19 @@ declare global {
         projectPath?: string
         error?: string
       }>
+
+      // Animation Library API
+      loadAnimationLibrary: () => Promise<{
+        success: boolean
+        metadata?: any
+        error?: string
+      }>
+      getAnimationFromLibrary: (category: string, filename: string) => Promise<{
+        success: boolean
+        data?: any
+        path?: string
+        error?: string
+      }>
     }
   }
 }

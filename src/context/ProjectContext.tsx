@@ -455,7 +455,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setState(prev => ({ ...prev, isPlaying: playing }))
   }
 
-  const addSubtitle = (subtitle: Subtitle) => {
+  const addSubtitle = (subtitle: Subtitle, skipHistory = false) => {
+    if (!skipHistory) {
+      const command = {
+        execute: () => addSubtitle(subtitle, true),
+        undo: () => deleteSubtitle(subtitle.id, true),
+        description: `Add subtitle: ${subtitle.text.substring(0, 20)}...`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       subtitles: [...prev.subtitles, subtitle],
@@ -463,7 +474,22 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const updateSubtitle = (id: string, subtitle: Partial<Subtitle>) => {
+  const updateSubtitle = (id: string, subtitle: Partial<Subtitle>, skipHistory = false) => {
+    if (!skipHistory) {
+      // Get the current subtitle state before updating
+      const oldSubtitle = state.subtitles.find(s => s.id === id)
+      if (!oldSubtitle) return
+
+      const command = {
+        execute: () => updateSubtitle(id, subtitle, true),
+        undo: () => updateSubtitle(id, oldSubtitle, true),
+        description: `Update subtitle`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       subtitles: prev.subtitles.map(s => (s.id === id ? { ...s, ...subtitle } : s)),
@@ -471,7 +497,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const deleteSubtitle = (id: string) => {
+  const deleteSubtitle = (id: string, skipHistory = false) => {
+    if (!skipHistory) {
+      const subtitle = state.subtitles.find(s => s.id === id)
+      if (!subtitle) return
+
+      const command = {
+        execute: () => deleteSubtitle(id, true),
+        undo: () => addSubtitle(subtitle, true),
+        description: `Delete subtitle: ${subtitle.text.substring(0, 20)}...`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       subtitles: prev.subtitles.filter(s => s.id !== id),
@@ -479,20 +519,54 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const addSFXTrack = (track: SFXTrack) => {
+  const addSFXTrack = (track: SFXTrack, skipHistory = false) => {
+    console.log('[ProjectContext] addSFXTrack called with:', track, 'skipHistory:', skipHistory)
+
     // Ensure originalDuration is set (for backward compatibility)
     const trackWithOriginal = {
       ...track,
       originalDuration: track.originalDuration || track.duration
     }
-    setState(prev => ({
-      ...prev,
-      sfxTracks: [...prev.sfxTracks, trackWithOriginal],
-      hasUnsavedChanges: true
-    }))
+
+    if (!skipHistory) {
+      console.log('[ProjectContext] Creating command for history')
+      const command = {
+        execute: () => addSFXTrack(trackWithOriginal, true),
+        undo: () => deleteSFXTrack(trackWithOriginal.id, true),
+        description: `Add SFX: ${track.prompt || 'sound effect'}`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
+    console.log('[ProjectContext] Adding track directly to state')
+    setState(prev => {
+      const newTracks = [...prev.sfxTracks, trackWithOriginal]
+      console.log('[ProjectContext] SFX tracks count:', prev.sfxTracks.length, '→', newTracks.length)
+      return {
+        ...prev,
+        sfxTracks: newTracks,
+        hasUnsavedChanges: true
+      }
+    })
   }
 
-  const updateSFXTrack = (id: string, track: Partial<SFXTrack>) => {
+  const updateSFXTrack = (id: string, track: Partial<SFXTrack>, skipHistory = false) => {
+    if (!skipHistory) {
+      const oldTrack = state.sfxTracks.find(t => t.id === id)
+      if (!oldTrack) return
+
+      const command = {
+        execute: () => updateSFXTrack(id, track, true),
+        undo: () => updateSFXTrack(id, oldTrack, true),
+        description: `Update SFX position`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       sfxTracks: prev.sfxTracks.map(t => (t.id === id ? { ...t, ...track } : t)),
@@ -500,7 +574,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const deleteSFXTrack = (id: string) => {
+  const deleteSFXTrack = (id: string, skipHistory = false) => {
+    if (!skipHistory) {
+      const track = state.sfxTracks.find(t => t.id === id)
+      if (!track) return
+
+      const command = {
+        execute: () => deleteSFXTrack(id, true),
+        undo: () => addSFXTrack(track, true),
+        description: `Delete SFX: ${track.prompt || 'sound effect'}`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       sfxTracks: prev.sfxTracks.filter(t => t.id !== id),
@@ -633,7 +721,18 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const addTextOverlay = (overlay: TextOverlay) => {
+  const addTextOverlay = (overlay: TextOverlay, skipHistory = false) => {
+    if (!skipHistory) {
+      const command = {
+        execute: () => addTextOverlay(overlay, true),
+        undo: () => deleteTextOverlay(overlay.id, true),
+        description: `Add text overlay: ${overlay.text.substring(0, 20)}...`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       textOverlays: [...prev.textOverlays, overlay],
@@ -641,7 +740,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const updateTextOverlay = (id: string, overlay: Partial<TextOverlay>) => {
+  const updateTextOverlay = (id: string, overlay: Partial<TextOverlay>, skipHistory = false) => {
+    if (!skipHistory) {
+      const oldOverlay = state.textOverlays.find(o => o.id === id)
+      if (!oldOverlay) return
+
+      const command = {
+        execute: () => updateTextOverlay(id, overlay, true),
+        undo: () => updateTextOverlay(id, oldOverlay, true),
+        description: `Update text overlay`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       textOverlays: prev.textOverlays.map(o => (o.id === id ? { ...o, ...overlay } : o)),
@@ -649,7 +762,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const deleteTextOverlay = (id: string) => {
+  const deleteTextOverlay = (id: string, skipHistory = false) => {
+    if (!skipHistory) {
+      const overlay = state.textOverlays.find(o => o.id === id)
+      if (!overlay) return
+
+      const command = {
+        execute: () => deleteTextOverlay(id, true),
+        undo: () => addTextOverlay(overlay, true),
+        description: `Delete text overlay: ${overlay.text.substring(0, 20)}...`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       textOverlays: prev.textOverlays.filter(o => o.id !== id),
@@ -658,15 +785,43 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }
 
   // Animation Track Management
-  const addAnimationTrack = (track: AnimationTrack) => {
-    setState(prev => ({
-      ...prev,
-      animationTracks: [...prev.animationTracks, track],
-      hasUnsavedChanges: true
-    }))
+  const addAnimationTrack = (track: AnimationTrack, skipHistory = false) => {
+    if (!skipHistory) {
+      const command = {
+        execute: () => addAnimationTrack(track, true),
+        undo: () => deleteAnimationTrack(track.id, true),
+        description: `Add animation: ${track.name}`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
+    setState(prev => {
+      const newTracks = [...prev.animationTracks, track]
+      return {
+        ...prev,
+        animationTracks: newTracks,
+        hasUnsavedChanges: true
+      }
+    })
   }
 
-  const updateAnimationTrack = (id: string, track: Partial<AnimationTrack>) => {
+  const updateAnimationTrack = (id: string, track: Partial<AnimationTrack>, skipHistory = false) => {
+    if (!skipHistory) {
+      const oldTrack = state.animationTracks.find(t => t.id === id)
+      if (!oldTrack) return
+
+      const command = {
+        execute: () => updateAnimationTrack(id, track, true),
+        undo: () => updateAnimationTrack(id, oldTrack, true),
+        description: `Update animation`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       animationTracks: prev.animationTracks.map(t => (t.id === id ? { ...t, ...track } : t)),
@@ -674,7 +829,21 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const deleteAnimationTrack = (id: string) => {
+  const deleteAnimationTrack = (id: string, skipHistory = false) => {
+    if (!skipHistory) {
+      const track = state.animationTracks.find(t => t.id === id)
+      if (!track) return
+
+      const command = {
+        execute: () => deleteAnimationTrack(id, true),
+        undo: () => addAnimationTrack(track, true),
+        description: `Delete animation: ${track.name}`
+      }
+      commandHistory.current.execute(command)
+      updateUndoRedoState()
+      return
+    }
+
     setState(prev => ({
       ...prev,
       animationTracks: prev.animationTracks.filter(t => t.id !== id),
@@ -954,13 +1123,15 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }
 
   const undo = () => {
-    if (commandHistory.current.undo()) {
+    const success = commandHistory.current.undo()
+    if (success) {
       updateUndoRedoState()
     }
   }
 
   const redo = () => {
-    if (commandHistory.current.redo()) {
+    const success = commandHistory.current.redo()
+    if (success) {
       updateUndoRedoState()
     }
   }

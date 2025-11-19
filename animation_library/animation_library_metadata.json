@@ -1,0 +1,48 @@
+{
+  "name": "Essential Animations Pack",
+  "version": "1.0.0",
+  "description": "Curated Lottie animations for video creators",
+  "totalAnimations": 4,
+  "categories": {
+    "loading": {
+      "name": "Loading",
+      "description": "Loading spinners and progress animations",
+      "icon": "⏳",
+      "animations": [
+        {"id": "spinner", "name": "Spinner", "file": "spinner.json", "duration": 3, "tags": ["loading", "spinner", "circular"]}
+      ]
+    },
+    "success": {
+      "name": "Success",
+      "description": "Success indicators and checkmarks",
+      "icon": "✅",
+      "animations": [
+        {"id": "checkmark", "name": "Checkmark", "file": "checkmark.json", "duration": 2, "tags": ["success", "check", "done"]}
+      ]
+    },
+    "arrows": {
+      "name": "Arrows",
+      "description": "Directional arrows and pointers",
+      "icon": "➡️",
+      "animations": [
+        {"id": "arrow_right", "name": "Arrow Right", "file": "arrow_right.json", "duration": 2, "tags": ["arrow", "right", "pointer"]}
+      ]
+    },
+    "celebrations": {
+      "name": "Celebrations",
+      "description": "Celebration and party animations",
+      "icon": "🎉",
+      "animations": [
+        {"id": "heart", "name": "Heart", "file": "heart.json", "duration": 2, "tags": ["heart", "love", "like"]}
+      ]
+    },
+    "text_effects": {
+      "name": "Text Effects",
+      "description": "Text animation effects",
+      "icon": "✨",
+      "animations": [
+        {"id": "bounce_text", "name": "Bounce Text", "file": "bounce_text.json", "duration": 2, "tags": ["text", "bounce", "effect"]}
+      ]
+    }
+  }
+}

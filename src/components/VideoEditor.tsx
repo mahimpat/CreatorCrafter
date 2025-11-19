@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
 import { useAutoSave } from '../hooks/useAutoSave'
+import { useAutoInsertSFX } from '../hooks/useAutoInsertSFX'
 import VideoPlayer from './VideoPlayer'
 import Timeline from './Timeline'
 import SidePanel from './SidePanel'
@@ -27,6 +28,9 @@ export default function VideoEditor() {
 
   // Enable auto-save
   useAutoSave()
+
+  // Enable auto-insert SFX from library after analysis
+  useAutoInsertSFX()
 
   // Check if a media overlay is selected
   const hasMediaOverlaySelected = selectedClipIds.some(id =>

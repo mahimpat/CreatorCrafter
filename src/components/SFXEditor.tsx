@@ -29,6 +29,51 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   return intersection.size / union.size
 }
 
+// Enhanced semantic matching using keywords and context
+const calculateSemanticSimilarity = (suggestionPrompt: string, librarySound: LibrarySound): number => {
+  const suggestion = suggestionPrompt.toLowerCase().trim()
+  const libraryPrompt = librarySound.prompt.toLowerCase().trim()
+  const tags = librarySound.tags.map(t => t.toLowerCase())
+  const category = librarySound.category.toLowerCase()
+
+  // Extract key descriptive words (filter out common filler words)
+  const fillerWords = new Set(['sound', 'effect', 'audio', 'sfx', 'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for'])
+
+  const extractKeywords = (text: string) => {
+    return text.split(/[\s,]+/).filter(word =>
+      word.length > 2 && !fillerWords.has(word)
+    )
+  }
+
+  const suggestionKeywords = extractKeywords(suggestion)
+  const libraryKeywords = extractKeywords(libraryPrompt)
+  const allLibraryKeywords = [...libraryKeywords, ...tags, category]
+
+  // Check for keyword matches
+  let matchScore = 0
+  let matches = 0
+
+  for (const sugKeyword of suggestionKeywords) {
+    for (const libKeyword of allLibraryKeywords) {
+      // Exact keyword match
+      if (sugKeyword === libKeyword) {
+        matchScore += 1.0
+        matches++
+      }
+      // Partial match (one contains the other)
+      else if (sugKeyword.includes(libKeyword) || libKeyword.includes(sugKeyword)) {
+        matchScore += 0.5
+        matches++
+      }
+    }
+  }
+
+  // Normalize by number of suggestion keywords
+  if (suggestionKeywords.length === 0) return 0
+
+  return Math.min(1.0, matchScore / suggestionKeywords.length)
+}
+
 interface LibrarySound {
   name: string
   prompt: string
@@ -39,11 +84,15 @@ interface LibrarySound {
 }
 
 export default function SFXEditor() {
+  console.log('[SFXEditor] Component rendered')
+
   const { sfxTracks, addSFXTrack, deleteSFXTrack, sfxLibrary, addSFXToLibrary, removeSFXFromLibrary, currentTime, analysis, unifiedAnalysis, projectPath } = useProject()
 
   // Use unified analysis if available, otherwise fall back to legacy analysis
   const sfxSuggestions = unifiedAnalysis?.sfx_suggestions || analysis?.suggestedSFX || []
   const musicSuggestions = unifiedAnalysis?.music_suggestions || analysis?.suggestedMusic || []
+
+  console.log('[SFXEditor] Render - suggestions:', sfxSuggestions?.length, 'unified:', !!unifiedAnalysis, 'legacy:', !!analysis)
 
   const [activeTab, setActiveTab] = useState<'generate' | 'library' | 'sfxlibrary' | 'freesound' | 'tracks'>('generate')
   const [isGenerating, setIsGenerating] = useState(false)
@@ -61,7 +110,7 @@ export default function SFXEditor() {
 
   // SFX Library (built-in library) state
   const [builtInLibrary, setBuiltInLibrary] = useState<LibrarySound[]>([])
-  const lastProcessedAnalysisRef = useRef<number>(0)
+  const lastProcessedAnalysisRef = useRef<string>('')
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -74,7 +123,7 @@ export default function SFXEditor() {
     }
   }, [])
 
-  // Load built-in SFX Library on mount
+  // Load built-in SFX Library on mount (for UI display purposes only)
   useEffect(() => {
     const loadBuiltInLibrary = async () => {
       try {
@@ -94,7 +143,7 @@ export default function SFXEditor() {
           })
 
           setBuiltInLibrary(sounds)
-          console.log(`Loaded ${sounds.length} sounds from built-in SFX library`)
+          console.log(`Loaded ${sounds.length} sounds from built-in SFX library for UI display`)
         }
       } catch (err) {
         console.error('Failed to load built-in SFX library:', err)
@@ -104,62 +153,8 @@ export default function SFXEditor() {
     loadBuiltInLibrary()
   }, [])
 
-  // Auto-insert matching library items ONCE after analysis completes
-  useEffect(() => {
-    // Only process if we have suggestions and they're from a new analysis
-    if (!sfxSuggestions || sfxSuggestions.length === 0) return
-    if (!builtInLibrary || builtInLibrary.length === 0) return
-
-    // Create a timestamp for this analysis (use first suggestion timestamp as ID)
-    const analysisTimestamp = sfxSuggestions[0]?.timestamp || 0
-
-    // Skip if we've already processed this analysis
-    if (lastProcessedAnalysisRef.current === analysisTimestamp) return
-
-    // Mark this analysis as processed
-    lastProcessedAnalysisRef.current = analysisTimestamp
-
-    console.log(`Processing ${sfxSuggestions.length} suggestions against ${builtInLibrary.length} library sounds`)
-
-    // Process each suggestion
-    let insertedCount = 0
-    sfxSuggestions.forEach((suggestion) => {
-      // Check if there's a matching library item
-      const libraryMatch = findMatchingBuiltInLibraryItem(suggestion.prompt)
-
-      if (libraryMatch) {
-        // Get absolute path to the sound file
-        window.electronAPI.getSFXLibraryPath(libraryMatch.filePath).then((result) => {
-          if (result.success) {
-            // Auto-insert the matching SFX from library
-            const track: SFXTrack = {
-              id: `sfx-${Date.now()}-${Math.random()}`,
-              path: result.path,
-              start: suggestion.timestamp,
-              duration: libraryMatch.duration,
-              originalDuration: libraryMatch.duration,
-              volume: 1,
-              prompt: libraryMatch.prompt
-            }
-
-            addSFXTrack(track)
-            insertedCount++
-
-            // Show toast notification
-            toast.success(`✓ Auto-inserted "${libraryMatch.name}" from SFX Library at ${suggestion.timestamp.toFixed(2)}s`, {
-              duration: 3000
-            })
-          }
-        }).catch(err => {
-          console.error('Failed to get SFX library path:', err)
-        })
-      }
-    })
-
-    if (insertedCount > 0) {
-      console.log(`Auto-inserted ${insertedCount} SFX from library`)
-    }
-  }, [sfxSuggestions, builtInLibrary])
+  // NOTE: Auto-insert logic has been moved to useAutoInsertSFX hook in VideoEditor
+  // This ensures SFX are inserted immediately after analysis, not when visiting this tab
 
   // Save settings to localStorage
   const saveSettings = (apiKey: string) => {
@@ -206,22 +201,41 @@ export default function SFXEditor() {
 
   // Find matching SFX from built-in library based on prompt similarity
   const findMatchingBuiltInLibraryItem = (prompt: string): LibrarySound | null => {
-    if (!builtInLibrary || builtInLibrary.length === 0) return null
+    if (!builtInLibrary || builtInLibrary.length === 0) {
+      console.log('[SFX Match] No built-in library loaded')
+      return null
+    }
 
-    const SIMILARITY_THRESHOLD = 0.7 // 70% similarity required
+    const SIMILARITY_THRESHOLD = 0.3 // Use semantic matching for better results
 
     let bestMatch: LibrarySound | null = null
     let bestScore = 0
 
+    console.log(`[SFX Match] Finding match for prompt: "${prompt}"`)
+    console.log(`[SFX Match] Checking against ${builtInLibrary.length} library sounds`)
+
     for (const item of builtInLibrary) {
-      const similarity = calculateSimilarity(prompt, item.prompt)
-      if (similarity > bestScore && similarity >= SIMILARITY_THRESHOLD) {
+      // Use semantic similarity instead of plain text similarity
+      const similarity = calculateSemanticSimilarity(prompt, item)
+
+      if (similarity > 0.1) { // Only log if there's some similarity
+        console.log(`[SFX Match] "${item.name}" (${item.category}) = ${similarity.toFixed(2)} - tags: [${item.tags.join(', ')}]`)
+      }
+
+      if (similarity > bestScore) {
         bestScore = similarity
         bestMatch = item
       }
     }
 
-    return bestMatch
+    // Only return match if it meets threshold
+    if (bestMatch && bestScore >= SIMILARITY_THRESHOLD) {
+      console.log(`[SFX Match] ✓ Found match: "${bestMatch.name}" (score: ${bestScore.toFixed(2)})`)
+      return bestMatch
+    } else {
+      console.log(`[SFX Match] ✗ No match found (best score: ${bestScore.toFixed(2)}, threshold: ${SIMILARITY_THRESHOLD})`)
+      return null
+    }
   }
 
   // Check if a suggestion was auto-inserted

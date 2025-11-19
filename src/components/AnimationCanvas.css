@@ -1,0 +1,45 @@
+.animation-canvas-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.lottie-animation-container {
+  position: absolute;
+  cursor: move;
+  transition: outline 0.2s;
+  pointer-events: auto;
+}
+
+.lottie-animation-container:hover {
+  outline: 2px solid rgba(59, 130, 246, 0.5);
+  outline-offset: 2px;
+}
+
+.lottie-wrapper {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.animation-resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  background: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: nwse-resize;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s;
+}
+
+.animation-resize-handle:hover {
+  transform: scale(1.2);
+}
