@@ -478,14 +478,24 @@ export default function Timeline() {
 
         const rect = timelineRef.current?.getBoundingClientRect()
         if (rect) {
-          const x = e.clientX - rect.left
-          const dropTime = Math.max(0, x / pixelsPerSecond)
+          // Calculate the end time of the last video clip on timeline
+          let suggestedStartTime = 0
+          if (videoTimelineClips.length > 0) {
+            // Find the maximum end time of all existing clips
+            const lastClipEnd = Math.max(
+              ...videoTimelineClips.map(clip => clip.start + clip.duration)
+            )
+            suggestedStartTime = lastClipEnd
+          }
+
+          // Use suggested start time (end of last clip) instead of drop position
+          const startTime = suggestedStartTime
 
           // Create new video timeline clip from library clip
           const timelineClip: import('../context/ProjectContext').VideoTimelineClip = {
             id: `video-timeline-${Date.now()}`,
             videoClipId: videoClip.id,
-            start: dropTime,
+            start: startTime,
             duration: videoClip.duration,
             clipStart: 0,
             clipEnd: videoClip.duration

@@ -20,7 +20,9 @@ function VideoPlayer() {
     subtitles,
     textOverlays,
     sfxTracks,
-    audioTracks
+    audioTracks,
+    videoTimelineClips,
+    videoClips
   } = useProject()
 
   const [volume, setVolume] = useState(1)
@@ -28,6 +30,47 @@ function VideoPlayer() {
   const [activeSubtitle, setActiveSubtitle] = useState<string | null>(null)
   const [activeOverlays, setActiveOverlays] = useState<string[]>([])
   const [videoDimensions, setVideoDimensions] = useState({ width: 1920, height: 1080 })
+  const [activeVideoSource, setActiveVideoSource] = useState<string | null>(null)
+  const [videoOffset, setVideoOffset] = useState(0)
+
+  // Determine which video should be playing based on timeline clips
+  useEffect(() => {
+    if (videoTimelineClips.length === 0) {
+      // No timeline clips, use main video
+      setActiveVideoSource(videoPath)
+      setVideoOffset(0)
+      return
+    }
+
+    // Find the timeline clip at the current playhead position
+    const activeClip = videoTimelineClips.find(clip =>
+      currentTime >= clip.start && currentTime < (clip.start + clip.duration)
+    )
+
+    if (!activeClip) {
+      // Playhead is not over any clip, pause playback
+      setIsPlaying(false)
+      return
+    }
+
+    // Calculate offset within the clip
+    const relativeTime = currentTime - activeClip.start
+    const clipOffset = activeClip.clipStart + relativeTime
+
+    // Get the video source for this clip
+    if (activeClip.videoClipId === 'main-video') {
+      // Main video
+      setActiveVideoSource(videoPath)
+      setVideoOffset(clipOffset)
+    } else {
+      // Media bin clip
+      const sourceClip = videoClips.find(v => v.id === activeClip.videoClipId)
+      if (sourceClip) {
+        setActiveVideoSource(sourceClip.path)
+        setVideoOffset(clipOffset)
+      }
+    }
+  }, [currentTime, videoTimelineClips, videoClips, videoPath])
 
   // Get video dimensions from metadata
   useEffect(() => {
@@ -77,14 +120,18 @@ function VideoPlayer() {
     }
   }, [isPlaying])
 
+  // Sync video playback position with timeline offset
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
-    if (Math.abs(video.currentTime - currentTime) > 0.1) {
-      video.currentTime = currentTime
+    // Use videoOffset for timeline clips mode, otherwise use currentTime
+    const targetTime = videoTimelineClips.length > 0 ? videoOffset : currentTime
+
+    if (Math.abs(video.currentTime - targetTime) > 0.1) {
+      video.currentTime = targetTime
     }
-  }, [currentTime])
+  }, [currentTime, videoOffset, videoTimelineClips.length])
 
   useEffect(() => {
     const video = videoRef.current
@@ -310,9 +357,14 @@ function VideoPlayer() {
   return (
     <div className="video-player-container">
       <div className="video-wrapper">
-        {videoPath && (
+        {(activeVideoSource || videoPath) && (
           <>
-            <video ref={videoRef} className="video-element" src={`localfile://${videoPath}`} />
+            <video
+              ref={videoRef}
+              className="video-element"
+              src={`localfile://${activeVideoSource || videoPath}`}
+              key={activeVideoSource || videoPath} // Force re-mount when source changes
+            />
 
             {/* Subtitle overlay */}
             {activeSubtitleData && (
