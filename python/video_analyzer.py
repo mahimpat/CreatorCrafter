@@ -930,6 +930,13 @@ def suggest_sfx(
                 # Combine all confidence multipliers
                 final_confidence = base_confidence * motion_confidence_multiplier * audio_confidence_mult
 
+                # DIALOGUE AWARENESS: Check if SFX overlaps with speech
+                is_dialogue_overlap = False
+                for segment in transcription:
+                    if segment['start'] <= timestamp <= segment['end']:
+                        is_dialogue_overlap = True
+                        break
+
                 suggestion = {
                     'timestamp': timestamp,
                     'prompt': sfx_prompt,
@@ -941,7 +948,8 @@ def suggest_sfx(
                     # NEW: Audio presence information
                     'type': suggestion_type,  # 'primary' or 'enhancement'
                     'audio_present': audio_present,
-                    'audio_energy': audio_energy
+                    'audio_energy': audio_energy,
+                    'is_dialogue_overlap': is_dialogue_overlap
                 }
 
                 # Add warnings
@@ -950,6 +958,10 @@ def suggest_sfx(
 
                 if audio_present:
                     suggestion['note'] = 'Original audio present - this is an optional enhancement'
+                    
+                if is_dialogue_overlap:
+                    suggestion['ducking'] = True
+                    suggestion['note'] = (suggestion.get('note', '') + ' Overlaps with dialogue - apply ducking').strip()
 
                 suggestions.append(suggestion)
 

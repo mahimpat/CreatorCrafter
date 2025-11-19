@@ -207,6 +207,17 @@ export interface EventData {
   to_mood?: string
 }
 
+export interface AnimationSuggestion {
+  timestamp: number
+  type: 'lottie' | 'fabric'
+  asset_id: string
+  category: string
+  duration: number
+  reason: string
+  confidence: number
+  config?: any
+}
+
 export interface UnifiedAnalysisResult {
   success: boolean
   video_path: string
@@ -217,6 +228,7 @@ export interface UnifiedAnalysisResult {
   events: EventData[]
   sfx_suggestions: SFXSuggestion[]
   music_suggestions: MusicSuggestion[]
+  animation_suggestions: AnimationSuggestion[]
   error?: string
 }
 
@@ -328,6 +340,7 @@ interface ProjectContextType extends ProjectState {
   addVideoToTimeline: (clip: VideoTimelineClip) => void
   updateVideoTimelineClip: (id: string, clip: Partial<VideoTimelineClip>) => void
   deleteVideoTimelineClip: (id: string) => void
+  splitVideoTimelineClip: (id: string, splitTime: number) => void
   // Media overlay management
   importMediaOverlay: (path: string, type: 'image' | 'video') => Promise<void>
   addMediaOverlayAsset: (asset: MediaOverlayAsset) => void
@@ -930,6 +943,50 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }))
   }
 
+  const splitVideoTimelineClip = (id: string, splitTime: number) => {
+    setState(prev => {
+      const clipToSplit = prev.videoTimelineClips.find(c => c.id === id)
+      if (!clipToSplit) return prev
+
+      // Calculate split position relative to clip start on timeline
+      const relativeTime = splitTime - clipToSplit.start
+
+      // Ensure split time is within clip bounds
+      if (relativeTime <= 0 || relativeTime >= clipToSplit.duration) {
+        return prev
+      }
+
+      // Create two new clips
+      const leftClip: VideoTimelineClip = {
+        ...clipToSplit,
+        id: `video-timeline-${Date.now()}-left`,
+        duration: relativeTime,
+        // clipStart remains the same
+        clipEnd: clipToSplit.clipStart + relativeTime
+      }
+
+      const rightClip: VideoTimelineClip = {
+        ...clipToSplit,
+        id: `video-timeline-${Date.now()}-right`,
+        start: splitTime,
+        duration: clipToSplit.duration - relativeTime,
+        clipStart: clipToSplit.clipStart + relativeTime,
+        // clipEnd remains the same
+      }
+
+      // Remove original clip and add the two new clips
+      return {
+        ...prev,
+        videoTimelineClips: [
+          ...prev.videoTimelineClips.filter(c => c.id !== id),
+          leftClip,
+          rightClip
+        ],
+        hasUnsavedChanges: true
+      }
+    })
+  }
+
   // Media overlay management functions
   const importMediaOverlay = async (path: string, type: 'image' | 'video') => {
     try {
@@ -1429,6 +1486,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         addVideoToTimeline,
         updateVideoTimelineClip,
         deleteVideoTimelineClip,
+        splitVideoTimelineClip,
         importMediaOverlay,
         addMediaOverlayAsset,
         removeMediaOverlayAsset,

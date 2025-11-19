@@ -21,7 +21,10 @@ from video_analyzer import (
     suggest_sfx,
     EventDetector
 )
+
 from music_prompt_generator import suggest_music
+from animation_suggester import AnimationSuggester
+import concurrent.futures
 
 
 def print_log(message):
@@ -408,7 +411,8 @@ def unified_analyze(video_path):
         'visual_scenes': [],
         'events': [],
         'sfx_suggestions': [],
-        'music_suggestions': []
+        'music_suggestions': [],
+        'animation_suggestions': []
     }
 
     try:
@@ -417,20 +421,25 @@ def unified_analyze(video_path):
 
         # Step 1: Thumbnail analysis (unique to unified analyzer)
         # DISABLED FOR THIS RELEASE - Thumbnail generation feature not included
-        # This saves significant processing time during video analysis
-        # result['thumbnail_candidates'] = analyze_thumbnails(video_path)
-        result['thumbnail_candidates'] = []  # Return empty list instead of analyzing
+        result['thumbnail_candidates'] = []
 
-        # Step 2: Audio transcription using video_analyzer's function
-        print_log("🎧 Transcribing audio...")
-        result['transcription'] = video_analyzer_transcribe(video_path)
+        # PARALLEL PROCESSING START
+        # Run Transcription and Scene Analysis in parallel to save time
+        print_log("🚀 Starting parallel analysis (Transcription + Scene Detection)...")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            # Submit tasks
+            future_transcription = executor.submit(video_analyzer_transcribe, video_path)
+            future_scenes = executor.submit(analyze_scenes, video_path)
+            
+            # Wait for results
+            print_log("   Waiting for parallel tasks to complete...")
+            result['transcription'] = future_transcription.result()
+            scenes = future_scenes.result()
+            
         print_log(f"✓ Transcribed {len(result['transcription'])} segments")
-
-        # Step 3: SMART scene analysis using video_analyzer's analyze_scenes
-        # This gives us scenes with mood, energy, BLIP descriptions, etc.
-        print_log("🎬 Analyzing scenes with smart scene detection...")
-        scenes = analyze_scenes(video_path)
         print_log(f"✓ Analyzed {len(scenes)} scenes")
+        # PARALLEL PROCESSING END
 
         # Step 4: Event detection (motion peaks, transitions)
         print_log("🎯 Detecting events for precise SFX timing...")
@@ -455,6 +464,15 @@ def unified_analyze(video_path):
         print_log("🎵 Generating background music suggestions...")
         result['music_suggestions'] = suggest_music(scenes)
         print_log(f"✓ Generated {len(result['music_suggestions'])} music suggestions")
+
+        # Step 7: Generate Animation Suggestions (New Feature)
+        print_log("✨ Generating animation suggestions...")
+        animation_suggester = AnimationSuggester()
+        result['animation_suggestions'] = animation_suggester.suggest_animations(
+            result['transcription'],
+            scenes
+        )
+        print_log(f"✓ Generated {len(result['animation_suggestions'])} animation suggestions")
 
         # Store events for frontend
         result['events'] = all_events
@@ -481,6 +499,7 @@ def unified_analyze(video_path):
             print_log(f"      ├─ {primary_count} primary (silent sections)")
             print_log(f"      └─ {enhancement_count} enhancements (optional)")
         print_log(f"   Music: {len(result['music_suggestions'])} suggestions")
+        print_log(f"   Animations: {len(result['animation_suggestions'])} suggestions")
         print_log("=" * 60)
 
         return result

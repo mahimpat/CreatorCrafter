@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useProject } from '../context/ProjectContext'
 import { Film, Volume2, MessageSquare, Type, Eye, Lock, Music, Undo2, Redo2, Magnet, Trash2, Hand, Image, Scissors, Sparkles } from 'lucide-react'
 import './Timeline.css'
@@ -50,6 +50,7 @@ export default function Timeline() {
     addVideoToTimeline,
     updateVideoTimelineClip,
     deleteVideoTimelineClip,
+    splitVideoTimelineClip,
     videoClips,
     mediaOverlays,
     mediaOverlayAssets,
@@ -59,17 +60,22 @@ export default function Timeline() {
 
   // Use unified analysis if available, otherwise fall back to legacy analysis
   const sfxSuggestions = unifiedAnalysis?.sfx_suggestions || analysis?.suggestedSFX || []
+  const animationSuggestions = unifiedAnalysis?.animation_suggestions || []
 
   const [draggedItem, setDraggedItem] = useState<{
     id: string
     type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation'
+    startX: number
+    originalStart: number
   } | null>(null)
+
   const [potentialDrag, setPotentialDrag] = useState<{
     id: string
     type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation'
     startX: number
     startY: number
   } | null>(null)
+
   const [resizingItem, setResizingItem] = useState<{
     id: string
     type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation'
@@ -78,6 +84,7 @@ export default function Timeline() {
     originalEnd: number
     originalDuration: number
   } | null>(null)
+
   const [snapGuide, setSnapGuide] = useState<number | null>(null)
   const [zoom, setZoom] = useState(1)
   const [isDraggingToDelete, setIsDraggingToDelete] = useState(false)
@@ -293,6 +300,7 @@ export default function Timeline() {
     itemWidth: number
   ) => {
     e.stopPropagation()
+    e.preventDefault() // Prevent default drag behavior
 
     // Detect if clicking on edge (16px from left or right for easier grabbing)
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -304,8 +312,6 @@ export default function Timeline() {
 
     // Handle edge resizing
     if (isLeftEdge || isRightEdge) {
-      e.preventDefault() // Prevent drag-and-drop from starting
-
       // Get original clip data
       let originalStart = 0
       let originalEnd = 0
@@ -449,281 +455,378 @@ export default function Timeline() {
     e.dataTransfer.dropEffect = 'copy'
   }
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!timelineRef.current) return
+  // Global mouse move handler for dragging and resizing
+  useEffect(() => {
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (!timelineRef.current) return
 
-    const rect = timelineRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const newTime = Math.max(0, Math.min(safeDuration, x / pixelsPerSecond))
+      const rect = timelineRef.current.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const newTime = Math.max(0, Math.min(safeDuration, x / pixelsPerSecond))
 
-    // Check if we should convert potential drag to actual drag
-    if (potentialDrag && !draggedItem) {
-      const deltaX = Math.abs(e.clientX - potentialDrag.startX)
-      const deltaY = Math.abs(e.clientY - potentialDrag.startY)
-      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+      // Check if we should convert potential drag to actual drag
+      if (potentialDrag && !draggedItem) {
+        const deltaX = Math.abs(e.clientX - potentialDrag.startX)
+        const deltaY = Math.abs(e.clientY - potentialDrag.startY)
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
 
-      // Only start dragging if moved beyond threshold
-      if (distance > DRAG_THRESHOLD) {
-        setDraggedItem({ id: potentialDrag.id, type: potentialDrag.type })
-        setPotentialDrag(null)
+        // Only start dragging if moved beyond threshold
+        if (distance > DRAG_THRESHOLD) {
+          // Get original start time for the dragged item
+          let originalStart = 0
+          if (potentialDrag.type === 'video') {
+            const clip = videoTimelineClips.find(c => c.id === potentialDrag.id)
+            if (clip) originalStart = clip.start
+          } else if (potentialDrag.type === 'media-overlay') {
+            const overlay = mediaOverlays.find(o => o.id === potentialDrag.id)
+            if (overlay) originalStart = overlay.start
+          } else if (potentialDrag.type === 'sfx') {
+            const track = sfxTracks.find(t => t.id === potentialDrag.id)
+            if (track) originalStart = track.start
+          } else if (potentialDrag.type === 'audio') {
+            const track = audioTracks.find(t => t.id === potentialDrag.id)
+            if (track) originalStart = track.start
+          } else if (potentialDrag.type === 'subtitle') {
+            const subtitle = subtitles.find(s => s.id === potentialDrag.id)
+            if (subtitle) originalStart = subtitle.start
+          } else if (potentialDrag.type === 'overlay') {
+            const overlay = textOverlays.find(o => o.id === potentialDrag.id)
+            if (overlay) originalStart = overlay.start
+          } else if (potentialDrag.type === 'animation') {
+            const track = animationTracks.find(t => t.id === potentialDrag.id)
+            if (track) originalStart = track.start
+          }
+
+          setDraggedItem({
+            id: potentialDrag.id,
+            type: potentialDrag.type,
+            startX: e.clientX,
+            originalStart
+          })
+          setPotentialDrag(null)
+          setIsDraggingToDelete(false)
+        }
       }
-    }
 
-    // Handle resizing
-    if (resizingItem) {
-      const minDuration = 0.1 // Minimum 0.1 second clip duration
+      // Handle resizing
+      if (resizingItem) {
+        const minDuration = 0.1 // Minimum 0.1 second clip duration
 
-      if (resizingItem.edge === 'left') {
-        // Trim from start - adjust start time while keeping end fixed
-        const maxStart = resizingItem.originalEnd - minDuration
-        let newStart = Math.max(0, Math.min(newTime, maxStart))
+        if (resizingItem.edge === 'left') {
+          // Trim from start - adjust start time while keeping end fixed
+          const maxStart = resizingItem.originalEnd - minDuration
+          let newStart = Math.max(0, Math.min(newTime, maxStart))
 
-        // Apply snapping
-        newStart = applySnapping(newStart, resizingItem.id)
+          // Apply snapping
+          newStart = applySnapping(newStart, resizingItem.id)
 
-        const newDuration = resizingItem.originalEnd - newStart
+          const newDuration = resizingItem.originalEnd - newStart
 
-        if (resizingItem.type === 'video') {
-          const clip = videoTimelineClips.find(c => c.id === resizingItem.id)
-          if (clip) {
-            const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
-            if (sourceClip) {
-              const trimAmount = resizingItem.originalStart - newStart
-              const newClipStart = Math.max(0, clip.clipStart - trimAmount)
-              updateVideoTimelineClip(resizingItem.id, {
+          if (resizingItem.type === 'video') {
+            const clip = videoTimelineClips.find(c => c.id === resizingItem.id)
+            if (clip) {
+              const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
+              if (sourceClip) {
+                const trimAmount = resizingItem.originalStart - newStart
+                const newClipStart = Math.max(0, clip.clipStart - trimAmount)
+                updateVideoTimelineClip(resizingItem.id, {
+                  start: newStart,
+                  duration: newDuration,
+                  clipStart: newClipStart
+                })
+              }
+            }
+          } else if (resizingItem.type === 'media-overlay') {
+            updateMediaOverlay(resizingItem.id, {
+              start: newStart,
+              duration: newDuration
+            })
+          } else if (resizingItem.type === 'sfx') {
+            // When trimming from left, we need to adjust the clip offset in the source file
+            const track = sfxTracks.find(t => t.id === resizingItem.id)
+            if (track) {
+              const trimAmount = newStart - resizingItem.originalStart
+              const newClipStart = Math.max(0, (track.clipStart || 0) + trimAmount)
+
+              // Constrain duration to not exceed remaining source duration
+              const remainingSourceDuration = resizingItem.originalDuration - newClipStart
+              const constrainedDuration = Math.min(newDuration, remainingSourceDuration)
+
+              updateSFXTrack(resizingItem.id, {
                 start: newStart,
-                duration: newDuration,
+                duration: constrainedDuration,
                 clipStart: newClipStart
               })
             }
-          }
-        } else if (resizingItem.type === 'media-overlay') {
-          updateMediaOverlay(resizingItem.id, {
-            start: newStart,
-            duration: newDuration
-          })
-        } else if (resizingItem.type === 'sfx') {
-          // When trimming from left, we need to adjust the clip offset in the source file
-          const track = sfxTracks.find(t => t.id === resizingItem.id)
-          if (track) {
-            const trimAmount = newStart - resizingItem.originalStart
-            const newClipStart = Math.max(0, (track.clipStart || 0) + trimAmount)
+          } else if (resizingItem.type === 'audio') {
+            // When trimming from left, we need to adjust the clip offset in the source file
+            const track = audioTracks.find(t => t.id === resizingItem.id)
+            if (track) {
+              const trimAmount = newStart - resizingItem.originalStart
+              const newClipStart = Math.max(0, (track.clipStart || 0) + trimAmount)
 
-            // Constrain duration to not exceed remaining source duration
-            const remainingSourceDuration = resizingItem.originalDuration - newClipStart
-            const constrainedDuration = Math.min(newDuration, remainingSourceDuration)
+              // Constrain duration to not exceed remaining source duration
+              const remainingSourceDuration = resizingItem.originalDuration - newClipStart
+              const constrainedDuration = Math.min(newDuration, remainingSourceDuration)
 
-            updateSFXTrack(resizingItem.id, {
+              updateAudioTrack(resizingItem.id, {
+                start: newStart,
+                duration: constrainedDuration,
+                clipStart: newClipStart
+              })
+            }
+          } else if (resizingItem.type === 'subtitle') {
+            updateSubtitle(resizingItem.id, {
               start: newStart,
-              duration: constrainedDuration,
-              clipStart: newClipStart
+              end: resizingItem.originalEnd
+            })
+          } else if (resizingItem.type === 'overlay') {
+            updateTextOverlay(resizingItem.id, {
+              start: newStart,
+              end: resizingItem.originalEnd
+            })
+          } else if (resizingItem.type === 'animation') {
+            const newDuration = resizingItem.originalEnd - newStart
+            updateAnimationTrack(resizingItem.id, {
+              start: newStart,
+              duration: newDuration
             })
           }
-        } else if (resizingItem.type === 'audio') {
-          // When trimming from left, we need to adjust the clip offset in the source file
-          const track = audioTracks.find(t => t.id === resizingItem.id)
-          if (track) {
-            const trimAmount = newStart - resizingItem.originalStart
-            const newClipStart = Math.max(0, (track.clipStart || 0) + trimAmount)
+        } else if (resizingItem.edge === 'right') {
+          // Trim from end - adjust end time while keeping start fixed
+          const minEnd = resizingItem.originalStart + minDuration
+          let newEnd = Math.max(minEnd, Math.min(newTime, safeDuration))
 
-            // Constrain duration to not exceed remaining source duration
-            const remainingSourceDuration = resizingItem.originalDuration - newClipStart
-            const constrainedDuration = Math.min(newDuration, remainingSourceDuration)
+          // Apply snapping
+          newEnd = applySnapping(newEnd, resizingItem.id)
 
-            updateAudioTrack(resizingItem.id, {
-              start: newStart,
-              duration: constrainedDuration,
-              clipStart: newClipStart
+          const newDuration = newEnd - resizingItem.originalStart
+
+          if (resizingItem.type === 'video') {
+            const clip = videoTimelineClips.find(c => c.id === resizingItem.id)
+            if (clip) {
+              const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
+              if (sourceClip) {
+                const newClipEnd = Math.min(sourceClip.duration, clip.clipStart + newDuration)
+                updateVideoTimelineClip(resizingItem.id, {
+                  duration: newDuration,
+                  clipEnd: newClipEnd
+                })
+              }
+            }
+          } else if (resizingItem.type === 'media-overlay') {
+            updateMediaOverlay(resizingItem.id, {
+              duration: newDuration
             })
-          }
-        } else if (resizingItem.type === 'subtitle') {
-          updateSubtitle(resizingItem.id, {
-            start: newStart,
-            end: resizingItem.originalEnd
-          })
-        } else if (resizingItem.type === 'overlay') {
-          updateTextOverlay(resizingItem.id, {
-            start: newStart,
-            end: resizingItem.originalEnd
-          })
-        } else if (resizingItem.type === 'animation') {
-          const newDuration = resizingItem.originalEnd - newStart
-          updateAnimationTrack(resizingItem.id, {
-            start: newStart,
-            duration: newDuration
-          })
-        }
-      } else if (resizingItem.edge === 'right') {
-        // Trim from end - adjust end time while keeping start fixed
-        const minEnd = resizingItem.originalStart + minDuration
-        let newEnd = Math.max(minEnd, Math.min(newTime, safeDuration))
+          } else if (resizingItem.type === 'sfx') {
+            // When trimming from right, adjust the clip end point
+            const track = sfxTracks.find(t => t.id === resizingItem.id)
+            if (track) {
+              const clipStart = track.clipStart || 0
+              const newClipEnd = Math.min(resizingItem.originalDuration, clipStart + newDuration)
+              const constrainedDuration = newClipEnd - clipStart
 
-        // Apply snapping
-        newEnd = applySnapping(newEnd, resizingItem.id)
-
-        const newDuration = newEnd - resizingItem.originalStart
-
-        if (resizingItem.type === 'video') {
-          const clip = videoTimelineClips.find(c => c.id === resizingItem.id)
-          if (clip) {
-            const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
-            if (sourceClip) {
-              const newClipEnd = Math.min(sourceClip.duration, clip.clipStart + newDuration)
-              updateVideoTimelineClip(resizingItem.id, {
-                duration: newDuration,
+              updateSFXTrack(resizingItem.id, {
+                duration: constrainedDuration,
                 clipEnd: newClipEnd
               })
             }
-          }
-        } else if (resizingItem.type === 'media-overlay') {
-          updateMediaOverlay(resizingItem.id, {
-            duration: newDuration
-          })
-        } else if (resizingItem.type === 'sfx') {
-          // When trimming from right, adjust the clip end point
-          const track = sfxTracks.find(t => t.id === resizingItem.id)
-          if (track) {
-            const clipStart = track.clipStart || 0
-            const newClipEnd = Math.min(resizingItem.originalDuration, clipStart + newDuration)
-            const constrainedDuration = newClipEnd - clipStart
+          } else if (resizingItem.type === 'audio') {
+            // When trimming from right, adjust the clip end point
+            const track = audioTracks.find(t => t.id === resizingItem.id)
+            if (track) {
+              const clipStart = track.clipStart || 0
+              const newClipEnd = Math.min(resizingItem.originalDuration, clipStart + newDuration)
+              const constrainedDuration = newClipEnd - clipStart
 
-            updateSFXTrack(resizingItem.id, {
-              duration: constrainedDuration,
-              clipEnd: newClipEnd
+              updateAudioTrack(resizingItem.id, {
+                duration: constrainedDuration,
+                clipEnd: newClipEnd
+              })
+            }
+          } else if (resizingItem.type === 'subtitle') {
+            updateSubtitle(resizingItem.id, {
+              end: newEnd
+            })
+          } else if (resizingItem.type === 'overlay') {
+            updateTextOverlay(resizingItem.id, {
+              end: newEnd
+            })
+          } else if (resizingItem.type === 'animation') {
+            const newDuration = newEnd - resizingItem.originalStart
+            updateAnimationTrack(resizingItem.id, {
+              duration: newDuration
             })
           }
-        } else if (resizingItem.type === 'audio') {
-          // When trimming from right, adjust the clip end point
-          const track = audioTracks.find(t => t.id === resizingItem.id)
-          if (track) {
-            const clipStart = track.clipStart || 0
-            const newClipEnd = Math.min(resizingItem.originalDuration, clipStart + newDuration)
-            const constrainedDuration = newClipEnd - clipStart
+        }
+        return
+      }
 
-            updateAudioTrack(resizingItem.id, {
-              duration: constrainedDuration,
-              clipEnd: newClipEnd
+      // Handle dragging
+      if (draggedItem) {
+        // Check if dragging over delete zone
+        const deleteZone = document.querySelector('.delete-drop-zone')
+        if (deleteZone) {
+          const deleteRect = deleteZone.getBoundingClientRect()
+          const isOver = (
+            e.clientX >= deleteRect.left &&
+            e.clientX <= deleteRect.right &&
+            e.clientY >= deleteRect.top &&
+            e.clientY <= deleteRect.bottom
+          )
+          setIsOverBin(isOver)
+          setIsDraggingToDelete(true)
+
+          if (isOver) {
+            // If over bin, don't move the clip on timeline, just show it's ready to delete
+            return
+          }
+        }
+
+        // Calculate new start time based on mouse delta
+        const deltaX = e.clientX - draggedItem.startX
+        const deltaTime = deltaX / pixelsPerSecond
+        const proposedTime = draggedItem.originalStart + deltaTime
+
+        // Constrain to timeline boundaries (0 to safeDuration)
+        const constrainedTime = Math.max(0, Math.min(proposedTime, safeDuration))
+
+        // Apply snapping to constrained drag position
+        const snappedTime = applySnapping(constrainedTime, draggedItem.id)
+
+        // Update the position based on item type
+        if (draggedItem.type === 'video') {
+          const clip = videoTimelineClips.find(c => c.id === draggedItem.id)
+          if (clip) {
+            // Ensure clip doesn't extend beyond timeline
+            const maxStart = safeDuration - clip.duration
+            const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+            updateVideoTimelineClip(draggedItem.id, { start: finalStart })
+          }
+        } else if (draggedItem.type === 'media-overlay') {
+          const overlay = mediaOverlays.find(o => o.id === draggedItem.id)
+          if (overlay) {
+            const maxStart = safeDuration - overlay.duration
+            const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+            updateMediaOverlay(draggedItem.id, { start: finalStart })
+          }
+        } else if (draggedItem.type === 'sfx') {
+          const track = sfxTracks.find(t => t.id === draggedItem.id)
+          if (track) {
+            const maxStart = safeDuration - track.duration
+            const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+            updateSFXTrack(draggedItem.id, { start: finalStart })
+          }
+        } else if (draggedItem.type === 'audio') {
+          const track = audioTracks.find(t => t.id === draggedItem.id)
+          if (track) {
+            const maxStart = safeDuration - track.duration
+            const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+            updateAudioTrack(draggedItem.id, { start: finalStart })
+          }
+        } else if (draggedItem.type === 'subtitle') {
+          const subtitle = subtitles.find(s => s.id === draggedItem.id)
+          if (subtitle) {
+            const duration = subtitle.end - subtitle.start
+            const maxStart = safeDuration - duration
+            const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+            updateSubtitle(draggedItem.id, {
+              start: finalStart,
+              end: finalStart + duration
             })
           }
-        } else if (resizingItem.type === 'subtitle') {
-          updateSubtitle(resizingItem.id, {
-            end: newEnd
-          })
-        } else if (resizingItem.type === 'overlay') {
-          updateTextOverlay(resizingItem.id, {
-            end: newEnd
-          })
-        } else if (resizingItem.type === 'animation') {
-          const newDuration = newEnd - resizingItem.originalStart
-          updateAnimationTrack(resizingItem.id, {
-            duration: newDuration
-          })
-        }
-      }
-      return
-    }
-
-    // Handle dragging
-    if (draggedItem) {
-      // Constrain to timeline boundaries (0 to safeDuration)
-      const constrainedTime = Math.max(0, Math.min(newTime, safeDuration))
-
-      // Apply snapping to constrained drag position
-      const snappedTime = applySnapping(constrainedTime, draggedItem.id)
-
-      // Update the position based on item type
-      if (draggedItem.type === 'video') {
-        const clip = videoTimelineClips.find(c => c.id === draggedItem.id)
-        if (clip) {
-          // Ensure clip doesn't extend beyond timeline
-          const maxStart = safeDuration - clip.duration
-          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
-          updateVideoTimelineClip(draggedItem.id, { start: finalStart })
-        }
-      } else if (draggedItem.type === 'media-overlay') {
-        const overlay = mediaOverlays.find(o => o.id === draggedItem.id)
-        if (overlay) {
-          const maxStart = safeDuration - overlay.duration
-          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
-          updateMediaOverlay(draggedItem.id, { start: finalStart })
-        }
-      } else if (draggedItem.type === 'sfx') {
-        const track = sfxTracks.find(t => t.id === draggedItem.id)
-        if (track) {
-          const maxStart = safeDuration - track.duration
-          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
-          updateSFXTrack(draggedItem.id, { start: finalStart })
-        }
-      } else if (draggedItem.type === 'audio') {
-        const track = audioTracks.find(t => t.id === draggedItem.id)
-        if (track) {
-          const maxStart = safeDuration - track.duration
-          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
-          updateAudioTrack(draggedItem.id, { start: finalStart })
-        }
-      } else if (draggedItem.type === 'subtitle') {
-        const subtitle = subtitles.find(s => s.id === draggedItem.id)
-        if (subtitle) {
-          const duration = subtitle.end - subtitle.start
-          const maxStart = safeDuration - duration
-          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
-          updateSubtitle(draggedItem.id, {
-            start: finalStart,
-            end: finalStart + duration
-          })
-        }
-      } else if (draggedItem.type === 'overlay') {
-        const overlay = textOverlays.find(o => o.id === draggedItem.id)
-        if (overlay) {
-          const duration = overlay.end - overlay.start
-          const maxStart = safeDuration - duration
-          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
-          updateTextOverlay(draggedItem.id, {
-            start: finalStart,
-            end: finalStart + duration
-          })
-        }
-      } else if (draggedItem.type === 'animation') {
-        const track = animationTracks.find(t => t.id === draggedItem.id)
-        if (track) {
-          const maxStart = safeDuration - track.duration
-          const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
-          updateAnimationTrack(draggedItem.id, { start: finalStart })
+        } else if (draggedItem.type === 'overlay') {
+          const overlay = textOverlays.find(o => o.id === draggedItem.id)
+          if (overlay) {
+            const duration = overlay.end - overlay.start
+            const maxStart = safeDuration - duration
+            const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+            updateTextOverlay(draggedItem.id, {
+              start: finalStart,
+              end: finalStart + duration
+            })
+          }
+        } else if (draggedItem.type === 'animation') {
+          const track = animationTracks.find(t => t.id === draggedItem.id)
+          if (track) {
+            const maxStart = safeDuration - track.duration
+            const finalStart = Math.max(0, Math.min(snappedTime, maxStart))
+            updateAnimationTrack(draggedItem.id, { start: finalStart })
+          }
         }
       }
     }
-  }
 
-  const handleMouseUp = () => {
-    // Check if dropped on bin for deletion
-    if (isDraggingToDelete && isOverBin && draggedItem) {
-      // Delete the item
-      if (draggedItem.type === 'video') {
-        deleteVideoTimelineClip(draggedItem.id)
-      } else if (draggedItem.type === 'media-overlay') {
-        deleteMediaOverlay(draggedItem.id)
-      } else if (draggedItem.type === 'sfx') {
-        deleteSFXTrack(draggedItem.id)
-      } else if (draggedItem.type === 'audio') {
-        deleteAudioTrack(draggedItem.id)
-      } else if (draggedItem.type === 'subtitle') {
-        deleteSubtitle(draggedItem.id)
-      } else if (draggedItem.type === 'overlay') {
-        deleteTextOverlay(draggedItem.id)
-      } else if (draggedItem.type === 'animation') {
-        deleteAnimationTrack(draggedItem.id)
+    const handleWindowMouseUp = (e: MouseEvent) => {
+      // Check if dropped on bin for deletion
+      if (isDraggingToDelete && isOverBin && draggedItem) {
+        // Delete the item
+        if (draggedItem.type === 'video') {
+          deleteVideoTimelineClip(draggedItem.id)
+        } else if (draggedItem.type === 'media-overlay') {
+          deleteMediaOverlay(draggedItem.id)
+        } else if (draggedItem.type === 'sfx') {
+          deleteSFXTrack(draggedItem.id)
+        } else if (draggedItem.type === 'audio') {
+          deleteAudioTrack(draggedItem.id)
+        } else if (draggedItem.type === 'subtitle') {
+          deleteSubtitle(draggedItem.id)
+        } else if (draggedItem.type === 'overlay') {
+          deleteTextOverlay(draggedItem.id)
+        } else if (draggedItem.type === 'animation') {
+          deleteAnimationTrack(draggedItem.id)
+        }
       }
+
+      // Reset all drag/resize states
+      setDraggedItem(null)
+      setPotentialDrag(null) // Clear potential drag
+      setResizingItem(null)
+      // Always clear snap guide when mouse is released
+      setSnapGuide(null)
+      setIsDraggingToDelete(false)
+      setIsOverBin(false)
     }
 
-    // Reset all drag/resize states
-    setDraggedItem(null)
-    setPotentialDrag(null) // Clear potential drag
-    setResizingItem(null)
-    // Always clear snap guide when mouse is released
-    setSnapGuide(null)
-    setIsDraggingToDelete(false)
-    setIsOverBin(false)
-  }
+    window.addEventListener('mousemove', handleWindowMouseMove)
+    window.addEventListener('mouseup', handleWindowMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove)
+      window.removeEventListener('mouseup', handleWindowMouseUp)
+    }
+  }, [
+    draggedItem,
+    potentialDrag,
+    resizingItem,
+    isDraggingToDelete,
+    isOverBin,
+    safeDuration,
+    pixelsPerSecond,
+    videoTimelineClips,
+    mediaOverlays,
+    sfxTracks,
+    audioTracks,
+    subtitles,
+    textOverlays,
+    animationTracks,
+    videoClips,
+    applySnapping,
+    updateVideoTimelineClip,
+    updateMediaOverlay,
+    updateSFXTrack,
+    updateAudioTrack,
+    updateSubtitle,
+    updateTextOverlay,
+    updateAnimationTrack,
+    deleteVideoTimelineClip,
+    deleteMediaOverlay,
+    deleteSFXTrack,
+    deleteAudioTrack,
+    deleteSubtitle,
+    deleteTextOverlay,
+    deleteAnimationTrack
+  ])
 
   // Split the selected clip at playhead position
   const handleSplitAtPlayhead = () => {
@@ -731,6 +834,17 @@ export default function Timeline() {
     if (selectedClipIds.length !== 1) return
 
     const selectedId = selectedClipIds[0]
+
+    // Try to find in Video clips
+    const videoClip = videoTimelineClips.find(c => c.id === selectedId)
+    if (videoClip) {
+      const playheadRelativePos = currentTime - videoClip.start
+      // Check if playhead is within the selected track bounds with margin
+      if (playheadRelativePos > 0.2 && playheadRelativePos < (videoClip.duration - 0.2)) {
+        splitVideoTimelineClip(selectedId, currentTime)
+      }
+      return
+    }
 
     // Try to find in SFX tracks
     const sfx = sfxTracks.find(t => t.id === selectedId)
@@ -761,6 +875,13 @@ export default function Timeline() {
     if (selectedClipIds.length !== 1) return false
 
     const selectedId = selectedClipIds[0]
+
+    // Check if selected clip is a Video clip
+    const videoClip = videoTimelineClips.find(c => c.id === selectedId)
+    if (videoClip) {
+      const playheadRelativePos = currentTime - videoClip.start
+      return playheadRelativePos > 0.2 && playheadRelativePos < (videoClip.duration - 0.2)
+    }
 
     // Check if selected clip is an SFX track
     const sfx = sfxTracks.find(t => t.id === selectedId)
@@ -877,21 +998,6 @@ export default function Timeline() {
     }
   }
 
-  // Start dragging for delete (when item is dragged from track)
-  const handleItemDragStart = (
-    e: React.DragEvent,
-    id: string,
-    type: 'subtitle' | 'sfx' | 'audio' | 'overlay' | 'video' | 'media-overlay' | 'animation'
-  ) => {
-    e.stopPropagation()
-    setDraggedItem({ id, type })
-    setIsDraggingToDelete(true)
-
-    // Set drag data
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', JSON.stringify({ id, type }))
-  }
-
   // Bin drop zone handlers
   const handleBinDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -904,38 +1010,8 @@ export default function Timeline() {
     setIsOverBin(false)
   }
 
-  const handleBinDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-
-    try {
-      const data = JSON.parse(e.dataTransfer.getData('text/plain'))
-      const { id, type } = data
-
-      // Delete the item
-      if (type === 'video') {
-        deleteVideoTimelineClip(id)
-      } else if (type === 'media-overlay') {
-        deleteMediaOverlay(id)
-      } else if (type === 'sfx') {
-        deleteSFXTrack(id)
-      } else if (type === 'audio') {
-        deleteAudioTrack(id)
-      } else if (type === 'subtitle') {
-        deleteSubtitle(id)
-      } else if (type === 'overlay') {
-        deleteTextOverlay(id)
-      } else if (type === 'animation') {
-        deleteAnimationTrack(id)
-      }
-    } catch (error) {
-      console.error('Error deleting item:', error)
-    }
-
-    // Reset states
-    setDraggedItem(null)
-    setIsDraggingToDelete(false)
-    setIsOverBin(false)
-  }
+  // Note: handleBinDrop is no longer needed as we handle drop in the global mouseUp handler
+  // But we keep the visual feedback in the render
 
   return (
     <div className="capcut-timeline">
@@ -1005,7 +1081,6 @@ export default function Timeline() {
             title={isDraggingToDelete ? "Drop here to delete" : "Delete Selected (Delete/Backspace)"}
             onDragOver={handleBinDragOver}
             onDragLeave={handleBinDragLeave}
-            onDrop={handleBinDrop}
           >
             <Trash2 size={16} />
             <span>{isOverBin ? 'Drop to Delete' : 'Delete'}</span>
@@ -1144,9 +1219,6 @@ export default function Timeline() {
             className="timeline-content"
             style={{ width: `${timelineWidth}px` }}
             onClick={handleTimelineClick}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
           >
@@ -1205,9 +1277,7 @@ export default function Timeline() {
                           left: `${startPos}px`,
                           width: `${displayWidth}px`
                         }}
-                        draggable
                         onClick={handleTrackItemClick}
-                        onDragStart={(e) => handleItemDragStart(e, clip.id, 'video')}
                         onMouseDown={(e) => handleTrackItemMouseDown(e, clip.id, 'video', displayWidth)}
                         title={`${sourceClip.name} - ${clip.start.toFixed(2)}s`}
                       >
@@ -1243,9 +1313,7 @@ export default function Timeline() {
                           width: `${displayWidth}px`,
                           height: '60px'
                         }}
-                        draggable
                         onClick={handleTrackItemClick}
-                        onDragStart={(e) => handleItemDragStart(e, audio.id, 'audio')}
                         onMouseDown={(e) => handleTrackItemMouseDown(e, audio.id, 'audio', displayWidth)}
                         title={`Original Audio - ${audio.start.toFixed(2)}s`}
                       >
@@ -1317,9 +1385,7 @@ export default function Timeline() {
                             left: `${startPos}px`,
                             width: `${displayWidth}px`
                           }}
-                          draggable
                           onClick={handleTrackItemClick}
-                          onDragStart={(e) => handleItemDragStart(e, sfx.id, 'sfx')}
                           onMouseDown={(e) => handleTrackItemMouseDown(e, sfx.id, 'sfx', displayWidth)}
                           title={`${sfx.prompt || 'SFX'} - ${sfx.start.toFixed(2)}s`}
                         >
@@ -1367,9 +1433,7 @@ export default function Timeline() {
                         left: `${startPos}px`,
                         width: `${displayWidth}px`
                       }}
-                      draggable
                       onClick={handleTrackItemClick}
-                      onDragStart={(e) => handleItemDragStart(e, subtitle.id, 'subtitle')}
                       onMouseDown={(e) => handleTrackItemMouseDown(e, subtitle.id, 'subtitle', displayWidth)}
                       title={subtitle.text}
                     >
@@ -1401,9 +1465,7 @@ export default function Timeline() {
                         left: `${startPos}px`,
                         width: `${displayWidth}px`
                       }}
-                      draggable
                       onClick={handleTrackItemClick}
-                      onDragStart={(e) => handleItemDragStart(e, overlay.id, 'overlay')}
                       onMouseDown={(e) => handleTrackItemMouseDown(e, overlay.id, 'overlay', displayWidth)}
                       title={overlay.text}
                     >
@@ -1443,9 +1505,7 @@ export default function Timeline() {
                           left: `${startPos}px`,
                           width: `${displayWidth}px`
                         }}
-                        draggable
                         onClick={handleTrackItemClick}
-                        onDragStart={(e) => handleItemDragStart(e, overlay.id, 'media-overlay')}
                         onMouseDown={(e) => handleTrackItemMouseDown(e, overlay.id, 'media-overlay', displayWidth)}
                         title={`${asset.name} - ${overlay.start.toFixed(2)}s`}
                       >
@@ -1485,9 +1545,7 @@ export default function Timeline() {
                           left: `${startPos}px`,
                           width: `${displayWidth}px`
                         }}
-                        draggable
                         onClick={handleTrackItemClick}
-                        onDragStart={(e) => handleItemDragStart(e, track.id, 'animation')}
                         onMouseDown={(e) => handleTrackItemMouseDown(e, track.id, 'animation', displayWidth)}
                         title={`${track.name} - ${track.start.toFixed(2)}s`}
                       >
@@ -1499,6 +1557,19 @@ export default function Timeline() {
                     )
                   })
                 )}
+
+                {/* AI Animation Suggestions */}
+                {animationSuggestions.map((suggestion, index) => {
+                  const position = suggestion.timestamp * pixelsPerSecond
+                  return (
+                    <div
+                      key={`anim-sugg-${index}`}
+                      className="animation-suggestion"
+                      style={{ left: `${position}px` }}
+                      title={`Suggested: ${suggestion.category} (${suggestion.reason})`}
+                    />
+                  )
+                })}
               </div>
             </div>
           </div>

@@ -314,7 +314,19 @@ export default function SFXLibrary() {
         ) : (
           <div className="sound-grid">
             {filteredSounds.map(sound => (
-              <div key={`${sound.category}-${sound.name}`} className="sound-card">
+              <div
+                key={`${sound.category}-${sound.name}`}
+                className="sound-card"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'copy'
+                  e.dataTransfer.setData('sfx-library-item', JSON.stringify({
+                    path: sound.filePath,
+                    duration: sound.duration,
+                    prompt: sound.prompt
+                  }))
+                }}
+              >
                 <div className="sound-info">
                   <h4>{sound.name.replace(/-/g, ' ')}</h4>
                   <p className="sound-description">{sound.prompt}</p>

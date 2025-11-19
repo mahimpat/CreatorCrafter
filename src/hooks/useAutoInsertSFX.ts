@@ -63,13 +63,13 @@ const calculateSemanticSimilarity = (suggestionPrompt: string, librarySound: Lib
 export function useAutoInsertSFX() {
   console.log('[Auto-Insert Hook] Hook initialized')
 
-  const { unifiedAnalysis, analysis, addSFXTrack } = useProject()
+  const { unifiedAnalysis, analysis, addSFXTrack, sfxTracks } = useProject()
   const [builtInLibrary, setBuiltInLibrary] = useState<LibrarySound[]>([])
   const lastProcessedAnalysisRef = useRef<string>('')
 
   const sfxSuggestions = unifiedAnalysis?.sfx_suggestions || analysis?.suggestedSFX || []
 
-  console.log('[Auto-Insert Hook] Hook render - suggestions:', sfxSuggestions?.length, 'library:', builtInLibrary?.length)
+  console.log('[Auto-Insert Hook] Hook render - suggestions:', sfxSuggestions?.length, 'library:', builtInLibrary?.length, 'existing tracks:', sfxTracks?.length)
 
   // Load built-in SFX Library on mount
   useEffect(() => {
@@ -132,6 +132,36 @@ export function useAutoInsertSFX() {
 
     console.log(`[Auto-Insert Hook] Processing ${sfxSuggestions.length} suggestions against ${builtInLibrary.length} library sounds`)
 
+    // Check if SFX have already been inserted for these suggestions
+    const hasExistingSFXForSuggestions = () => {
+      // If there are no SFX tracks, definitely not inserted yet
+      if (!sfxTracks || sfxTracks.length === 0) return false
+
+      // Check if there are SFX tracks at or near the suggestion timestamps
+      // Use a tolerance of 0.5 seconds to account for slight variations
+      const TIMESTAMP_TOLERANCE = 0.5
+
+      let matchCount = 0
+      for (const suggestion of sfxSuggestions) {
+        const hasTrackNearTimestamp = sfxTracks.some(track =>
+          Math.abs(track.start - suggestion.timestamp) < TIMESTAMP_TOLERANCE
+        )
+        if (hasTrackNearTimestamp) {
+          matchCount++
+        }
+      }
+
+      // If more than 50% of suggestions have SFX near their timestamps, assume already inserted
+      const threshold = sfxSuggestions.length * 0.5
+      return matchCount >= threshold
+    }
+
+    if (hasExistingSFXForSuggestions()) {
+      console.log('[Auto-Insert Hook] SFX already exist for these suggestions, skipping auto-insert')
+      lastProcessedAnalysisRef.current = analysisId
+      return
+    }
+
     // Process each suggestion asynchronously
     const processAutoInsert = async () => {
       console.log('[Auto-Insert Hook] processAutoInsert called')
@@ -193,6 +223,9 @@ export function useAutoInsertSFX() {
     }
 
     processAutoInsert()
+  // Note: sfxTracks not in dependency array to avoid re-running on every track change
+  // We only check it once when suggestions or library changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sfxSuggestions, builtInLibrary, addSFXTrack])
 
   // Find best matching sound from library
