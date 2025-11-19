@@ -247,8 +247,57 @@ export default function Timeline() {
     return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`
   }
 
-  // Safe duration calculation
-  const safeDuration = Math.max(1, duration || 1)
+  // Calculate timeline duration - should be the maximum of:
+  // 1. Main video duration
+  // 2. End time of the last video timeline clip
+  // 3. End time of any other content (SFX, overlays, etc.)
+  const calculateTimelineDuration = () => {
+    let maxDuration = duration || 1
+
+    // Check video timeline clips
+    videoTimelineClips.forEach(clip => {
+      const clipEnd = clip.start + clip.duration
+      maxDuration = Math.max(maxDuration, clipEnd)
+    })
+
+    // Check SFX tracks
+    sfxTracks.forEach(track => {
+      const trackEnd = track.start + track.duration
+      maxDuration = Math.max(maxDuration, trackEnd)
+    })
+
+    // Check audio tracks
+    audioTracks.forEach(track => {
+      const trackEnd = track.start + track.duration
+      maxDuration = Math.max(maxDuration, trackEnd)
+    })
+
+    // Check subtitles
+    subtitles.forEach(sub => {
+      maxDuration = Math.max(maxDuration, sub.end)
+    })
+
+    // Check text overlays
+    textOverlays.forEach(overlay => {
+      maxDuration = Math.max(maxDuration, overlay.end)
+    })
+
+    // Check media overlays
+    mediaOverlays.forEach(overlay => {
+      const overlayEnd = overlay.start + overlay.duration
+      maxDuration = Math.max(maxDuration, overlayEnd)
+    })
+
+    // Check animation tracks
+    animationTracks.forEach(track => {
+      const trackEnd = track.start + track.duration
+      maxDuration = Math.max(maxDuration, trackEnd)
+    })
+
+    return maxDuration
+  }
+
+  const safeDuration = Math.max(1, calculateTimelineDuration())
   const pixelsPerSecond = 50 * zoom
   const timelineWidth = safeDuration * pixelsPerSecond
   const playheadPosition = (currentTime / safeDuration) * timelineWidth
@@ -1262,6 +1311,7 @@ export default function Timeline() {
             {/* Video Track */}
             <div className="track video-track">
               <div className="track-content">
+                {console.log('[Timeline Render] Video track - videoPath:', !!videoPath, 'videoTimelineClips:', videoTimelineClips.length, videoTimelineClips)}
                 {/* Show main video if loaded and no timeline clips */}
                 {videoPath && videoTimelineClips.length === 0 ? (
                   <div
@@ -1283,15 +1333,18 @@ export default function Timeline() {
                   </div>
                 ) : (
                   videoTimelineClips.map(clip => {
+                    console.log('[Timeline Render] Rendering clip:', clip.id, 'videoClipId:', clip.videoClipId, 'start:', clip.start, 'duration:', clip.duration)
                     const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
                     if (!sourceClip) {
                       console.error('[Timeline Render] Could not find source clip for videoClipId:', clip.videoClipId, 'Available clips:', videoClips.map(v => v.id))
                       return null
                     }
 
+                    console.log('[Timeline Render] Found sourceClip:', sourceClip.name, 'duration:', sourceClip.duration, 'type:', typeof sourceClip.duration)
                     const startPos = clip.start * pixelsPerSecond
                     const width = clip.duration * pixelsPerSecond
                     const displayWidth = Math.max(width, 60)
+                    console.log('[Timeline Render] Calculated positions - startPos:', startPos, 'width:', width, 'displayWidth:', displayWidth, 'pixelsPerSecond:', pixelsPerSecond)
                     const isResizing = resizingItem?.id === clip.id
                     const resizingClass = isResizing ? `resizing-${resizingItem.edge}` : ''
 
