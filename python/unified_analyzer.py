@@ -474,6 +474,52 @@ def unified_analyze(video_path):
         )
         print_log(f"✓ Generated {len(result['animation_suggestions'])} animation suggestions")
 
+        # Step 8: Detect Silence Gaps (New Feature)
+        print_log("✂️  Detecting silence gaps for jump cuts...")
+        
+        def detect_silence_gaps(transcription, min_gap=0.8):
+            """Find gaps between speech segments > min_gap seconds"""
+            gaps = []
+            if not transcription:
+                return gaps
+                
+            # Sort by start time just in case
+            sorted_segments = sorted(transcription, key=lambda x: x['start'])
+            
+            # Check gap between start of video and first speech
+            if sorted_segments[0]['start'] > min_gap:
+                gaps.append({
+                    'start': 0.0,
+                    'end': sorted_segments[0]['start'],
+                    'duration': sorted_segments[0]['start']
+                })
+                
+            # Check gaps between segments
+            for i in range(len(sorted_segments) - 1):
+                current_end = sorted_segments[i]['end']
+                next_start = sorted_segments[i+1]['start']
+                gap_duration = next_start - current_end
+                
+                if gap_duration > min_gap:
+                    gaps.append({
+                        'start': current_end,
+                        'end': next_start,
+                        'duration': gap_duration
+                    })
+                    
+            return gaps
+
+        silence_gaps = detect_silence_gaps(result['transcription'])
+        result['cut_suggestions'] = [{
+            'start': gap['start'],
+            'end': gap['end'],
+            'duration': gap['duration'],
+            'type': 'silence',
+            'reason': f"Silence detected ({gap['duration']:.1f}s)"
+        } for gap in silence_gaps]
+        
+        print_log(f"✓ Found {len(result['cut_suggestions'])} silence gaps")
+
         # Store events for frontend
         result['events'] = all_events
 

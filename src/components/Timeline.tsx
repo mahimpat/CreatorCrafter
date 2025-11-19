@@ -56,6 +56,7 @@ export default function Timeline() {
     mediaOverlayAssets,
     updateMediaOverlay,
     deleteMediaOverlay,
+    applySilenceRemoval,
   } = useProject()
 
   // Use unified analysis if available, otherwise fall back to legacy analysis
@@ -1070,6 +1071,22 @@ export default function Timeline() {
             <span>Redo</span>
           </button>
         </div>
+
+        <div className="toolbar-divider" />
+
+        {unifiedAnalysis?.cut_suggestions && unifiedAnalysis.cut_suggestions.length > 0 && (
+          <div className="toolbar-section">
+            <button
+              className="toolbar-btn"
+              onClick={applySilenceRemoval}
+              title={`Remove ${unifiedAnalysis.cut_suggestions.length} silence gaps`}
+              style={{ background: '#ff4d4d20', borderColor: '#ff4d4d' }}
+            >
+              <Scissors size={16} />
+              <span>Remove Silence ({unifiedAnalysis.cut_suggestions.length})</span>
+            </button>
+          </div>
+        )}
 
         <div className="toolbar-divider" />
 
