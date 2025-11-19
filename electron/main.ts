@@ -249,11 +249,12 @@ function registerIpcHandlers() {
         } else {
           console.error('FFmpeg error output:', errorOutput)
 
-          // Check if video has no audio stream
+          // Check if video has no audio stream - this is OK, just return null
           if (errorOutput.includes('does not contain any stream') ||
               errorOutput.includes('No audio') ||
               errorOutput.includes('Output file is empty')) {
-            reject(new Error('Video has no audio track. Please use a video with audio for analysis.'))
+            console.log('Video has no audio track - continuing without audio')
+            resolve(null) // Return null instead of rejecting
           } else {
             reject(new Error(`FFmpeg exited with code ${code}: ${errorOutput.substring(0, 500)}`))
           }

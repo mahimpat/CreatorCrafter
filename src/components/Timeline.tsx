@@ -1132,7 +1132,7 @@ export default function Timeline() {
           <div className="time-display">
             <span className="current-time">{formatTime(currentTime)}</span>
             <span className="separator">/</span>
-            <span className="total-time">{formatTime(safeDuration)}</span>
+            <span className="total-time">{formatTime(contentDuration)}</span>
           </div>
 
           {/* Right side - Zoom and view controls */}

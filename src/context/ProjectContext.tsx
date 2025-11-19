@@ -1269,16 +1269,22 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       let originalAudioPath: string | null = null
       try {
         const audioPath = await window.electronAPI.extractAudio(videoPath)
-        // Copy audio to project assets/sfx folder
-        const audioRelativePath = await window.electronAPI.copyAssetToProject(
-          audioPath,
-          result.projectPath,
-          'sfx'
-        )
-        originalAudioPath = await window.electronAPI.resolveProjectPath(
-          result.projectPath,
-          audioRelativePath
-        )
+
+        // Only process audio if extraction succeeded (audioPath is not null)
+        if (audioPath) {
+          // Copy audio to project assets/sfx folder
+          const audioRelativePath = await window.electronAPI.copyAssetToProject(
+            audioPath,
+            result.projectPath,
+            'sfx'
+          )
+          originalAudioPath = await window.electronAPI.resolveProjectPath(
+            result.projectPath,
+            audioRelativePath
+          )
+        } else {
+          console.log('Video has no audio track - continuing without audio')
+        }
       } catch (error) {
         console.warn('Could not extract audio from video:', error)
         // Continue without audio - some videos may not have audio
