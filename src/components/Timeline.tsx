@@ -326,6 +326,9 @@ export default function Timeline() {
   const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!timelineRef.current || draggedItem) return
 
+    // Don't handle click if it's actually a drop event
+    if (e.defaultPrevented) return
+
     const rect = timelineRef.current.getBoundingClientRect()
     const x = e.clientX - rect.left
     const newTime = Math.max(0, Math.min(safeDuration, x / pixelsPerSecond))
@@ -456,6 +459,22 @@ export default function Timeline() {
       try {
         const videoClip = JSON.parse(videoClipData)
         console.log('[Timeline] Parsed video clip:', videoClip)
+
+        // If this is the first timeline clip being added and we have a main video,
+        // convert the main video to a timeline clip first
+        if (videoTimelineClips.length === 0 && videoPath && duration) {
+          console.log('[Timeline] Converting main video to timeline clip first')
+          // Main video always goes at the start
+          const mainVideoClip: import('../context/ProjectContext').VideoTimelineClip = {
+            id: `video-timeline-main-${Date.now()}`,
+            videoClipId: 'main-video', // Special ID for main video
+            start: 0,
+            duration: duration,
+            clipStart: 0,
+            clipEnd: duration
+          }
+          addVideoToTimeline(mainVideoClip)
+        }
 
         const rect = timelineRef.current?.getBoundingClientRect()
         if (rect) {
@@ -1334,6 +1353,36 @@ export default function Timeline() {
                 ) : (
                   videoTimelineClips.map(clip => {
                     console.log('[Timeline Render] Rendering clip:', clip.id, 'videoClipId:', clip.videoClipId, 'start:', clip.start, 'duration:', clip.duration)
+
+                    // Handle main video (special case)
+                    if (clip.videoClipId === 'main-video') {
+                      console.log('[Timeline Render] Rendering main video clip')
+                      const startPos = clip.start * pixelsPerSecond
+                      const width = clip.duration * pixelsPerSecond
+                      const displayWidth = Math.max(width, 60)
+                      const isResizing = resizingItem?.id === clip.id
+                      const resizingClass = isResizing ? `resizing-${resizingItem.edge}` : ''
+
+                      return (
+                        <div
+                          key={clip.id}
+                          className={`track-item video-clip ${draggedItem?.id === clip.id ? 'dragging' : ''} ${selectedClipIds.includes(clip.id) ? 'selected' : ''} ${resizingClass}`}
+                          style={{
+                            left: `${startPos}px`,
+                            width: `${displayWidth}px`
+                          }}
+                          onClick={handleTrackItemClick}
+                          onMouseDown={(e) => handleTrackItemMouseDown(e, clip.id, 'video', displayWidth)}
+                          title={`Main Video - ${clip.start.toFixed(2)}s`}
+                        >
+                          <div className="item-content">
+                            <span className="item-icon"><Film size={14} /></span>
+                            <span className="item-label">Main Video</span>
+                          </div>
+                        </div>
+                      )
+                    }
+
                     const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
                     if (!sourceClip) {
                       console.error('[Timeline Render] Could not find source clip for videoClipId:', clip.videoClipId, 'Available clips:', videoClips.map(v => v.id))

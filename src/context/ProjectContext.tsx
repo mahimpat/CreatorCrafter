@@ -1178,6 +1178,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }
 
   const deleteSelectedClips = () => {
+    console.trace('[DeleteSelectedClips] Called from:')
     setState(prev => {
       if (prev.selectedClipIds.length === 0) return prev
 
