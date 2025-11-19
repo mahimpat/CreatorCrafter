@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { useProject } from '../context/ProjectContext'
 import { Film, Volume2, MessageSquare, Type, Eye, Lock, Music, Undo2, Redo2, Magnet, Trash2, Hand, Image, Scissors, Sparkles } from 'lucide-react'
+import toast from 'react-hot-toast'
 import './Timeline.css'
 
 export default function Timeline() {
@@ -297,7 +298,10 @@ export default function Timeline() {
     return maxDuration
   }
 
-  const safeDuration = Math.max(1, calculateTimelineDuration())
+  // Add 30 seconds of extra space beyond content for adding more clips
+  const contentDuration = calculateTimelineDuration()
+  const EXTRA_TIMELINE_SPACE = 30 // seconds
+  const safeDuration = Math.max(1, contentDuration + EXTRA_TIMELINE_SPACE)
   const pixelsPerSecond = 50 * zoom
   const timelineWidth = safeDuration * pixelsPerSecond
   const playheadPosition = (currentTime / safeDuration) * timelineWidth
@@ -460,32 +464,35 @@ export default function Timeline() {
         const videoClip = JSON.parse(videoClipData)
         console.log('[Timeline] Parsed video clip:', videoClip)
 
-        // If this is the first timeline clip being added and we have a main video,
-        // convert the main video to a timeline clip first
-        if (videoTimelineClips.length === 0 && videoPath && duration) {
-          console.log('[Timeline] Converting main video to timeline clip first')
-          // Main video always goes at the start
-          const mainVideoClip: import('../context/ProjectContext').VideoTimelineClip = {
-            id: `video-timeline-main-${Date.now()}`,
-            videoClipId: 'main-video', // Special ID for main video
-            start: 0,
-            duration: duration,
-            clipStart: 0,
-            clipEnd: duration
-          }
-          addVideoToTimeline(mainVideoClip)
-        }
-
         const rect = timelineRef.current?.getBoundingClientRect()
         if (rect) {
+          // If this is the first timeline clip being added and we have a main video,
+          // convert the main video to a timeline clip first
+          let startTimeOffset = 0
+          if (videoTimelineClips.length === 0 && videoPath && duration) {
+            console.log('[Timeline] Converting main video to timeline clip first')
+            // Main video always goes at the start
+            const mainVideoClip: import('../context/ProjectContext').VideoTimelineClip = {
+              id: `video-timeline-main-${Date.now()}`,
+              videoClipId: 'main-video', // Special ID for main video
+              start: 0,
+              duration: duration,
+              clipStart: 0,
+              clipEnd: duration
+            }
+            addVideoToTimeline(mainVideoClip)
+            // New clip should start after main video
+            startTimeOffset = duration
+          }
+
           // Calculate the end time of the last video clip on timeline
-          let suggestedStartTime = 0
+          let suggestedStartTime = startTimeOffset
           if (videoTimelineClips.length > 0) {
             // Find the maximum end time of all existing clips
             const lastClipEnd = Math.max(
               ...videoTimelineClips.map(clip => clip.start + clip.duration)
             )
-            suggestedStartTime = lastClipEnd
+            suggestedStartTime = Math.max(lastClipEnd, startTimeOffset)
           }
 
           // Use suggested start time (end of last clip) instead of drop position
@@ -988,10 +995,11 @@ export default function Timeline() {
   // Analyze the entire timeline composition
   const handleAnalyzeTimeline = async () => {
     if (videoTimelineClips.length === 0) {
-      alert('Please add video clips to the timeline first')
+      toast.error('Please add video clips to the timeline first')
       return
     }
 
+    const loadingToast = toast.loading('Analyzing timeline composition...')
     setIsAnalyzingTimeline(true)
     setAnalysisProgress('Preparing timeline export...')
 
@@ -1063,23 +1071,23 @@ export default function Timeline() {
       // Note: SFX suggestions are stored in analysis for manual review
       // Users can click suggestions to add them to timeline
 
-      const message = addedCount > 0
-        ? `Added ${addedCount} captions from timeline!`
-        : 'Timeline analyzed - no captions found'
+      toast.dismiss(loadingToast)
 
-      setAnalysisProgress(message)
-      setTimeout(() => {
-        setAnalysisProgress('')
-        setIsAnalyzingTimeline(false)
-      }, 3000)
+      if (addedCount > 0) {
+        toast.success(`Timeline analyzed! Added ${addedCount} captions`, { duration: 5000 })
+      } else {
+        toast.success('Timeline analyzed - no captions found', { duration: 3000 })
+      }
+
+      setAnalysisProgress('')
+      setIsAnalyzingTimeline(false)
 
     } catch (error) {
       console.error('Timeline analysis error:', error)
-      setAnalysisProgress('Analysis failed')
-      setTimeout(() => {
-        setAnalysisProgress('')
-        setIsAnalyzingTimeline(false)
-      }, 3000)
+      toast.dismiss(loadingToast)
+      toast.error('Timeline analysis failed: ' + (error as Error).message, { duration: 5000 })
+      setAnalysisProgress('')
+      setIsAnalyzingTimeline(false)
     }
   }
 
@@ -1340,7 +1348,6 @@ export default function Timeline() {
             {/* Video Track */}
             <div className="track video-track">
               <div className="track-content">
-                {console.log('[Timeline Render] Video track - videoPath:', !!videoPath, 'videoTimelineClips:', videoTimelineClips.length, videoTimelineClips)}
                 {/* Show main video if loaded and no timeline clips */}
                 {videoPath && videoTimelineClips.length === 0 ? (
                   <div

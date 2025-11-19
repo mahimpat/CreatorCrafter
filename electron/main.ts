@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, protocol, shell } from 'electron'
 import { join, dirname, basename } from 'path'
 import { spawn, exec } from 'child_process'
 import * as fs from 'fs/promises'
-import { readFile } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
 import * as projectManager from './projectManager'
 import { initializeFreesoundService, getFreesoundService } from './freesoundService'
 import * as elevenlabsService from './elevenlabsService'
@@ -666,16 +666,20 @@ function registerIpcHandlers() {
         console.log('Created concat file:', concatListPath)
 
         // Step 2: Concatenate videos using FFmpeg
+        // Add silent audio if video has no audio stream
         console.log('Concatenating timeline clips...')
         const ffmpegConcat = spawn('ffmpeg', [
           '-f', 'concat',
           '-safe', '0',
           '-i', concatListPath,
+          '-f', 'lavfi',           // Add silent audio filter if needed
+          '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
           '-c:v', 'libx264',
           '-preset', 'ultrafast',  // Fast encoding for analysis
           '-crf', '28',            // Lower quality (faster encoding)
           '-c:a', 'aac',
           '-b:a', '128k',
+          '-shortest',             // End when shortest input ends
           '-y',                    // Overwrite output
           outputVideoPath
         ])

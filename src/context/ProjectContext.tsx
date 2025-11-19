@@ -236,7 +236,7 @@ export interface UnifiedAnalysisResult {
   events: EventData[]
   sfx_suggestions: SFXSuggestion[]
   music_suggestions: MusicSuggestion[]
-  animation_suggestions: AnimationSuggestion[]
+  animation_suggestions?: AnimationSuggestion[]  // Optional since it might not always be present
   cut_suggestions?: CutSuggestion[]
   error?: string
 }
@@ -323,7 +323,7 @@ interface ProjectContextType extends ProjectState {
   addSubtitle: (subtitle: Subtitle) => void
   updateSubtitle: (id: string, subtitle: Partial<Subtitle>) => void
   deleteSubtitle: (id: string) => void
-  addSFXTrack: (track: SFXTrack) => void
+  addSFXTrack: (track: SFXTrack, skipHistory?: boolean) => void
   updateSFXTrack: (id: string, track: Partial<SFXTrack>) => void
   deleteSFXTrack: (id: string) => void
   splitSFXTrack: (id: string, splitTime: number) => void

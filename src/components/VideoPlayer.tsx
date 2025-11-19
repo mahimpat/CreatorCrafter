@@ -87,6 +87,27 @@ function VideoPlayer() {
     if (!video) return
 
     const handleTimeUpdate = () => {
+      // When using timeline clips, convert video's internal time back to timeline time
+      if (videoTimelineClips.length > 0) {
+        // Find the active clip based on active video source
+        const activeClip = videoTimelineClips.find(clip => {
+          if (clip.videoClipId === 'main-video') {
+            return activeVideoSource === videoPath
+          } else {
+            const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
+            return sourceClip && activeVideoSource === sourceClip.path
+          }
+        })
+
+        if (activeClip) {
+          // Convert video's internal time to timeline time
+          const timelineTime = activeClip.start + (video.currentTime - activeClip.clipStart)
+          setCurrentTime(timelineTime)
+          return
+        }
+      }
+
+      // No timeline clips, use video time directly
       setCurrentTime(video.currentTime)
     }
 
@@ -95,6 +116,26 @@ function VideoPlayer() {
     }
 
     const handleEnded = () => {
+      // When a clip ends, move to next clip if available
+      if (videoTimelineClips.length > 0) {
+        const activeClip = videoTimelineClips.find(clip => {
+          if (clip.videoClipId === 'main-video') {
+            return activeVideoSource === videoPath
+          } else {
+            const sourceClip = videoClips.find(v => v.id === clip.videoClipId)
+            return sourceClip && activeVideoSource === sourceClip.path
+          }
+        })
+
+        if (activeClip) {
+          const clipEnd = activeClip.start + activeClip.duration
+          // Move playhead to start of next clip
+          setCurrentTime(clipEnd)
+          // Don't pause, let it continue to next clip
+          return
+        }
+      }
+
       setIsPlaying(false)
     }
 
@@ -107,7 +148,7 @@ function VideoPlayer() {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('ended', handleEnded)
     }
-  }, [setCurrentTime, setDuration, setIsPlaying])
+  }, [setCurrentTime, setDuration, setIsPlaying, videoTimelineClips, activeVideoSource, videoPath, videoClips])
 
   useEffect(() => {
     const video = videoRef.current
