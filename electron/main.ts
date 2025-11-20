@@ -675,6 +675,7 @@ function registerIpcHandlers() {
           '-i', concatListPath,
           '-f', 'lavfi',           // Add silent audio filter if needed
           '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+          '-vf', 'scale=-2:720',   // Downscale to 720p for faster analysis
           '-c:v', 'libx264',
           '-preset', 'ultrafast',  // Fast encoding for analysis
           '-crf', '28',            // Lower quality (faster encoding)
