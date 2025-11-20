@@ -36,16 +36,22 @@ class EventDetector:
     def __init__(
         self,
         base_motion_threshold: float = 0.15,
-        scene_boundary_buffer: float = 0.5
+        scene_boundary_buffer: float = 0.5,
+        frame_skip: int = 1,
+        enable_transition_detection: bool = True
     ):
         """
         Args:
             base_motion_threshold: Base threshold for detecting significant motion
             scene_boundary_buffer: Time (seconds) to ignore near scene boundaries
+            frame_skip: Skip every N frames (1 = analyze all frames)
+            enable_transition_detection: Enable transition filtering (slower but more accurate)
         """
         self.base_motion_threshold = base_motion_threshold
         self.scene_boundary_buffer = scene_boundary_buffer
-        self.transition_detector = TransitionDetector()
+        self.frame_skip = frame_skip
+        self.enable_transition_detection = enable_transition_detection
+        self.transition_detector = TransitionDetector() if enable_transition_detection else None
 
     def get_adaptive_threshold(self, scene: Dict) -> float:
         """
@@ -136,20 +142,23 @@ class EventDetector:
                 if not ret:
                     break
 
-                curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
-                curr_gray = cv2.GaussianBlur(curr_gray, (5, 5), 0)
+                # Convert to grayscale (keep unblurred for transition detection)
+                curr_gray_raw = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
+                curr_gray = cv2.GaussianBlur(curr_gray_raw, (5, 5), 0)
 
                 if prev_frame is not None and prev_gray is not None:
-                    # Check for transitions FIRST before analyzing motion
-                    # Get next frame for better transition detection
-                    ret_next, next_frame = cap.read()
-                    if ret_next:
-                        # Reset position back to current frame
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    # Check for transitions FIRST before analyzing motion (if enabled)
+                    transition_type = None
+                    if self.enable_transition_detection:
+                        # Pass unblurred grayscale frames to avoid redundant conversions
+                        # Use the raw grayscale (before blur) for transition detection
+                        prev_gray_raw = getattr(self, '_prev_gray_raw', None)
+                        transition_type = self.transition_detector.detect_transition_type(
+                            prev_frame, curr_frame, None, prev_gray_raw, curr_gray_raw
+                        )
 
-                    transition_type = self.transition_detector.detect_transition_type(
-                        prev_frame, curr_frame, next_frame if ret_next else None
-                    )
+                    # Store raw grayscale for next iteration
+                    self._prev_gray_raw = curr_gray_raw
 
                     if transition_type:
                         # Skip this frame - it's a transition, not real motion

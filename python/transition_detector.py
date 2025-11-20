@@ -36,7 +36,9 @@ class TransitionDetector:
         self,
         prev_frame: np.ndarray,
         curr_frame: np.ndarray,
-        next_frame: Optional[np.ndarray] = None
+        next_frame: Optional[np.ndarray] = None,
+        prev_gray: Optional[np.ndarray] = None,
+        curr_gray: Optional[np.ndarray] = None
     ) -> Optional[str]:
         """
         Detect if a transition is occurring and classify its type.
@@ -45,23 +47,156 @@ class TransitionDetector:
             prev_frame: Previous frame (BGR)
             curr_frame: Current frame (BGR)
             next_frame: Next frame (BGR), optional but helps with accuracy
+            prev_gray: Pre-computed grayscale of prev_frame (optional, for performance)
+            curr_gray: Pre-computed grayscale of curr_frame (optional, for performance)
 
         Returns:
             Transition type: 'cut', 'fade', 'dissolve', or None if no transition
         """
+        # Convert to grayscale if not provided
+        if prev_gray is None:
+            prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+        if curr_gray is None:
+            curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
+
         # Check for hard cut first (most common)
-        if self._is_cut(prev_frame, curr_frame):
+        if self._is_cut_optimized(prev_gray, curr_gray):
             return 'cut'
 
         # Check for fade to/from black or white
-        if self._is_fade(prev_frame, curr_frame, next_frame):
+        if self._is_fade_optimized(prev_gray, curr_gray, next_frame):
             return 'fade'
 
         # Check for dissolve/cross-fade
-        if self._is_dissolve(prev_frame, curr_frame):
+        if self._is_dissolve_optimized(prev_gray, curr_gray):
             return 'dissolve'
 
         return None
+
+    def _is_cut_optimized(self, prev_gray: np.ndarray, curr_gray: np.ndarray) -> bool:
+        """
+        Optimized cut detection using pre-computed grayscale frames.
+
+        Args:
+            prev_gray: Previous frame (grayscale)
+            curr_gray: Current frame (grayscale)
+
+        Returns:
+            True if hard cut detected
+        """
+        # Calculate histograms
+        prev_hist = cv2.calcHist([prev_gray], [0], None, [256], [0, 256])
+        curr_hist = cv2.calcHist([curr_gray], [0], None, [256], [0, 256])
+
+        # Normalize histograms
+        prev_hist = cv2.normalize(prev_hist, prev_hist).flatten()
+        curr_hist = cv2.normalize(curr_hist, curr_hist).flatten()
+
+        # Compare histograms using correlation
+        correlation = cv2.compareHist(
+            prev_hist.reshape(-1, 1),
+            curr_hist.reshape(-1, 1),
+            cv2.HISTCMP_CORREL
+        )
+
+        # Low correlation = hard cut
+        pixel_diff = np.mean(np.abs(prev_gray.astype(float) - curr_gray.astype(float))) / 255.0
+        is_cut = (correlation < (1.0 - self.cut_threshold)) and (pixel_diff > 0.3)
+
+        return is_cut
+
+    def _is_fade_optimized(
+        self,
+        prev_gray: np.ndarray,
+        curr_gray: np.ndarray,
+        next_frame: Optional[np.ndarray] = None
+    ) -> bool:
+        """
+        Optimized fade detection using pre-computed grayscale frames.
+
+        Args:
+            prev_gray: Previous frame (grayscale)
+            curr_gray: Current frame (grayscale)
+            next_frame: Next frame (BGR), optional
+
+        Returns:
+            True if fade detected
+        """
+        # Calculate average brightness
+        prev_brightness = np.mean(prev_gray) / 255.0
+        curr_brightness = np.mean(curr_gray) / 255.0
+
+        # Check for fade to black
+        fade_to_black = (prev_brightness > 0.3 and
+                        curr_brightness < 0.15 and
+                        prev_brightness - curr_brightness > 0.2)
+
+        # Check for fade from black
+        fade_from_black = (prev_brightness < 0.15 and
+                          curr_brightness > 0.3 and
+                          curr_brightness - prev_brightness > 0.2)
+
+        # Check for fade to white
+        fade_to_white = (prev_brightness < 0.7 and
+                        curr_brightness > 0.85 and
+                        curr_brightness - prev_brightness > 0.2)
+
+        # Check for fade from white
+        fade_from_white = (prev_brightness > 0.85 and
+                          curr_brightness < 0.7 and
+                          prev_brightness - curr_brightness > 0.2)
+
+        # Check if brightness change is uniform across the frame
+        if fade_to_black or fade_from_black or fade_to_white or fade_from_white:
+            pixel_diff = prev_gray.astype(float) - curr_gray.astype(float)
+            uniformity = 1.0 - (np.std(pixel_diff) / 255.0)
+
+            if uniformity > 0.7:
+                return True
+
+        return False
+
+    def _is_dissolve_optimized(self, prev_gray: np.ndarray, curr_gray: np.ndarray) -> bool:
+        """
+        Optimized dissolve detection using pre-computed grayscale frames.
+
+        Args:
+            prev_gray: Previous frame (grayscale)
+            curr_gray: Current frame (grayscale)
+
+        Returns:
+            True if dissolve detected
+        """
+        # Calculate histogram of current frame
+        curr_hist = cv2.calcHist([curr_gray], [0], None, [256], [0, 256])
+        curr_hist = curr_hist.flatten()
+
+        # Smooth histogram to reduce noise
+        from scipy.ndimage import gaussian_filter1d
+        smoothed_hist = gaussian_filter1d(curr_hist, sigma=5)
+
+        # Find peaks in histogram
+        peaks = self._find_histogram_peaks(smoothed_hist)
+
+        # If 2+ distinct peaks with significant gap, likely dissolve
+        if len(peaks) >= 2:
+            peak_separation = abs(peaks[0] - peaks[1])
+            if peak_separation > 50:
+                peak_balance = min(smoothed_hist[peaks[0]], smoothed_hist[peaks[1]]) / \
+                              max(smoothed_hist[peaks[0]], smoothed_hist[peaks[1]])
+
+                if peak_balance > 0.3:
+                    return True
+
+        # Alternative check: High pixel-level differences but similar overall structure
+        pixel_diff = np.mean(np.abs(prev_gray.astype(float) - curr_gray.astype(float))) / 255.0
+        structure_similarity = self._calculate_structure_similarity(prev_gray, curr_gray)
+
+        # Dissolve: moderate pixel difference but preserved structure
+        if 0.15 < pixel_diff < 0.5 and structure_similarity > 0.5:
+            return True
+
+        return False
 
     def _is_cut(self, prev_frame: np.ndarray, curr_frame: np.ndarray) -> bool:
         """

@@ -1167,6 +1167,7 @@ def main():
     parser = argparse.ArgumentParser(description='Analyze video content')
     parser.add_argument('--video', required=True, help='Path to video file')
     parser.add_argument('--audio', required=True, help='Path to extracted audio file')
+    parser.add_argument('--timeline', action='store_true', help='Timeline analysis mode (faster, skips transition detection)')
 
     args = parser.parse_args()
 

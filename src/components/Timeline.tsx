@@ -253,7 +253,7 @@ export default function Timeline() {
   // 2. End time of the last video timeline clip
   // 3. End time of any other content (SFX, overlays, etc.)
   const calculateTimelineDuration = () => {
-    let maxDuration = duration || 1
+    let maxDuration = 0
 
     // Check video timeline clips
     videoTimelineClips.forEach(clip => {
@@ -294,6 +294,11 @@ export default function Timeline() {
       const trackEnd = track.start + track.duration
       maxDuration = Math.max(maxDuration, trackEnd)
     })
+
+    // If no content at all, use main video duration or 1 second minimum
+    if (maxDuration === 0) {
+      maxDuration = duration || 1
+    }
 
     return maxDuration
   }
@@ -1370,7 +1375,7 @@ export default function Timeline() {
                     className="track-item video-clip main-video"
                     style={{
                       left: '0px',
-                      width: `${safeDuration * pixelsPerSecond}px`
+                      width: `${(duration || 0) * pixelsPerSecond}px`
                     }}
                     title="Main Video"
                   >
