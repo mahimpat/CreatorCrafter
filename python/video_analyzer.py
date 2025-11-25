@@ -12,6 +12,11 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+# CRITICAL FIX: Add script directory to Python path for local imports
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
 # Import smart scene analyzer, event detector, and music generator
 from smart_scene_analyzer import SmartSceneAnalyzer
 from event_detector import EventDetector, EventClassifier

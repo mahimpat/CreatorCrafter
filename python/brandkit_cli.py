@@ -6,6 +6,13 @@ Brand Kit CLI - Command-line interface for brand kit management
 import sys
 import json
 import argparse
+import os
+
+# CRITICAL FIX: Add script directory to Python path for local imports
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
 from brandkit_manager import BrandKitManager
 
 

@@ -85,6 +85,42 @@
       {
         "from": "requirements.txt",
         "to": "requirements.txt"
+      },
+      {
+        "from": "build/squirrel-setup.ps1",
+        "to": "squirrel-setup.ps1"
+      },
+      {
+        "from": "build/setup-dependencies.bat",
+        "to": "setup-dependencies.bat"
+      },
+      {
+        "from": "resources/ffmpeg",
+        "to": "ffmpeg",
+        "filter": [
+          "*.exe"
+        ]
+      },
+      {
+        "from": "build/SETUP_README.txt",
+        "to": "SETUP_README.txt"
+      },
+      {
+        "from": "resources/python-portable",
+        "to": "python-portable"
+      },
+      {
+        "from": "get-pip.py",
+        "to": "get-pip.py"
+      },
+      {
+        "from": "sfx_library",
+        "to": "sfx_library",
+        "filter": [
+          "**/*.wav",
+          "**/*.json",
+          "!**/*.sh"
+        ]
       }
     ],
     "mac": {
@@ -113,26 +149,15 @@
     "win": {
       "target": [
         {
-          "target": "nsis",
+          "target": "portable",
           "arch": [
             "x64"
           ]
         }
       ]
     },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "CreatorCrafter",
-      "runAfterFinish": true,
-      "displayLanguageSelector": false,
-      "installerSidebar": null,
-      "uninstallerSidebar": null,
-      "deleteAppDataOnUninstall": true,
-      "include": "build/installer.nsh",
-      "warningsAsErrors": false
+    "portable": {
+      "artifactName": "CreatorCrafter-${version}-portable.exe"
     },
     "linux": {
       "target": [

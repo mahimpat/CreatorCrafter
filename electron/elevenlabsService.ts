@@ -12,6 +12,33 @@ import { writeFile, readFile } from 'fs/promises'
 import { join } from 'path'
 import { app } from 'electron'
 
+// Helper function to get Python executable path
+// Reads from .env file (set by setup-manager) or falls back to venv
+const getPythonPath = () => {
+  const appRoot = app.isPackaged
+    ? process.resourcesPath
+    : join(__dirname, '..')
+
+  const installDir = app.isPackaged
+    ? join(process.resourcesPath, '..')
+    : join(__dirname, '..')
+
+  // Check if .env specifies portable Python marker
+  if (process.env.PYTHON_PATH === 'PORTABLE_PYTHON') {
+    // Resolve portable Python path at runtime
+    return join(appRoot, 'python-portable', 'python.exe')
+  } else if (process.env.PYTHON_PATH) {
+    // Use custom path from .env
+    return process.env.PYTHON_PATH
+  }
+
+  // Fallback to venv for backward compatibility (development)
+  const isWindows = process.platform === 'win32'
+  return isWindows
+    ? join(installDir, 'venv', 'python.exe')
+    : join(installDir, 'venv', 'bin', 'python')
+}
+
 export interface ElevenLabsConfig {
   apiKey: string
   defaultDuration?: number // seconds, max 30
@@ -180,13 +207,7 @@ if __name__ == "__main__":
           ? process.resourcesPath
           : join(__dirname, '..')
 
-        const installDir = app.isPackaged
-          ? join(process.resourcesPath, '..')
-          : join(__dirname, '..')
-
-        const pythonPath = process.platform === 'win32'
-          ? join(installDir, 'venv', 'python.exe')
-          : join(installDir, 'venv', 'bin', 'python')
+        const pythonPath = getPythonPath()
 
         // Build arguments
         const args = [
@@ -318,13 +339,7 @@ if __name__ == "__main__":
 
     writeFile(tempScriptPath, pythonScript)
       .then(() => {
-        const installDir = app.isPackaged
-          ? join(process.resourcesPath, '..')
-          : join(__dirname, '..')
-
-        const pythonPath = process.platform === 'win32'
-          ? join(installDir, 'venv', 'python.exe')
-          : join(installDir, 'venv', 'bin', 'python')
+        const pythonPath = getPythonPath()
 
         const python = spawn(pythonPath, [tempScriptPath, apiKey])
 
@@ -402,13 +417,7 @@ if __name__ == "__main__":
 
     writeFile(tempScriptPath, pythonScript)
       .then(() => {
-        const installDir = app.isPackaged
-          ? join(process.resourcesPath, '..')
-          : join(__dirname, '..')
-
-        const pythonPath = process.platform === 'win32'
-          ? join(installDir, 'venv', 'python.exe')
-          : join(installDir, 'venv', 'bin', 'python')
+        const pythonPath = getPythonPath()
 
         const python = spawn(pythonPath, [tempScriptPath, apiKey])
 

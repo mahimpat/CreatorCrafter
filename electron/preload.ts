@@ -129,7 +129,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadAnimationLibrary: () =>
     ipcRenderer.invoke('animationLibrary:load'),
   getAnimationFromLibrary: (category: string, filename: string) =>
-    ipcRenderer.invoke('animationLibrary:getAnimation', category, filename)
+    ipcRenderer.invoke('animationLibrary:getAnimation', category, filename),
+
+  // Setup handlers
+  startSetup: () =>
+    ipcRenderer.invoke('setup:start'),
+  setupComplete: () =>
+    ipcRenderer.invoke('setup:complete'),
+  checkPackages: () =>
+    ipcRenderer.invoke('setup:checkPackages'),
+  onSetupProgress: (callback: (progress: any) => void) => {
+    const listener = (_event: any, progress: any) => callback(progress)
+    ipcRenderer.on('setup:progress', listener)
+    return () => ipcRenderer.removeListener('setup:progress', listener)
+  },
+  openExternal: (url: string) =>
+    ipcRenderer.invoke('shell:openExternal', url)
 })
 
 // Expose electron object for IPC event listeners (needed for progress tracking)

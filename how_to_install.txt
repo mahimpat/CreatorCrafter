@@ -1,0 +1,21 @@
+  Step 1: Run Installer (30 seconds)
+  User downloads: CreatorCrafter Setup 1.0.0.exe (247MB)
+  Double-clicks to install
+  → Installs to: %LOCALAPPDATA%\CreatorCrafter\
+  → Creates Start Menu shortcut
+
+  Step 2: Run Setup Script (10-15 minutes)
+  User navigates to installation folder
+  Double-clicks: setup-dependencies.bat
+  → Checks for Python 3.11+
+  → Downloads/installs Python if missing (~30MB)
+  → Creates virtual environment
+  → Installs PyTorch, Whisper, AudioCraft, etc. (~1.5GB)
+  → Configures environment
+
+  Step 3: Launch App
+  User clicks Start Menu → CreatorCrafter
+  → First video analysis: ~5 min (Whisper model downloads)
+  → First SFX generation: ~10 min (AudioCraft model downloads)
+  → All subsequent uses: Instant!
+

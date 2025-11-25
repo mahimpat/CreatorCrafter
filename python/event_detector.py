@@ -19,6 +19,12 @@ import sys
 import os
 from typing import List, Dict, Tuple
 from scipy.signal import find_peaks
+
+# CRITICAL FIX: Add script directory to Python path for local imports
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
 from transition_detector import TransitionDetector
 
 # Suppress FFmpeg/OpenCV H.264 decoder warnings

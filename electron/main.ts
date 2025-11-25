@@ -3,12 +3,15 @@ import { join, dirname, basename } from 'path'
 import { spawn, exec } from 'child_process'
 import * as fs from 'fs/promises'
 import { readFile, writeFile } from 'fs/promises'
+import { existsSync } from 'fs'
 import * as projectManager from './projectManager'
 import { initializeFreesoundService, getFreesoundService } from './freesoundService'
 import * as elevenlabsService from './elevenlabsService'
 import * as dotenv from 'dotenv'
+import { SetupManager } from './setup-manager'
 
-// Load environment variables
+// Load environment variables from default location (for development)
+// In production, we'll reload from the correct path after app.whenReady()
 dotenv.config()
 
 // Handle running as root (WSL/Linux) - MUST be before any app initialization
@@ -39,8 +42,44 @@ app.on('remote-get-current-web-contents', (event) => {
 })
 
 let mainWindow: BrowserWindow | null = null
+let setupWindow: BrowserWindow | null = null
+let setupManager: SetupManager | null = null
 let hasUnsavedChanges = false
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+
+function createSetupWindow() {
+  setupWindow = new BrowserWindow({
+    width: 700,
+    height: 600,
+    resizable: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: join(__dirname, 'preload.js')
+    },
+    backgroundColor: '#667eea',
+    titleBarStyle: 'hidden',
+    frame: false,
+    show: false
+  })
+
+  // Graceful show
+  setupWindow.once('ready-to-show', () => {
+    setupWindow?.show()
+  })
+
+  // Load the setup page
+  if (isDev) {
+    setupWindow.loadURL('http://localhost:5173/#/setup')
+  } else {
+    setupWindow.loadFile(join(__dirname, '../dist/index.html'), { hash: 'setup' })
+  }
+
+  setupWindow.on('closed', () => {
+    setupWindow = null
+  })
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -141,18 +180,46 @@ app.whenReady().then(() => {
 })
 
 // App lifecycle
-app.whenReady().then(() => {
-  createWindow()
+app.whenReady().then(async () => {
+  // Load .env from userData directory (where setup-manager creates it)
+  const appDataPath = app.getPath('userData')
+  const envPath = join(appDataPath, '.env')
+
+  if (existsSync(envPath)) {
+    console.log('[App] Loading .env from:', envPath)
+    dotenv.config({ path: envPath, override: true })
+    console.log('[App] PYTHON_PATH loaded:', process.env.PYTHON_PATH || 'not set')
+  } else {
+    console.log('[App] No .env file found at:', envPath)
+    console.log('[App] This is normal on first run before setup')
+  }
+
+  // Initialize setup manager
+  setupManager = new SetupManager()
+
+  // Check if first run
+  const isFirstRun = await setupManager.isFirstRun()
+
+  if (isFirstRun) {
+    console.log('[App] First run detected - showing setup wizard')
+    createSetupWindow()
+  } else {
+    console.log('[App] Environment ready - launching main app')
+    createWindow()
+  }
+
   registerIpcHandlers()
 
-  // Initialize FreeSound service with API key only
-  const apiKey = process.env.FREESOUND_CLIENT_ID || ''
+  // Initialize FreeSound service with API key only (skip on first run)
+  if (!isFirstRun) {
+    const apiKey = process.env.FREESOUND_CLIENT_ID || ''
 
-  if (apiKey) {
-    initializeFreesoundService(apiKey)
-    console.log('FreeSound service initialized with API key')
-  } else {
-    console.warn('FREESOUND_CLIENT_ID not found in .env file')
+    if (apiKey) {
+      initializeFreesoundService(apiKey)
+      console.log('FreeSound service initialized with API key')
+    } else {
+      console.warn('FREESOUND_CLIENT_ID not found in .env file')
+    }
   }
 
   app.on('activate', () => {
@@ -170,6 +237,134 @@ app.on('window-all-closed', () => {
 
 // IPC Handlers
 function registerIpcHandlers() {
+  // Setup handlers
+  ipcMain.handle('setup:start', async () => {
+    if (!setupManager) {
+      throw new Error('Setup manager not initialized')
+    }
+
+    // Set up progress callback
+    setupManager.onProgress((progress) => {
+      if (setupWindow) {
+        setupWindow.webContents.send('setup:progress', progress)
+      }
+    })
+
+    // Run setup
+    try {
+      await setupManager.runSetup()
+      console.log('[App] Setup completed successfully')
+    } catch (error: any) {
+      console.error('[App] Setup failed:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('setup:complete', async () => {
+    console.log('[App] Setup complete - closing setup window and launching main app')
+
+    // Reload .env file to get PYTHON_PATH set by setup
+    const appDataPath = app.getPath('userData')
+    const envPath = join(appDataPath, '.env')
+    console.log('[App] Reloading .env from:', envPath)
+    dotenv.config({ path: envPath, override: true })
+    console.log('[App] PYTHON_PATH:', process.env.PYTHON_PATH)
+
+    // Close setup window
+    if (setupWindow) {
+      setupWindow.close()
+      setupWindow = null
+    }
+
+    // Create main window
+    createWindow()
+
+    // Initialize services
+    const apiKey = process.env.FREESOUND_CLIENT_ID || ''
+    if (apiKey) {
+      initializeFreesoundService(apiKey)
+    }
+  })
+
+  // Diagnostic handler to check Python package installation
+  ipcMain.handle('setup:checkPackages', async () => {
+    return new Promise((resolve) => {
+      try {
+        const pythonPath = getPythonPath()
+
+        // Test importing critical packages
+        const packages = [
+          'numpy',
+          'cv2',
+          'whisper',
+          'transformers',
+          'spacy',
+          'librosa',
+          'soundfile',
+          'PIL',
+          'scipy',
+          'scenedetect'
+        ]
+
+        const results: { [key: string]: boolean } = {}
+        let testsCompleted = 0
+
+        packages.forEach((pkg) => {
+          const python = spawn(pythonPath, ['-c', `import ${pkg}; print('OK')`], {
+            cwd: join(appRoot, 'python')
+          })
+
+          let output = ''
+          let errorOutput = ''
+
+          python.stdout.on('data', (data) => {
+            output += data.toString()
+          })
+
+          python.stderr.on('data', (data) => {
+            errorOutput += data.toString()
+          })
+
+          python.on('close', (code) => {
+            results[pkg] = code === 0 && output.includes('OK')
+            testsCompleted++
+
+            if (testsCompleted === packages.length) {
+              console.log('[Diagnostics] Package check results:', results)
+              resolve({ success: true, packages: results })
+            }
+          })
+
+          python.on('error', () => {
+            results[pkg] = false
+            testsCompleted++
+
+            if (testsCompleted === packages.length) {
+              console.log('[Diagnostics] Package check results:', results)
+              resolve({ success: true, packages: results })
+            }
+          })
+        })
+
+        // Timeout after 30 seconds
+        setTimeout(() => {
+          if (testsCompleted < packages.length) {
+            console.error('[Diagnostics] Package check timed out')
+            resolve({ success: false, error: 'Timeout checking packages', packages: results })
+          }
+        }, 30000)
+
+      } catch (error: any) {
+        console.error('[Diagnostics] Error checking packages:', error)
+        resolve({ success: false, error: error.message })
+      }
+    })
+  })
+
+  ipcMain.handle('shell:openExternal', async (_, url: string) => {
+    await shell.openExternal(url)
+  })
+
   // File dialog handlers
   ipcMain.handle('dialog:openFile', async () => {
     const result = await dialog.showOpenDialog({
@@ -217,6 +412,69 @@ function registerIpcHandlers() {
     ? join(process.resourcesPath, '..')
     : join(__dirname, '..')
 
+  // Python scripts directory - used as cwd for Python processes
+  const pythonDir = join(appRoot, 'python')
+
+  // Helper functions to get FFmpeg binary paths
+  const getFFmpegPath = () => {
+    const ffmpegDir = join(appRoot, 'ffmpeg')
+    const isWindows = process.platform === 'win32'
+    const ffmpegPath = join(ffmpegDir, isWindows ? 'ffmpeg.exe' : 'ffmpeg')
+
+    if (!existsSync(ffmpegPath)) {
+      console.error('[FFmpeg] Binary not found at:', ffmpegPath)
+      throw new Error(`FFmpeg binary not found at ${ffmpegPath}. Please reinstall the application.`)
+    }
+
+    return ffmpegPath
+  }
+
+  const getFFprobePath = () => {
+    const ffmpegDir = join(appRoot, 'ffmpeg')
+    const isWindows = process.platform === 'win32'
+    const ffprobePath = join(ffmpegDir, isWindows ? 'ffprobe.exe' : 'ffprobe')
+
+    if (!existsSync(ffprobePath)) {
+      console.error('[FFprobe] Binary not found at:', ffprobePath)
+      throw new Error(`FFprobe binary not found at ${ffprobePath}. Please reinstall the application.`)
+    }
+
+    return ffprobePath
+  }
+
+  // Helper function to get Python executable path
+  // Reads from .env file (set by setup-manager) or falls back to venv
+  const getPythonPath = () => {
+    let pythonPath: string
+
+    // Check if .env specifies portable Python marker
+    if (process.env.PYTHON_PATH === 'PORTABLE_PYTHON') {
+      // Resolve portable Python path at runtime (works even if temp folder changes)
+      pythonPath = join(appRoot, 'python-portable', 'python.exe')
+      console.log('[Python] Using portable Python (runtime resolved):', pythonPath)
+    } else if (process.env.PYTHON_PATH) {
+      // Use custom path from .env
+      pythonPath = process.env.PYTHON_PATH
+      console.log('[Python] Using custom Python from .env:', pythonPath)
+    } else {
+      // Fallback to venv for backward compatibility (development)
+      const isWindows = process.platform === 'win32'
+      pythonPath = isWindows
+        ? join(installDir, 'venv', 'python.exe')
+        : join(installDir, 'venv', 'bin', 'python')
+      console.log('[Python] Using venv Python (development fallback):', pythonPath)
+    }
+
+    if (!existsSync(pythonPath)) {
+      console.error('[Python] Executable not found at:', pythonPath)
+      console.error('[Python] appRoot:', appRoot)
+      console.error('[Python] process.env.PYTHON_PATH:', process.env.PYTHON_PATH)
+      throw new Error(`Python executable not found at ${pythonPath}. Please run the setup wizard again.`)
+    }
+
+    return pythonPath
+  }
+
   // Video processing handlers
   ipcMain.handle('video:extractAudio', async (_, videoPath: string) => {
     return new Promise((resolve, reject) => {
@@ -226,7 +484,7 @@ function registerIpcHandlers() {
       console.log('Output path:', outputPath)
 
       // FFmpeg command to extract audio
-      const ffmpeg = spawn('ffmpeg', [
+      const ffmpeg = spawn(getFFmpegPath(), [
         '-i', videoPath,
         '-vn',
         '-acodec', 'pcm_s16le',
@@ -267,7 +525,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('video:getMetadata', async (_, videoPath: string) => {
     return new Promise((resolve, reject) => {
-      const ffprobe = spawn('ffprobe', [
+      const ffprobe = spawn(getFFprobePath(), [
         '-v', 'quiet',
         '-print_format', 'json',
         '-show_format',
@@ -305,11 +563,8 @@ function registerIpcHandlers() {
       const scriptName = 'audiocraft_generator.py'
       const pythonScript = join(appRoot, 'python', scriptName)
       const outputPath = join(app.getPath('temp'), `sfx-${Date.now()}.wav`)
-      // Use venv python (platform-specific paths)
-      // Windows: Embeddable Python has python.exe in root, not Scripts/
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      // Get Python executable path from .env or venv
+      const pythonPath = getPythonPath()
 
       const modelName = modelType === 'musicgen' ? 'MusicGen' : 'AudioGen'
       console.log(`Starting ${modelName} generation:`, { prompt, duration, outputPath, modelType })
@@ -320,7 +575,9 @@ function registerIpcHandlers() {
         '--duration', duration.toString(),
         '--output', outputPath,
         '--model', modelType
-      ])
+      ], {
+        cwd: pythonDir
+      })
 
       let errorOutput = ''
       let isResolved = false
@@ -456,9 +713,7 @@ function registerIpcHandlers() {
       try {
         const scriptName = 'caption_styler.py'
         const pythonScript = join(appRoot, 'python', scriptName)
-        const pythonPath = process.platform === 'win32'
-          ? join(installDir, 'venv', 'python.exe')
-          : join(installDir, 'venv', 'bin', 'python')
+        const pythonPath = getPythonPath()
 
         const timestamp = Date.now()
         const inputPath = join(app.getPath('temp'), `captions-input-${timestamp}.json`)
@@ -473,7 +728,9 @@ function registerIpcHandlers() {
           pythonScript,
           '--input', inputPath,
           '--output', outputPath
-        ])
+        ], {
+          cwd: pythonDir
+        })
 
         let errorOutput = ''
 
@@ -526,11 +783,8 @@ function registerIpcHandlers() {
       // Always use .py files (cross-version compatible)
       const scriptName = 'video_analyzer.py'
       const pythonScript = join(appRoot, 'python', scriptName)
-      // Use venv python (platform-specific paths)
-      // Windows: Embeddable Python has python.exe in root, not Scripts/
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      // Get Python executable path from .env or venv
+      const pythonPath = getPythonPath()
 
       console.log('Analyzing video with:', { pythonPath, pythonScript, videoPath, audioPath })
 
@@ -538,7 +792,9 @@ function registerIpcHandlers() {
         pythonScript,
         '--video', videoPath,
         '--audio', audioPath
-      ])
+      ], {
+        cwd: pythonDir
+      })
 
       let output = ''
       let errorOutput = ''
@@ -579,9 +835,7 @@ function registerIpcHandlers() {
     return new Promise((resolve, reject) => {
       const scriptName = 'unified_analyzer.py'
       const pythonScript = join(appRoot, 'python', scriptName)
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
 
       const outputPath = join(app.getPath('temp'), `unified-analysis-${Date.now()}.json`)
 
@@ -591,7 +845,9 @@ function registerIpcHandlers() {
         pythonScript,
         '--video', videoPath,
         '--output', outputPath
-      ])
+      ], {
+        cwd: join(appRoot, 'python')  // Set working directory to python folder for imports
+      })
 
       let output = ''
       let errorOutput = ''
@@ -669,7 +925,7 @@ function registerIpcHandlers() {
         // Step 2: Concatenate videos using FFmpeg
         // Add silent audio if video has no audio stream
         console.log('Concatenating timeline clips...')
-        const ffmpegConcat = spawn('ffmpeg', [
+        const ffmpegConcat = spawn(getFFmpegPath(), [
           '-f', 'concat',
           '-safe', '0',
           '-i', concatListPath,
@@ -708,9 +964,7 @@ function registerIpcHandlers() {
         console.log('Analyzing concatenated timeline...')
         const scriptName = 'unified_analyzer.py'
         const pythonScript = join(appRoot, 'python', scriptName)
-        const pythonPath = process.platform === 'win32'
-          ? join(installDir, 'venv', 'python.exe')
-          : join(installDir, 'venv', 'bin', 'python')
+        const pythonPath = getPythonPath()
 
         const analysisOutputPath = join(tempDir, `timeline-analysis-${timestamp}.json`)
 
@@ -718,7 +972,9 @@ function registerIpcHandlers() {
           pythonScript,
           '--video', outputVideoPath,
           '--output', analysisOutputPath
-        ])
+        ], {
+          cwd: pythonDir
+        })
 
         let pythonOutput = ''
         let pythonError = ''
@@ -786,9 +1042,7 @@ function registerIpcHandlers() {
   ipcMain.handle('thumbnail:analyze', async (_, videoPath: string) => {
     return new Promise((resolve, reject) => {
       const pythonScript = join(appRoot, 'python', 'thumbnail_generator.py')
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
 
       const outputPath = join(app.getPath('temp'), `thumbnail-analysis-${Date.now()}.json`)
 
@@ -801,7 +1055,9 @@ function registerIpcHandlers() {
         '--output', outputPath,
         '--interval', '2',
         '--max-frames', '15'
-      ])
+      ], {
+        cwd: pythonDir
+      })
 
       let output = ''
       let errorOutput = ''
@@ -840,9 +1096,7 @@ function registerIpcHandlers() {
   ipcMain.handle('thumbnail:extract', async (_, videoPath: string, timestamp: number) => {
     return new Promise((resolve, reject) => {
       const pythonScript = join(appRoot, 'python', 'thumbnail_generator.py')
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
 
       const outputPath = join(app.getPath('temp'), `thumbnail-frame-${Date.now()}.png`)
 
@@ -854,7 +1108,9 @@ function registerIpcHandlers() {
         '--video', videoPath,
         '--timestamp', timestamp.toString(),
         '--output', outputPath
-      ])
+      ], {
+        cwd: pythonDir
+      })
 
       let output = ''
       let errorOutput = ''
@@ -899,9 +1155,7 @@ function registerIpcHandlers() {
   }) => {
     return new Promise((resolve, reject) => {
       const pythonScript = join(appRoot, 'python', 'thumbnail_generator.py')
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
 
       const outputPath = join(app.getPath('temp'), `thumbnail-${Date.now()}.png`)
 
@@ -922,7 +1176,9 @@ function registerIpcHandlers() {
         args.push('--background', options.background)
       }
 
-      const python = spawn(pythonPath, args)
+      const python = spawn(pythonPath, args, {
+        cwd: pythonDir
+      })
 
       let output = ''
       let errorOutput = ''
@@ -962,9 +1218,7 @@ function registerIpcHandlers() {
   ipcMain.handle('thumbnail:generateCaptions', async (_, videoPath: string, timestamp: number) => {
     return new Promise((resolve, reject) => {
       const pythonScript = join(appRoot, 'python', 'caption_generator.py')
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
 
       const outputPath = join(app.getPath('temp'), `captions-${Date.now()}.json`)
 
@@ -975,7 +1229,9 @@ function registerIpcHandlers() {
         '--video', videoPath,
         '--timestamp', timestamp.toString(),
         '--output', outputPath
-      ])
+      ], {
+        cwd: pythonDir
+      })
 
       let output = ''
       let errorOutput = ''
@@ -1059,7 +1315,9 @@ function registerIpcHandlers() {
         args.push('--preserve-aspect', options.preserveAspect.toString())
       }
 
-      const python = spawn(pythonPath, args)
+      const python = spawn(pythonPath, args, {
+        cwd: pythonDir
+      })
 
       let stdoutData = ''
       let stderrData = ''
@@ -1096,9 +1354,7 @@ function registerIpcHandlers() {
   ipcMain.handle('brandkit:list', async () => {
     try {
       const pythonScript = join(appRoot, 'python', 'brandkit_cli.py')
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
       const result = await new Promise((resolve, reject) => {
         exec(`"${pythonPath}" "${pythonScript}" list`, (error, stdout, stderr) => {
           if (error) {
@@ -1124,9 +1380,7 @@ function registerIpcHandlers() {
   ipcMain.handle('brandkit:load', async (_, brandKitId: string) => {
     try {
       const pythonScript = join(appRoot, 'python', 'brandkit_cli.py')
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
       const result = await new Promise((resolve, reject) => {
         exec(`"${pythonPath}" "${pythonScript}" load "${brandKitId}"`, (error, stdout, stderr) => {
           if (error) {
@@ -1152,9 +1406,7 @@ function registerIpcHandlers() {
   ipcMain.handle('brandkit:save', async (_, brandKit: any) => {
     try {
       const pythonScript = join(appRoot, 'python', 'brandkit_cli.py')
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
       const brandKitJson = JSON.stringify(brandKit)
       const result = await new Promise((resolve, reject) => {
         exec(`"${pythonPath}" "${pythonScript}" save '${brandKitJson}'`, (error, stdout, stderr) => {
@@ -1176,9 +1428,7 @@ function registerIpcHandlers() {
   ipcMain.handle('brandkit:delete', async (_, brandKitId: string) => {
     try {
       const pythonScript = join(appRoot, 'python', 'brandkit_cli.py')
-      const pythonPath = process.platform === 'win32'
-        ? join(installDir, 'venv', 'python.exe')
-        : join(installDir, 'venv', 'bin', 'python')
+      const pythonPath = getPythonPath()
       await new Promise((resolve, reject) => {
         exec(`"${pythonPath}" "${pythonScript}" delete "${brandKitId}"`, (error, stdout, stderr) => {
           if (error) {
@@ -1240,7 +1490,7 @@ function registerIpcHandlers() {
 
       console.log('FFmpeg command:', 'ffmpeg', ffmpegArgs.join(' '))
 
-      const ffmpeg = spawn('ffmpeg', ffmpegArgs)
+      const ffmpeg = spawn(getFFmpegPath(), ffmpegArgs)
 
       let ffmpegOutput = ''
 
@@ -1298,7 +1548,7 @@ function registerIpcHandlers() {
   // Helper function to get video metadata
   async function getVideoMetadata(videoPath: string): Promise<any> {
     return new Promise((resolve, reject) => {
-      const ffprobe = spawn('ffprobe', [
+      const ffprobe = spawn(getFFprobePath(), [
         '-v', 'quiet',
         '-print_format', 'json',
         '-show_format',
@@ -1534,7 +1784,7 @@ function registerIpcHandlers() {
   // SFX Library handlers
   ipcMain.handle('sfxLibrary:load', async () => {
     try {
-      const libraryPath = join(__dirname, '..', 'sfx_library', 'library_metadata.json')
+      const libraryPath = join(appRoot, 'sfx_library', 'library_metadata.json')
 
       // Import synchronous fs functions
       const fsSync = require('fs')
@@ -1563,7 +1813,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('sfxLibrary:getPath', async (_, relativePath: string) => {
     try {
-      const absolutePath = join(__dirname, '..', relativePath)
+      const absolutePath = join(appRoot, relativePath)
 
       // Import synchronous fs functions
       const fsSync = require('fs')

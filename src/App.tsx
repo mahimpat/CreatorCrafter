@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import VideoEditor from './components/VideoEditor'
 import WelcomeScreen from './components/WelcomeScreen'
+import SetupWizard from './components/SetupWizard'
 import ToastProvider from './components/ToastProvider'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ProjectProvider } from './context/ProjectContext'
@@ -28,7 +29,26 @@ function AppContent({ hasProject, onProjectCreated }: { hasProject: boolean; onP
 
 function App() {
   const [hasProject, setHasProject] = useState(false)
+  const [isSetupMode, setIsSetupMode] = useState(false)
 
+  useEffect(() => {
+    // Check if we're in setup mode (first run)
+    const hash = window.location.hash
+    if (hash === '#setup') {
+      setIsSetupMode(true)
+    }
+  }, [])
+
+  // If in setup mode, show setup wizard
+  if (isSetupMode) {
+    return (
+      <ErrorBoundary>
+        <SetupWizard />
+      </ErrorBoundary>
+    )
+  }
+
+  // Normal app flow
   return (
     <ErrorBoundary>
       <ProjectProvider>

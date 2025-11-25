@@ -24,7 +24,14 @@
       "Bash(python:*)",
       "Bash(pkill:*)",
       "Bash(xargs:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(wget:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx electron-builder --dir)",
+      "Bash(npx electron-builder:*)",
+      "Bash(/home/mahim/CreatorCrafter/resources/python-env/python.exe:*)",
+      "Bash(source:*)",
+      "Bash(pip download:*)"
     ],
     "deny": [],
     "ask": []

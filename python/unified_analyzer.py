@@ -13,6 +13,12 @@ import os
 import numpy as np
 from pathlib import Path
 
+# CRITICAL FIX: Add script directory to Python path for local imports
+# This ensures video_analyzer and other local modules can be imported
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
 # Import the existing working video analyzer functions
 # This way we use the EXACT SAME algorithm that was working before
 from video_analyzer import (

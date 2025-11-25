@@ -18,6 +18,7 @@ spacy>=3.7.0
 # Utilities
 Pillow>=10.0.0
 scipy>=1.11.0  # For enhanced peak detection in event_detector
+requests>=2.31.0  # For ElevenLabs API integration
 
 # REMOVED FOR THIS RELEASE (saves ~4GB disk space and installation time):
 # - torch, torchaudio, audiocraft (using ElevenLabs API instead)
