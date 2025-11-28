@@ -1,0 +1,208 @@
+.tour-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 3000;
+    pointer-events: none;
+    /* Let clicks pass through to mask/tooltip */
+}
+
+.tour-mask {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: auto;
+    /* Catch clicks on the overlay */
+}
+
+.tour-highlight-border {
+    animation: pulseBorder 2s infinite;
+}
+
+.tour-tooltip {
+    position: absolute;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    width: 320px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+    animation: floatIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 3001;
+}
+
+/* Arrows */
+.tour-tooltip::before {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background-color: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    border-left: 1px solid var(--border-color);
+    transform: rotate(45deg);
+}
+
+.tour-tooltip-top {
+    margin-top: -10px;
+}
+
+.tour-tooltip-top::before {
+    bottom: -7px;
+    left: 50%;
+    margin-left: -6px;
+    transform: rotate(225deg);
+}
+
+.tour-tooltip-bottom {
+    margin-top: 10px;
+}
+
+.tour-tooltip-bottom::before {
+    top: -7px;
+    left: 50%;
+    margin-left: -6px;
+    transform: rotate(45deg);
+}
+
+.tour-tooltip-left {
+    margin-left: -10px;
+}
+
+.tour-tooltip-left::before {
+    top: 50%;
+    right: -7px;
+    margin-top: -6px;
+    transform: rotate(135deg);
+}
+
+.tour-tooltip-right {
+    margin-left: 10px;
+}
+
+.tour-tooltip-right::before {
+    top: 50%;
+    left: -7px;
+    margin-top: -6px;
+    transform: rotate(-45deg);
+}
+
+.tour-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.tour-close:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.tour-content h3 {
+    margin: 0 0 8px 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.tour-content p {
+    margin: 0 0 20px 0;
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.tour-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tour-progress {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.tour-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.tour-btn-primary,
+.tour-btn-secondary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tour-btn-primary {
+    background-color: var(--accent-color);
+    color: white;
+    border: none;
+}
+
+.tour-btn-primary:hover {
+    background-color: var(--accent-hover);
+}
+
+.tour-btn-secondary {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.tour-btn-secondary:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.tour-btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@keyframes pulseBorder {
+    0% {
+        stroke-opacity: 0.5;
+        stroke-width: 2;
+    }
+
+    50% {
+        stroke-opacity: 1;
+        stroke-width: 3;
+    }
+
+    100% {
+        stroke-opacity: 0.5;
+        stroke-width: 2;
+    }
+}
+
+@keyframes floatIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

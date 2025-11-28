@@ -44,6 +44,13 @@ declare global {
           from_mood?: string
           to_mood?: string
         }>
+        highlights: Array<{
+          start: number
+          end: number
+          score: number
+          reason: string
+          type: string
+        }>
         sfx_suggestions: Array<{
           timestamp: number
           prompt: string
@@ -91,6 +98,11 @@ declare global {
       showInFolder: (filePath: string) => Promise<boolean>
       isValidProject: (projectPath: string) => Promise<boolean>
 
+      // Replicate AI
+      replicateGenerateVideo: (prompt: string, apiKey: string, model?: string, duration?: number) => Promise<{ success: boolean; prediction?: any; error?: string }>
+      replicateCheckStatus: (predictionId: string, apiKey: string) => Promise<{ success: boolean; prediction?: any; error?: string }>
+      replicateDownloadVideo: (url: string, fileName: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
+
       // FreeSound APIs
       freesoundSearch: (params: any) => Promise<{ success: boolean; results?: any; error?: string }>
       freesoundGetSound: (soundId: number) => Promise<{ success: boolean; sound?: any; error?: string }>
@@ -102,16 +114,18 @@ declare global {
       elevenlabsGetCredits: (apiKey: string) => Promise<{ credits: number | null }>
 
       // Thumbnail generation APIs
-      thumbnailAnalyze: (videoPath: string) => Promise<{ success: boolean; candidates?: Array<{
-        timestamp: number
-        frame_number: number
-        score: number
-        has_faces: boolean
-        face_count: number
-        sharpness: number
-        contrast: number
-        vibrancy: number
-      }>; error?: string }>
+      thumbnailAnalyze: (videoPath: string) => Promise<{
+        success: boolean; candidates?: Array<{
+          timestamp: number
+          frame_number: number
+          score: number
+          has_faces: boolean
+          face_count: number
+          sharpness: number
+          contrast: number
+          vibrancy: number
+        }>; error?: string
+      }>
       thumbnailExtract: (videoPath: string, timestamp: number) => Promise<{ success: boolean; frame_path?: string; timestamp?: number; error?: string }>
       thumbnailGenerate: (options: { videoPath: string; timestamp: number; text: string; template: string; background?: string; brandKitId?: string }) => Promise<{ success: boolean; thumbnail_path?: string; error?: string }>
       thumbnailGenerateVariations: (options: { videoPath: string; timestamp: number; text: string; numVariations: number; brandKitId?: string }) => Promise<{ success: boolean; variations?: any[]; error?: string }>
@@ -212,8 +226,19 @@ declare global {
         path?: string
         error?: string
       }>
+
+      // Setup Wizard API
+      startSetup: () => Promise<void>
+      onSetupProgress: (callback: (progress: { stage: string; progress: number; message: string; error?: string }) => void) => () => void
+      setupComplete: () => Promise<void>
+      openExternal: (url: string) => Promise<void>
+
+      // Settings API
+      getSetting: (key: string) => Promise<any>
+      getAllSettings: () => Promise<any>
+      setSetting: (key: string, value: any) => Promise<boolean>
     }
   }
 }
 
-export {}
+export { }

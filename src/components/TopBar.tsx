@@ -1,15 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { Search, Save, Upload } from 'lucide-react'
+import { Search, Save, Upload, Settings, HelpCircle, Keyboard, Map } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getUserFriendlyError } from '../utils/errorMessages'
+import SettingsDialog from './SettingsDialog'
 import './TopBar.css'
 
 interface TopBarProps {
   onExport?: () => void
+  onThumbnail?: () => void
+  onShowShortcuts?: () => void
+  onStartTour?: () => void
 }
 
-export default function TopBar({ onExport }: TopBarProps) {
+export default function TopBar({ onExport, onThumbnail, onShowShortcuts, onStartTour }: TopBarProps) {
   const {
     videoPath,
     setIsAnalyzing,
@@ -30,24 +34,30 @@ export default function TopBar({ onExport }: TopBarProps) {
   } = useProject()
 
   const [showFileMenu, setShowFileMenu] = useState(false)
+  const [showHelpMenu, setShowHelpMenu] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const fileMenuRef = useRef<HTMLDivElement>(null)
+  const helpMenuRef = useRef<HTMLDivElement>(null)
 
-  // Close file menu when clicking outside
+  // Close menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (fileMenuRef.current && !fileMenuRef.current.contains(event.target as Node)) {
         setShowFileMenu(false)
       }
+      if (helpMenuRef.current && !helpMenuRef.current.contains(event.target as Node)) {
+        setShowHelpMenu(false)
+      }
     }
 
-    if (showFileMenu) {
+    if (showFileMenu || showHelpMenu) {
       document.addEventListener('mousedown', handleClickOutside)
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [showFileMenu])
+  }, [showFileMenu, showHelpMenu])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -199,8 +209,8 @@ export default function TopBar({ onExport }: TopBarProps) {
     return `${hours.toString().padStart(2, '0')}:${minutes
       .toString()
       .padStart(2, '0')}:${secs.toString().padStart(2, '0')},${ms
-      .toString()
-      .padStart(3, '0')}`
+        .toString()
+        .padStart(3, '0')}`
   }
 
   const formatLastSaved = () => {
@@ -250,6 +260,17 @@ export default function TopBar({ onExport }: TopBarProps) {
               >
                 <span>Save As...</span>
                 <span className="shortcut">Ctrl+Shift+S</span>
+              </button>
+              <div className="menu-divider" />
+              <button
+                className="menu-item"
+                onClick={() => {
+                  onThumbnail?.()
+                  setShowFileMenu(false)
+                }}
+                disabled={!videoPath}
+              >
+                <span>Create Thumbnail</span>
               </button>
               <div className="menu-divider" />
               <button
@@ -307,7 +328,56 @@ export default function TopBar({ onExport }: TopBarProps) {
           <Upload size={16} />
           <span>Export Video</span>
         </button>
+
+        <div className="help-menu-container" ref={helpMenuRef}>
+          <button
+            className="btn-icon"
+            onClick={() => setShowHelpMenu(!showHelpMenu)}
+            title="Help"
+          >
+            <HelpCircle size={20} />
+          </button>
+
+          {showHelpMenu && (
+            <div className="file-menu-dropdown help-dropdown">
+              <button
+                className="menu-item"
+                onClick={() => {
+                  onShowShortcuts?.()
+                  setShowHelpMenu(false)
+                }}
+              >
+                <Keyboard size={14} />
+                <span>Keyboard Shortcuts</span>
+                <span className="shortcut">?</span>
+              </button>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  onStartTour?.()
+                  setShowHelpMenu(false)
+                }}
+              >
+                <Map size={14} />
+                <span>Start Tour</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        <button
+          className="btn-icon"
+          onClick={() => setShowSettings(true)}
+          title="Settings"
+        >
+          <Settings size={20} />
+        </button>
       </div>
+
+      <SettingsDialog
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
   )
 }

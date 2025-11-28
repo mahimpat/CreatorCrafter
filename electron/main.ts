@@ -2,13 +2,14 @@ import { app, BrowserWindow, ipcMain, dialog, protocol, shell } from 'electron'
 import { join, dirname, basename } from 'path'
 import { spawn, exec } from 'child_process'
 import * as fs from 'fs/promises'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, writeFile, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import * as projectManager from './projectManager'
 import { initializeFreesoundService, getFreesoundService } from './freesoundService'
 import * as elevenlabsService from './elevenlabsService'
 import * as dotenv from 'dotenv'
 import { SetupManager } from './setup-manager'
+import axios from 'axios'
 
 // Load environment variables from default location (for development)
 // In production, we'll reload from the correct path after app.whenReady()
@@ -254,7 +255,7 @@ function registerIpcHandlers() {
     try {
       await setupManager.runSetup()
       console.log('[App] Setup completed successfully')
-    } catch (error: any) {
+    } catch (error) {
       console.error('[App] Setup failed:', error)
       throw error
     }
@@ -354,7 +355,7 @@ function registerIpcHandlers() {
           }
         }, 30000)
 
-      } catch (error: any) {
+      } catch (error) {
         console.error('[Diagnostics] Error checking packages:', error)
         resolve({ success: false, error: error.message })
       }
@@ -414,6 +415,9 @@ function registerIpcHandlers() {
 
   // Python scripts directory - used as cwd for Python processes
   const pythonDir = join(appRoot, 'python')
+
+  // Cache directory for AI models
+  const cacheDir = join(appRoot, 'cache')
 
   // Helper functions to get FFmpeg binary paths
   const getFFmpegPath = () => {
@@ -509,8 +513,8 @@ function registerIpcHandlers() {
 
           // Check if video has no audio stream - this is OK, just return null
           if (errorOutput.includes('does not contain any stream') ||
-              errorOutput.includes('No audio') ||
-              errorOutput.includes('Output file is empty')) {
+            errorOutput.includes('No audio') ||
+            errorOutput.includes('Output file is empty')) {
             console.log('Video has no audio track - continuing without audio')
             resolve(null) // Return null instead of rejecting
           } else {
@@ -576,7 +580,8 @@ function registerIpcHandlers() {
         '--output', outputPath,
         '--model', modelType
       ], {
-        cwd: pythonDir
+        cwd: pythonDir,
+        env: { ...process.env, XDG_CACHE_HOME: cacheDir }
       })
 
       let errorOutput = ''
@@ -676,7 +681,7 @@ function registerIpcHandlers() {
       }
 
       throw new Error(result.error || 'Unknown error')
-    } catch (error: any) {
+    } catch (error) {
       console.error('ElevenLabs generation error:', error)
       return {
         success: false,
@@ -729,7 +734,8 @@ function registerIpcHandlers() {
           '--input', inputPath,
           '--output', outputPath
         ], {
-          cwd: pythonDir
+          cwd: pythonDir,
+          env: { ...process.env, XDG_CACHE_HOME: cacheDir }
         })
 
         let errorOutput = ''
@@ -793,7 +799,8 @@ function registerIpcHandlers() {
         '--video', videoPath,
         '--audio', audioPath
       ], {
-        cwd: pythonDir
+        cwd: pythonDir,
+        env: { ...process.env, XDG_CACHE_HOME: cacheDir }
       })
 
       let output = ''
@@ -838,13 +845,15 @@ function registerIpcHandlers() {
       const pythonPath = getPythonPath()
 
       const outputPath = join(app.getPath('temp'), `unified-analysis-${Date.now()}.json`)
+      const assetsDir = join(app.getPath('temp'), 'thumbnails')
 
-      console.log('Running unified analysis:', { pythonPath, pythonScript, videoPath })
+      console.log('Running unified analysis:', { pythonPath, pythonScript, videoPath, assetsDir })
 
       const python = spawn(pythonPath, [
         pythonScript,
         '--video', videoPath,
-        '--output', outputPath
+        '--output', outputPath,
+        '--assets-dir', assetsDir
       ], {
         cwd: join(appRoot, 'python')  // Set working directory to python folder for imports
       })
@@ -1152,12 +1161,13 @@ function registerIpcHandlers() {
     text: string
     template: string
     background?: string
+    outputPath?: string
   }) => {
     return new Promise((resolve, reject) => {
       const pythonScript = join(appRoot, 'python', 'thumbnail_generator.py')
       const pythonPath = getPythonPath()
 
-      const outputPath = join(app.getPath('temp'), `thumbnail-${Date.now()}.png`)
+      const outputPath = options.outputPath || join(app.getPath('temp'), `thumbnail-${Date.now()}.png`)
 
       console.log('Generating thumbnail:', { options, outputPath })
 
@@ -1371,7 +1381,7 @@ function registerIpcHandlers() {
         })
       })
       return { success: true, brandKits: result }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Brand kit list error:', error)
       return { success: false, error: error.message, brandKits: [] }
     }
@@ -1397,7 +1407,7 @@ function registerIpcHandlers() {
         })
       })
       return { success: true, brandKit: result }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Brand kit load error:', error)
       return { success: false, error: error.message }
     }
@@ -1419,7 +1429,7 @@ function registerIpcHandlers() {
         })
       })
       return { success: true }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Brand kit save error:', error)
       return { success: false, error: error.message }
     }
@@ -1440,7 +1450,7 @@ function registerIpcHandlers() {
         })
       })
       return { success: true }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Brand kit delete error:', error)
       return { success: false, error: error.message }
     }
@@ -1465,12 +1475,87 @@ function registerIpcHandlers() {
     }
   })
 
+  // Replicate API Handlers
+  ipcMain.handle('replicate:generateVideo', async (event, { prompt, apiKey, model, duration }) => {
+    try {
+      console.log('Generating video with Replicate:', { prompt, model, duration })
+
+      // Default to Minimax if no model specified (High quality, fast)
+      const modelVersion = model || "minimax/video-01"
+
+      let endpoint = 'https://api.replicate.com/v1/predictions'
+      let body: any = { input: { prompt, prompt_optimizer: true } }
+      
+      // Add duration if specified (some models support it)
+      if (duration && duration > 0) {
+        body.input.duration = duration
+      }
+
+      if (model && model.includes('/')) {
+        // It's a model identifier like "minimax/video-01"
+        const [owner, name] = model.split('/')
+        endpoint = `https://api.replicate.com/v1/models/${owner}/${name}/predictions`
+      } else {
+        // Fallback or specific version hash
+        body.version = model
+      }
+
+      const response = await axios.post(endpoint, body, {
+        headers: {
+          'Authorization': `Token ${apiKey}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      return { success: true, prediction: response.data }
+    } catch (error: any) {
+      console.error('Replicate generation failed:', error.response?.data || error.message)
+      return { success: false, error: error.response?.data?.detail || error.message }
+    }
+  })
+
+  ipcMain.handle('replicate:checkStatus', async (event, { predictionId, apiKey }) => {
+    try {
+      const response = await axios.get(
+        `https://api.replicate.com/v1/predictions/${predictionId}`,
+        {
+          headers: {
+            'Authorization': `Token ${apiKey}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      return { success: true, prediction: response.data }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  ipcMain.handle('replicate:downloadVideo', async (event, { url, fileName }) => {
+    try {
+      const response = await axios.get(url, { responseType: 'arraybuffer' })
+      const userDataPath = app.getPath('userData')
+      const assetsDir = join(userDataPath, 'assets', 'generated_video')
+
+      if (!existsSync(assetsDir)) {
+        await fs.mkdir(assetsDir, { recursive: true })
+      }
+
+      const filePath = join(assetsDir, fileName)
+      await fs.writeFile(filePath, Buffer.from(response.data))
+
+      return { success: true, filePath }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // Render final video
   ipcMain.handle('video:render', async (event, options: RenderOptions) => {
     return new Promise(async (resolve, reject) => {
-      const { videoPath, outputPath, subtitles, sfxTracks, overlays } = options
+      const { videoPath, outputPath, subtitles, sfxTracks, overlays, composition } = options
 
-      console.log('Starting video render:', { videoPath, outputPath })
+      console.log('Starting video render:', { videoPath, outputPath, compositionLength: composition?.length })
 
       // Get video duration for progress calculation
       let videoDuration = 0
@@ -1482,7 +1567,74 @@ function registerIpcHandlers() {
       }
 
       // Build complex FFmpeg command with filters
-      const ffmpegArgs = buildRenderCommand(videoPath, outputPath, {
+      // Build complex FFmpeg command with filters
+      let inputPath = videoPath
+
+      // If we have a composition (trimmed clips), we need to concatenate them first
+      if (composition && composition.length > 0) {
+        try {
+          console.log('Processing timeline composition...')
+          const tempDir = app.getPath('temp')
+          const timestamp = Date.now()
+          const concatListPath = join(tempDir, `render-concat-${timestamp}.txt`)
+          const intermediatePath = join(tempDir, `render-intermediate-${timestamp}.mp4`)
+
+          // Create FFmpeg concat file
+          const concatContent = composition.map(clip => {
+            // Escape single quotes in path for FFmpeg
+            const escapedPath = clip.videoPath.replace(/'/g, "'\\''")
+            const lines = [`file '${escapedPath}'`]
+
+            // Add trim points if specified
+            if (clip.clipStart > 0) {
+              lines.push(`inpoint ${clip.clipStart}`)
+            }
+            if (clip.clipEnd > clip.clipStart) {
+              lines.push(`outpoint ${clip.clipEnd}`)
+            }
+
+            return lines.join('\n')
+          }).join('\n')
+
+          await fs.writeFile(concatListPath, concatContent, 'utf-8')
+          console.log('Created concat file:', concatListPath)
+
+          // Concatenate videos
+          await new Promise((resolveConcat, rejectConcat) => {
+            const ffmpegConcat = spawn(getFFmpegPath(), [
+              '-f', 'concat',
+              '-safe', '0',
+              '-i', concatListPath,
+              '-c', 'copy',  // Stream copy for speed if formats match
+              '-y',
+              intermediatePath
+            ])
+
+            ffmpegConcat.on('close', (code) => {
+              if (code === 0) {
+                console.log('Concatenation complete:', intermediatePath)
+                resolveConcat(true)
+              } else {
+                rejectConcat(new Error(`Concatenation failed with code ${code}`))
+              }
+            })
+            ffmpegConcat.on('error', rejectConcat)
+          })
+
+          // Use the concatenated video as input for the rest of the pipeline
+          inputPath = intermediatePath
+
+          // Update video duration based on composition
+          videoDuration = composition.reduce((acc, clip) => acc + (clip.clipEnd - clip.clipStart), 0)
+
+        } catch (err) {
+          console.error('Composition processing failed:', err)
+          reject(err)
+          return
+        }
+      }
+
+      const ffmpegArgs = buildRenderCommand(inputPath, outputPath, {
         subtitles,
         sfxTracks,
         overlays
@@ -1743,7 +1895,7 @@ function registerIpcHandlers() {
       const service = getFreesoundService()
       const results = await service.search(params)
       return { success: true, results }
-    } catch (error: any) {
+    } catch (error) {
       console.error('FreeSound search error:', error)
       return { success: false, error: error.message }
     }
@@ -1754,7 +1906,7 @@ function registerIpcHandlers() {
       const service = getFreesoundService()
       const sound = await service.getSound(soundId)
       return { success: true, sound }
-    } catch (error: any) {
+    } catch (error) {
       console.error('FreeSound getSound error:', error)
       return { success: false, error: error.message }
     }
@@ -1765,26 +1917,18 @@ function registerIpcHandlers() {
       const service = getFreesoundService()
       const filePath = await service.downloadPreview(previewUrl, outputPath)
       return { success: true, filePath }
-    } catch (error: any) {
+    } catch (error) {
       console.error('FreeSound preview download error:', error)
       return { success: false, error: error.message }
     }
   })
 
-  // Unsaved changes tracking
-  ipcMain.handle('app:setUnsavedChanges', async (_, hasChanges: boolean) => {
-    hasUnsavedChanges = hasChanges
-    return true
-  })
 
-  ipcMain.handle('app:getUnsavedChanges', async () => {
-    return hasUnsavedChanges
-  })
 
-  // SFX Library handlers
   ipcMain.handle('sfxLibrary:load', async () => {
     try {
-      const libraryPath = join(appRoot, 'sfx_library', 'library_metadata.json')
+      const appRoot = isDev ? join(__dirname, '..') : process.resourcesPath
+      const libraryPath = join(appRoot, 'sfx_library/library_metadata.json')
 
       // Import synchronous fs functions
       const fsSync = require('fs')
@@ -1802,17 +1946,18 @@ function registerIpcHandlers() {
         success: true,
         metadata
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error loading SFX library:', error)
       return {
         success: false,
-        error: error.message
+        error: (error as Error).message
       }
     }
   })
 
   ipcMain.handle('sfxLibrary:getPath', async (_, relativePath: string) => {
     try {
+      const appRoot = isDev ? join(__dirname, '..') : process.resourcesPath
       const absolutePath = join(appRoot, relativePath)
 
       // Import synchronous fs functions
@@ -1829,11 +1974,11 @@ function registerIpcHandlers() {
         success: true,
         path: absolutePath
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error getting SFX path:', error)
       return {
         success: false,
-        error: error.message
+        error: (error as Error).message
       }
     }
   })
@@ -1841,12 +1986,14 @@ function registerIpcHandlers() {
   ipcMain.handle('sfxLibrary:copyToProject', async (_, libraryPath: string, projectPath: string) => {
     try {
       // Get source path from library
-      const sourcePath = join(__dirname, '..', libraryPath)
+      // Use appRoot to correctly locate resources in both dev and packaged modes
+      const sourcePath = join(appRoot, libraryPath)
 
       // Import synchronous fs functions
       const fsSync = require('fs')
 
       if (!fsSync.existsSync(sourcePath)) {
+        console.error('[SFX Library] Source file not found:', sourcePath)
         return {
           success: false,
           error: 'Source sound file not found'
@@ -1874,7 +2021,7 @@ function registerIpcHandlers() {
         success: true,
         projectPath: outputPath
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error copying SFX to project:', error)
       return {
         success: false,
@@ -1904,11 +2051,11 @@ function registerIpcHandlers() {
         success: true,
         metadata
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error loading animation library:', error)
       return {
         success: false,
-        error: error.message
+        error: (error as Error).message
       }
     }
   })
@@ -1934,257 +2081,264 @@ function registerIpcHandlers() {
         data: animationData,
         path: animationPath
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error loading animation:', error)
       return {
         success: false,
-        error: error.message
+        error: (error as Error).message
       }
     }
   })
-}
 
-interface RenderOptions {
-  videoPath: string
-  outputPath: string
-  subtitles?: Array<{ text: string; start: number; end: number }>
-  sfxTracks?: Array<{ path: string; start: number }>
-  overlays?: Array<{ text: string; start: number; end: number; style: any }>
-}
+  interface RenderOptions {
+    videoPath: string
+    outputPath: string
+    subtitles?: Array<{ text: string; start: number; end: number }>
+    sfxTracks?: Array<{ path: string; start: number }>
+    overlays?: Array<{ text?: string; mediaPath?: string; start: number; end: number; style: any }>
+    composition?: Array<{
+      videoPath: string
+      start: number
+      duration: number
+      clipStart: number
+      clipEnd: number
+    }>
+  }
 
-function buildRenderCommand(
-  videoPath: string,
-  outputPath: string,
-  options: Omit<RenderOptions, 'videoPath' | 'outputPath'>
-): string[] {
-  const args = ['-i', videoPath]
-  let inputIndex = 1
+  function buildRenderCommand(
+    videoPath: string,
+    outputPath: string,
+    options: Omit<RenderOptions, 'videoPath' | 'outputPath'>
+  ): string[] {
+    const args = ['-i', videoPath]
+    let inputIndex = 1
 
-  // Add SFX tracks as additional inputs
-  const sfxInputs: Array<{ index: number; start: number; path: string }> = []
-  options.sfxTracks?.forEach(sfx => {
-    args.push('-i', sfx.path)
-    sfxInputs.push({ index: inputIndex, start: sfx.start, path: sfx.path })
-    inputIndex++
-  })
-
-  // Add media overlay inputs (images/videos)
-  const overlayInputs: Array<{ index: number; overlay: any }> = []
-  options.overlays?.forEach(overlay => {
-    if (overlay.mediaPath) {
-      args.push('-i', overlay.mediaPath)
-      overlayInputs.push({ index: inputIndex, overlay })
+    // Add SFX tracks as additional inputs
+    const sfxInputs: Array<{ index: number; start: number; path: string }> = []
+    options.sfxTracks?.forEach(sfx => {
+      args.push('-i', sfx.path)
+      sfxInputs.push({ index: inputIndex, start: sfx.start, path: sfx.path })
       inputIndex++
-    }
-  })
-
-  // Build filter complex for video, subtitles, overlays, and audio mixing
-  const filters: string[] = []
-  let videoLabel = '[0:v]'
-
-  // 1. Burn subtitles into video
-  if (options.subtitles && options.subtitles.length > 0) {
-    const subtitleFilter = buildSubtitleFilter(options.subtitles)
-    filters.push(`${videoLabel}${subtitleFilter}[v_sub]`)
-    videoLabel = '[v_sub]'
-  }
-
-  // 2. Apply media overlays (images/videos with transforms)
-  if (overlayInputs.length > 0) {
-    overlayInputs.forEach((input, idx) => {
-      const overlay = input.overlay
-      const overlayFilter = buildOverlayFilter(input.index, overlay)
-      const outputLabel = idx === overlayInputs.length - 1 ? '[vout]' : `[v_overlay_${idx}]`
-      filters.push(`${videoLabel}[${input.index}:v]${overlayFilter}${outputLabel}`)
-      videoLabel = outputLabel
     })
-  } else {
-    // No overlays, just pass through the video stream
-    if (videoLabel !== '[0:v]') {
-      filters.push(`${videoLabel}null[vout]`)
-    } else {
-      videoLabel = '[vout]'
-      filters.push(`[0:v]null[vout]`)
+
+    // Add media overlay inputs (images/videos)
+    const overlayInputs: Array<{ index: number; overlay: any }> = []
+    options.overlays?.forEach(overlay => {
+      if (overlay.mediaPath) {
+        args.push('-i', overlay.mediaPath)
+        overlayInputs.push({ index: inputIndex, overlay })
+        inputIndex++
+      }
+    })
+
+    // Build filter complex for video, subtitles, overlays, and audio mixing
+    const filters: string[] = []
+    let videoLabel = '[0:v]'
+
+    // 1. Burn subtitles into video
+    if (options.subtitles && options.subtitles.length > 0) {
+      const subtitleFilter = buildSubtitleFilter(options.subtitles)
+      filters.push(`${videoLabel}${subtitleFilter}[v_sub]`)
+      videoLabel = '[v_sub]'
     }
-  }
 
-  // 3. Mix audio tracks (original + SFX with timing)
-  if (sfxInputs.length > 0) {
-    const audioFilter = buildAudioMixFilter(sfxInputs)
-    filters.push(`${audioFilter}[aout]`)
-  } else {
-    // No SFX, just pass through original audio
-    filters.push('[0:a]anull[aout]')
-  }
-
-  // Apply all filters
-  if (filters.length > 0) {
-    args.push('-filter_complex', filters.join(';'))
-    args.push('-map', '[vout]')
-    args.push('-map', '[aout]')
-  } else {
-    // No filters, just copy streams
-    args.push('-map', '0:v')
-    args.push('-map', '0:a')
-  }
-
-  // Output encoding settings
-  args.push(
-    '-c:v', 'libx264',      // H.264 video codec
-    '-preset', 'medium',     // Encoding speed/quality balance
-    '-crf', '23',            // Quality (lower = better, 18-28 range)
-    '-c:a', 'aac',           // AAC audio codec
-    '-b:a', '192k',          // Audio bitrate
-    '-movflags', '+faststart', // Enable streaming
-    '-y',                    // Overwrite output file
-    outputPath
-  )
-
-  return args
-}
-
-// Build subtitle filter (burn subtitles into video)
-function buildSubtitleFilter(subtitles: Array<{ text: string; start: number; end: number; style?: any; words?: any[]; emphasisColor?: string; animation?: any }>): string {
-  // Escape text for FFmpeg drawtext filter
-  const escapeText = (text: string): string => {
-    return text
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/:/g, '\\:')
-      .replace(/\n/g, '\\n')
-  }
-
-  // Build drawtext filter for each subtitle with enable condition
-  const drawTextFilters = subtitles.map((sub, idx) => {
-    const style = sub.style || {}
-    const fontSize = style.fontSize || 24
-    const fontColor = style.color || 'white'
-    const borderColor = style.borderColor || 'black'
-    const borderWidth = style.borderWidth || 2
-
-    // Check if subtitle has word-level data for AI styling
-    if (sub.words && sub.words.length > 0 && sub.animation?.type) {
-      const animationType = sub.animation.type
-      const animDuration = (sub.animation.duration || 150) / 1000  // Convert ms to seconds
-
-      const baseX = style.position === 'top' ? '(w-text_w)/2' :
-                    style.position === 'center' ? '(w-text_w)/2' :
-                    '(w-text_w)/2'
-
-      const baseY = style.position === 'top' ? '50' :
-                    style.position === 'center' ? '(h-text_h)/2' :
-                    'h-th-50'
-
-      // Create word-by-word filters with chosen animation
-      return sub.words.map((word: any, wordIdx: number) => {
-        const escapedWord = escapeText(word.text)
-        const wordColor = word.emphasized && sub.emphasisColor ? sub.emphasisColor : fontColor
-        const wordSize = word.emphasized ? Math.round(fontSize * 1.1) : fontSize
-        const wordOffset = wordIdx * fontSize * 0.6
-
-        const wordStart = word.start
-        const wordEnd = word.end
-        const wordDuration = wordEnd - wordStart
-
-        if (animationType === 'karaoke') {
-          // Karaoke: Simple reveal during word time
-          return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:enable='between(t,${wordStart},${wordEnd})'`
-
-        } else if (animationType === 'pop') {
-          // Pop: Scale from 0 to full size at start of word, then stay visible
-          // Use alpha fade-in combined with word timing
-          const fadeStart = wordStart
-          const fadeEnd = wordStart + Math.min(animDuration, wordDuration)
-
-          return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:alpha='if(lt(t,${fadeStart}),0,if(lt(t,${fadeEnd}),(t-${fadeStart})/${animDuration},if(lt(t,${wordEnd}),1,0)))'`
-
-        } else if (animationType === 'slide') {
-          // Slide: Slide in from bottom, then stay visible
-          const slideStart = wordStart
-          const slideEnd = wordStart + Math.min(animDuration, wordDuration)
-          const slideDistance = 50  // pixels to slide
-
-          return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y='if(lt(t,${slideStart}),${baseY}+${slideDistance},if(lt(t,${slideEnd}),${baseY}+${slideDistance}*(1-(t-${slideStart})/${animDuration}),${baseY}))':alpha='if(lt(t,${wordStart}),0,if(lt(t,${wordEnd}),1,0))'`
-
-        } else {
-          // Fallback: no animation
-          return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:enable='between(t,${wordStart},${wordEnd})'`
-        }
-      }).join(',')
-    } else if (sub.words && sub.words.length > 0) {
-      // Static rendering with emphasis colors (no animation)
-      // Build full text with emphasis markers for FFmpeg
-      const fullText = sub.words.map((word: any) => word.text).join(' ')
-      const escapedText = escapeText(fullText)
-
-      // For now, render as single text block
-      // TODO: Advanced implementation would render each emphasized word separately
-      const x = style.x !== undefined ? style.x : '(w-text_w)/2'
-      const y = style.y !== undefined ? style.y : 'h-th-50'
-
-      return `drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${x}:y=${y}:enable='between(t,${sub.start},${sub.end})'`
+    // 2. Apply media overlays (images/videos with transforms)
+    if (overlayInputs.length > 0) {
+      overlayInputs.forEach((input, idx) => {
+        const overlay = input.overlay
+        const overlayFilter = buildOverlayFilter(input.index, overlay)
+        const outputLabel = idx === overlayInputs.length - 1 ? '[vout]' : `[v_overlay_${idx}]`
+        filters.push(`${videoLabel}[${input.index}:v]${overlayFilter}${outputLabel}`)
+        videoLabel = outputLabel
+      })
     } else {
-      // Standard subtitle (no AI styling)
-      const escapedText = escapeText(sub.text)
-      const fontFile = style.fontFamily ? `fontfile='${style.fontFamily}'` : ''
-
-      // Position (default: bottom center)
-      const x = style.x !== undefined ? style.x : '(w-text_w)/2'
-      const y = style.y !== undefined ? style.y : 'h-th-50'
-
-      return `drawtext=${fontFile ? fontFile + ':' : ''}text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${x}:y=${y}:enable='between(t,${sub.start},${sub.end})'`
+      // No overlays, just pass through the video stream
+      if (videoLabel !== '[0:v]') {
+        filters.push(`${videoLabel}null[vout]`)
+      } else {
+        videoLabel = '[vout]'
+        filters.push(`[0:v]null[vout]`)
+      }
     }
-  }).join(',')
 
-  return drawTextFilters
-}
+    // 3. Mix audio tracks (original + SFX with timing)
+    if (sfxInputs.length > 0) {
+      const audioFilter = buildAudioMixFilter(sfxInputs)
+      filters.push(`${audioFilter}[aout]`)
+    } else {
+      // No SFX, just pass through original audio
+      filters.push('[0:a]anull[aout]')
+    }
 
-// Build overlay filter for media overlays (images/videos)
-function buildOverlayFilter(overlayInputIndex: number, overlay: any): string {
-  const x = overlay.x || 0
-  const y = overlay.y || 0
-  const width = overlay.width || -1  // -1 means keep aspect ratio
-  const height = overlay.height || -1
-  const opacity = overlay.opacity !== undefined ? overlay.opacity : 1
-  const start = overlay.start || 0
-  const end = overlay.end || 999999
+    // Apply all filters
+    if (filters.length > 0) {
+      args.push('-filter_complex', filters.join(';'))
+      args.push('-map', '[vout]')
+      args.push('-map', '[aout]')
+    } else {
+      // No filters, just copy streams
+      args.push('-map', '0:v')
+      args.push('-map', '0:a')
+    }
 
-  // Scale and position overlay
-  let filter = `[${overlayInputIndex}:v]`
+    // Output encoding settings
+    args.push(
+      '-c:v', 'libx264',      // H.264 video codec
+      '-preset', 'medium',     // Encoding speed/quality balance
+      '-crf', '23',            // Quality (lower = better, 18-28 range)
+      '-c:a', 'aac',           // AAC audio codec
+      '-b:a', '192k',          // Audio bitrate
+      '-movflags', '+faststart', // Enable streaming
+      '-y',                    // Overwrite output file
+      outputPath
+    )
 
-  // Apply transforms (scale, opacity)
-  if (width !== -1 || height !== -1) {
-    filter += `scale=${width}:${height},`
+    return args
   }
 
-  if (opacity < 1) {
-    filter += `format=yuva420p,colorchannelmixer=aa=${opacity},`
+  // Build subtitle filter (burn subtitles into video)
+  function buildSubtitleFilter(subtitles: Array<{ text: string; start: number; end: number; style?: any; words?: any[]; emphasisColor?: string; animation?: any }>): string {
+    // Escape text for FFmpeg drawtext filter
+    const escapeText = (text: string): string => {
+      return text
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/:/g, '\\:')
+        .replace(/\n/g, '\\n')
+    }
+
+    // Build drawtext filter for each subtitle with enable condition
+    const drawTextFilters = subtitles.map((sub, idx) => {
+      const style = sub.style || {}
+      const fontSize = style.fontSize || 24
+      const fontColor = style.color || 'white'
+      const borderColor = style.borderColor || 'black'
+      const borderWidth = style.borderWidth || 2
+
+      // Check if subtitle has word-level data for AI styling
+      if (sub.words && sub.words.length > 0 && sub.animation?.type) {
+        const animationType = sub.animation.type
+        const animDuration = (sub.animation.duration || 150) / 1000  // Convert ms to seconds
+
+        const baseX = style.position === 'top' ? '(w-text_w)/2' :
+          style.position === 'center' ? '(w-text_w)/2' :
+            '(w-text_w)/2'
+
+        const baseY = style.position === 'top' ? '50' :
+          style.position === 'center' ? '(h-text_h)/2' :
+            'h-th-50'
+
+        // Create word-by-word filters with chosen animation
+        return sub.words.map((word: any, wordIdx: number) => {
+          const escapedWord = escapeText(word.text)
+          const wordColor = word.emphasized && sub.emphasisColor ? sub.emphasisColor : fontColor
+          const wordSize = word.emphasized ? Math.round(fontSize * 1.1) : fontSize
+          const wordOffset = wordIdx * fontSize * 0.6
+
+          const wordStart = word.start
+          const wordEnd = word.end
+          const wordDuration = wordEnd - wordStart
+
+          if (animationType === 'karaoke') {
+            // Karaoke: Simple reveal during word time
+            return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:enable='between(t,${wordStart},${wordEnd})'`
+
+          } else if (animationType === 'pop') {
+            // Pop: Scale from 0 to full size at start of word, then stay visible
+            // Use alpha fade-in combined with word timing
+            const fadeStart = wordStart
+            const fadeEnd = wordStart + Math.min(animDuration, wordDuration)
+
+            return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:alpha='if(lt(t,${fadeStart}),0,if(lt(t,${fadeEnd}),(t-${fadeStart})/${animDuration},if(lt(t,${wordEnd}),1,0)))'`
+
+          } else if (animationType === 'slide') {
+            // Slide: Slide in from bottom, then stay visible
+            const slideStart = wordStart
+            const slideEnd = wordStart + Math.min(animDuration, wordDuration)
+            const slideDistance = 50  // pixels to slide
+
+            return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y='if(lt(t,${slideStart}),${baseY}+${slideDistance},if(lt(t,${slideEnd}),${baseY}+${slideDistance}*(1-(t-${slideStart})/${animDuration}),${baseY}))':alpha='if(lt(t,${wordStart}),0,if(lt(t,${wordEnd}),1,0))'`
+
+          } else {
+            // Fallback: no animation
+            return `drawtext=text='${escapedWord}':fontsize=${wordSize}:fontcolor=${wordColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${baseX}+${wordOffset}:y=${baseY}:enable='between(t,${wordStart},${wordEnd})'`
+          }
+        }).join(',')
+      } else if (sub.words && sub.words.length > 0) {
+        // Static rendering with emphasis colors (no animation)
+        // Build full text with emphasis markers for FFmpeg
+        const fullText = sub.words.map((word: any) => word.text).join(' ')
+        const escapedText = escapeText(fullText)
+
+        // For now, render as single text block
+        // TODO: Advanced implementation would render each emphasized word separately
+        const x = style.x !== undefined ? style.x : '(w-text_w)/2'
+        const y = style.y !== undefined ? style.y : 'h-th-50'
+
+        return `drawtext=text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${x}:y=${y}:enable='between(t,${sub.start},${sub.end})'`
+      } else {
+        // Standard subtitle (no AI styling)
+        const escapedText = escapeText(sub.text)
+        const fontFile = style.fontFamily ? `fontfile='${style.fontFamily}'` : ''
+
+        // Position (default: bottom center)
+        const x = style.x !== undefined ? style.x : '(w-text_w)/2'
+        const y = style.y !== undefined ? style.y : 'h-th-50'
+
+        return `drawtext=${fontFile ? fontFile + ':' : ''}text='${escapedText}':fontsize=${fontSize}:fontcolor=${fontColor}:bordercolor=${borderColor}:borderw=${borderWidth}:x=${x}:y=${y}:enable='between(t,${sub.start},${sub.end})'`
+      }
+    }).join(',')
+
+    return drawTextFilters
   }
 
-  // Apply rotation if specified
-  if (overlay.rotation) {
-    filter += `rotate=${overlay.rotation * Math.PI / 180}:c=none,`
+  // Build overlay filter for media overlays (images/videos)
+  function buildOverlayFilter(overlayInputIndex: number, overlay: any): string {
+    const x = overlay.x || 0
+    const y = overlay.y || 0
+    const width = overlay.width || -1  // -1 means keep aspect ratio
+    const height = overlay.height || -1
+    const opacity = overlay.opacity !== undefined ? overlay.opacity : 1
+    const start = overlay.start || 0
+    const end = overlay.end || 999999
+
+    // Scale and position overlay
+    let filter = `[${overlayInputIndex}:v]`
+
+    // Apply transforms (scale, opacity)
+    if (width !== -1 || height !== -1) {
+      filter += `scale=${width}:${height},`
+    }
+
+    if (opacity < 1) {
+      filter += `format=yuva420p,colorchannelmixer=aa=${opacity},`
+    }
+
+    // Apply rotation if specified
+    if (overlay.rotation) {
+      filter += `rotate=${overlay.rotation * Math.PI / 180}:c=none,`
+    }
+
+    // Remove trailing comma
+    filter = filter.replace(/,$/, '')
+    filter += `[ovr];`
+
+    // Overlay onto main video with timing
+    return `[ovr]overlay=x=${x}:y=${y}:enable='between(t,${start},${end})'`
   }
 
-  // Remove trailing comma
-  filter = filter.replace(/,$/, '')
-  filter += `[ovr];`
+  // Build audio mix filter with timing (delayed audio for SFX)
+  function buildAudioMixFilter(sfxInputs: Array<{ index: number; start: number; path: string }>): string {
+    // Delay each SFX track to match its start time
+    const delayedTracks = sfxInputs.map((sfx, idx) => {
+      const delayMs = Math.floor(sfx.start * 1000)
+      return `[${sfx.index}:a]adelay=${delayMs}|${delayMs}[sfx${idx}]`
+    })
 
-  // Overlay onto main video with timing
-  return `[ovr]overlay=x=${x}:y=${y}:enable='between(t,${start},${end})'`
-}
+    // Mix all tracks together
+    const mixInputs = ['[0:a]', ...sfxInputs.map((_, idx) => `[sfx${idx}]`)].join('')
+    const mixFilter = `${mixInputs}amix=inputs=${sfxInputs.length + 1}:duration=longest:dropout_transition=2`
 
-// Build audio mix filter with timing (delayed audio for SFX)
-function buildAudioMixFilter(sfxInputs: Array<{ index: number; start: number; path: string }>): string {
-  // Delay each SFX track to match its start time
-  const delayedTracks = sfxInputs.map((sfx, idx) => {
-    const delayMs = Math.floor(sfx.start * 1000)
-    return `[${sfx.index}:a]adelay=${delayMs}|${delayMs}[sfx${idx}]`
-  })
-
-  // Mix all tracks together
-  const mixInputs = ['[0:a]', ...sfxInputs.map((_, idx) => `[sfx${idx}]`)].join('')
-  const mixFilter = `${mixInputs}amix=inputs=${sfxInputs.length + 1}:duration=longest:dropout_transition=2`
-
-  return delayedTracks.join(';') + ';' + mixFilter
+    return delayedTracks.join(';') + ';' + mixFilter
+  }
 }

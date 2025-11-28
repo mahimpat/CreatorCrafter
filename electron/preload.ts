@@ -45,12 +45,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Thumbnail generation APIs
   thumbnailAnalyze: (videoPath: string) =>
     ipcRenderer.invoke('thumbnail:analyze', videoPath),
-  thumbnailExtract: (videoPath: string, timestamp: number) =>
-    ipcRenderer.invoke('thumbnail:extract', videoPath, timestamp),
-  thumbnailGenerate: (options: { videoPath: string; timestamp: number; text: string; template: string; brandKitId?: string }) =>
+  thumbnailGenerate: (options: { videoPath: string; timestamp: number; text: string; template: string; outputPath?: string }) =>
     ipcRenderer.invoke('thumbnail:generate', options),
-  thumbnailGenerateCaptions: (videoPath: string, timestamp: number) =>
-    ipcRenderer.invoke('thumbnail:generateCaptions', videoPath, timestamp),
 
   // Brand Kit APIs
   brandkitList: () =>
@@ -103,6 +99,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isValidProject: (projectPath: string) =>
     ipcRenderer.invoke('project:isValid', projectPath),
 
+  // Replicate APIs
+  replicateGenerateVideo: (prompt: string, apiKey: string, model?: string, duration?: number) =>
+    ipcRenderer.invoke('replicate:generateVideo', { prompt, apiKey, model, duration }),
+  replicateCheckStatus: (predictionId: string, apiKey: string) =>
+    ipcRenderer.invoke('replicate:checkStatus', { predictionId, apiKey }),
+  replicateDownloadVideo: (url: string, fileName: string) =>
+    ipcRenderer.invoke('replicate:downloadVideo', { url, fileName }),
+
   // FreeSound APIs (API key only - no OAuth)
   freesoundSearch: (params: any) =>
     ipcRenderer.invoke('freesound:search', params),
@@ -144,7 +148,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('setup:progress', listener)
   },
   openExternal: (url: string) =>
-    ipcRenderer.invoke('shell:openExternal', url)
+    ipcRenderer.invoke('shell:openExternal', url),
+
+  // Settings API
+  getSetting: (key: string) =>
+    ipcRenderer.invoke('settings:get', key),
+  getAllSettings: () =>
+    ipcRenderer.invoke('settings:getAll'),
+  setSetting: (key: string, value: any) =>
+    ipcRenderer.invoke('settings:set', key, value)
 })
 
 // Expose electron object for IPC event listeners (needed for progress tracking)
@@ -181,19 +193,18 @@ export interface ElectronAPI {
   elevenlabsGetCredits: (apiKey: string) => Promise<{ credits: number | null }>
 
   // Thumbnail generation APIs
-  thumbnailAnalyze: (videoPath: string) => Promise<{ success: boolean; candidates?: Array<{
-    timestamp: number
-    frame_number: number
-    score: number
-    has_faces: boolean
-    face_count: number
-    sharpness: number
-    contrast: number
-    vibrancy: number
-  }>; error?: string }>
-  thumbnailExtract: (videoPath: string, timestamp: number) => Promise<{ success: boolean; frame_path?: string; timestamp?: number; error?: string }>
-  thumbnailGenerate: (options: { videoPath: string; timestamp: number; text: string; template: string }) => Promise<{ success: boolean; thumbnail_path?: string; error?: string }>
-  thumbnailGenerateCaptions: (videoPath: string, timestamp: number) => Promise<{ success: boolean; captions?: string[]; visual_description?: string; audio_context?: string; error?: string }>
+  thumbnailAnalyze: (videoPath: string) => Promise<{
+    success: boolean;
+    candidates?: Array<{
+      path: string
+      timestamp: number
+      score: number
+      face_count: number
+      faces: Array<{ x: number; y: number; w: number; h: number }>
+    }>;
+    error?: string
+  }>
+  thumbnailGenerate: (options: { videoPath: string; timestamp: number; text: string; template: string; outputPath?: string }) => Promise<{ success: boolean; path?: string; error?: string }>
 
   readFile: (filePath: string) => Promise<string>
   writeFile: (filePath: string, content: string) => Promise<boolean>
@@ -223,6 +234,17 @@ export interface ElectronAPI {
   // App state management
   setUnsavedChanges: (hasChanges: boolean) => Promise<boolean>
   getUnsavedChanges: () => Promise<boolean>
+
+  // Setup Wizard API
+  startSetup: () => Promise<void>
+  onSetupProgress: (callback: (progress: { stage: string; progress: number; message: string; error?: string }) => void) => () => void
+  setupComplete: () => Promise<void>
+  openExternal: (url: string) => Promise<void>
+
+  // Settings API
+  getSetting: (key: string) => Promise<any>
+  getAllSettings: () => Promise<any>
+  setSetting: (key: string, value: any) => Promise<boolean>
 }
 
 export interface VideoMetadata {
