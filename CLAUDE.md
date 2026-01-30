@@ -69,6 +69,18 @@ Central state is managed through React Context (`src/context/ProjectContext.tsx`
 - `TextOverlay`: Text overlays with animations
 - `VideoAnalysisResult`: AI analysis results from Python scripts
 
+### Project File Structure
+Projects are stored as directories with:
+```
+project-name/
+├── project.json          # Project metadata and state
+└── assets/
+    ├── source/           # Original video files
+    ├── sfx/              # Generated/imported sound effects
+    └── exports/          # Rendered output videos
+```
+Project serialization handled by `src/utils/projectSerializer.ts`.
+
 ### Communication Flow
 ```
 React Components → IPC (preload.ts) → Main Process → Python Scripts → AI Models
@@ -98,10 +110,11 @@ React Components → IPC (preload.ts) → Main Process → Python Scripts → AI
   - AudioCraft SFX generation
   - Video rendering with overlays
 - `preload.ts`: Secure API exposure to renderer
+- `projectManager.ts`: Project file operations (save/load, recent projects, asset management)
 
 ### Python AI Components (`python/`)
 - `video_analyzer.py`: Video analysis using Whisper (transcription) and BLIP (vision understanding)
-- `audiocraft_generator.py`: SFX generation using Meta AudioCraft MusicGen
+- `audiocraft_generator.py`: SFX generation using Meta AudioCraft AudioGen
 - `requirements.txt`: Python dependencies including PyTorch, OpenCV, Whisper
 
 ## Development Workflow
@@ -127,10 +140,10 @@ React Components → IPC (preload.ts) → Main Process → Python Scripts → AI
 ## Model Configuration
 
 ### AI Models (configurable in Python scripts)
-- **Whisper**: `base` model (line ~43 in video_analyzer.py)
+- **Whisper**: `base` model (line ~56 in video_analyzer.py)
   - Options: `tiny`, `small`, `base`, `medium`, `large`
-- **AudioCraft**: `small` model (line ~42 in audiocraft_generator.py)
-  - Options: `small`, `medium`, `large`
+- **AudioGen**: `facebook/audiogen-medium` (line ~42 in audiocraft_generator.py)
+  - Uses Meta AudioCraft's AudioGen model for sound effect generation
 - **BLIP**: `blip-image-captioning-base` for scene understanding
 
 ### Performance Notes

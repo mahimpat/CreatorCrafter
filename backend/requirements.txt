@@ -1,0 +1,42 @@
+# FastAPI and web server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy>=2.0.25
+alembic>=1.13.1
+psycopg2-binary>=2.9.9
+asyncpg>=0.29.0
+
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Async file operations
+aiofiles>=23.2.1
+
+# Background tasks
+celery>=5.3.6
+redis>=5.0.1
+
+# CORS and security
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+
+# AI/ML dependencies (from existing project)
+torch>=2.2.0
+torchaudio>=2.2.0
+openai-whisper
+transformers>=4.30.0
+opencv-python>=4.8.1.78
+numpy<2.0.0,>=1.24.0
+librosa>=0.10.0
+soundfile>=0.12.0
+Pillow>=10.0.0
+
+# AudioCraft (install from GitHub)
+# pip install 'audiocraft @ git+https://github.com/facebookresearch/audiocraft.git'
+
+# WebSockets
+websockets>=12.0

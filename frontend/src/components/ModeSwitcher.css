@@ -1,0 +1,142 @@
+/* Mode Switcher Styles */
+.mode-switcher {
+  position: relative;
+}
+
+.mode-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.mode-trigger:hover {
+  background: var(--bg-secondary);
+  border-color: var(--text-secondary);
+}
+
+.mode-trigger svg:last-child {
+  transition: transform 0.2s;
+}
+
+.mode-trigger svg:last-child.rotated {
+  transform: rotate(180deg);
+}
+
+/* Mode-specific colors */
+.mode-trigger.mode-manual {
+  border-color: rgba(156, 39, 176, 0.4);
+}
+
+.mode-trigger.mode-manual svg:first-child {
+  color: #ce93d8;
+}
+
+.mode-trigger.mode-semi_manual {
+  border-color: rgba(33, 150, 243, 0.4);
+}
+
+.mode-trigger.mode-semi_manual svg:first-child {
+  color: #64b5f6;
+}
+
+.mode-trigger.mode-automatic {
+  border-color: rgba(76, 175, 80, 0.4);
+}
+
+.mode-trigger.mode-automatic svg:first-child {
+  color: #81c784;
+}
+
+/* Dropdown */
+.mode-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 280px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.dropdown-header {
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mode-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.2s;
+}
+
+.mode-option:hover {
+  background: var(--bg-tertiary);
+}
+
+.mode-option.selected {
+  background: rgba(79, 195, 247, 0.1);
+}
+
+.option-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  color: var(--text-secondary);
+}
+
+.mode-option.selected .option-icon {
+  background: rgba(79, 195, 247, 0.2);
+  color: var(--accent-primary);
+}
+
+.option-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.option-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.option-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.check-icon {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}

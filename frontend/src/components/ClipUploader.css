@@ -1,0 +1,128 @@
+/* Clip Uploader Styles */
+.clip-uploader {
+  padding: 16px;
+}
+
+.upload-zone {
+  border: 2px dashed var(--border-color);
+  border-radius: 12px;
+  padding: 32px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--bg-tertiary);
+}
+
+.upload-zone:hover {
+  border-color: var(--accent-primary);
+  background: rgba(79, 195, 247, 0.05);
+}
+
+.upload-zone.dragging {
+  border-color: var(--accent-primary);
+  background: rgba(79, 195, 247, 0.1);
+}
+
+.upload-zone svg {
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.upload-zone h4 {
+  margin: 0 0 8px 0;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.upload-zone p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Upload List */
+.upload-list {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.upload-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.upload-item svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.upload-item .filename {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upload-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 80px;
+  text-align: right;
+}
+
+.upload-status .done {
+  color: #4caf50;
+}
+
+.upload-status .error {
+  color: var(--error);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.progress-bar {
+  width: 80px;
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar .progress {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.3s;
+}
+
+.remove-btn {
+  padding: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.remove-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--error);
+}
+
+/* Upload Item States */
+.upload-item.done {
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.upload-item.error {
+  border-color: rgba(239, 68, 68, 0.3);
+}
