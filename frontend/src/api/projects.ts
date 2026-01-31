@@ -77,6 +77,13 @@ export interface VideoAnalysisResult {
     action_context?: string
     confidence: number
   }>
+  suggestedTransitions?: Array<{
+    timestamp: number
+    type: 'cut' | 'gradual' | 'start' | 'end'
+    confidence: number
+    suggested_transition: 'cut' | 'fade' | 'fade_in' | 'fade_out' | 'dissolve' | 'wipe' | 'slide'
+    reason: string
+  }>
   transcription: Array<{
     text: string
     start: number
@@ -201,8 +208,14 @@ export const projectsApi = {
     apiClient.put<VideoClip>(`/projects/${projectId}/clips/${clipId}`, data),
   deleteClip: (projectId: number, clipId: number) =>
     apiClient.delete(`/projects/${projectId}/clips/${clipId}`),
+  duplicateClip: (projectId: number, clipId: number) =>
+    apiClient.post<VideoClip>(`/projects/${projectId}/clips/${clipId}/duplicate`),
   reorderClips: (projectId: number, clipOrders: Array<{ id: number; timeline_order: number }>) =>
     apiClient.put<VideoClip[]>(`/projects/${projectId}/clips/reorder`, { clip_orders: clipOrders }),
+  stitchClips: (projectId: number) =>
+    apiClient.post<{ success: boolean; filename: string; url: string; message: string }>(
+      `/projects/${projectId}/clips/stitch`
+    ),
 
   // Transitions
   listTransitions: (projectId: number) =>

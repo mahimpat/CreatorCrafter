@@ -1,0 +1,565 @@
+/* ================================================
+   TEMPLATE SELECTOR V2 - Clean, Visual Design
+   ================================================ */
+
+.template-selector-v2 {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+/* ===== HEADER ===== */
+.ts-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ts-header-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gradient-primary);
+  border-radius: 14px;
+  color: white;
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);
+}
+
+.ts-header-text h2 {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ts-header-text p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ===== CATEGORY PILLS ===== */
+.ts-categories {
+  display: flex;
+  gap: 8px;
+  padding: 16px 24px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ts-categories::-webkit-scrollbar {
+  display: none;
+}
+
+.ts-category-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: var(--bg-tertiary);
+  border: 2px solid transparent;
+  border-radius: 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.ts-category-pill:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.ts-category-pill.active {
+  background: var(--cat-color);
+  color: white;
+  border-color: var(--cat-color);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--cat-color) 40%, transparent);
+}
+
+.ts-category-pill svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ===== CARDS CONTAINER ===== */
+.ts-cards-container {
+  flex: 1;
+  overflow: hidden;
+  padding: 24px;
+}
+
+.ts-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+  height: 100%;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.ts-cards::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ts-cards::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ts-cards::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+/* ===== TEMPLATE CARD ===== */
+.ts-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 200px;
+}
+
+.ts-card:hover {
+  border-color: var(--card-accent);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+}
+
+.ts-card.selected {
+  border-color: var(--card-accent);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--card-accent) 10%, var(--bg-secondary)),
+    var(--bg-secondary)
+  );
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--card-accent) 20%, transparent);
+}
+
+/* Card Badge */
+.ts-card-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #1f2937;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  z-index: 2;
+}
+
+/* Card Check */
+.ts-card-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-gradient);
+  border-radius: 50%;
+  color: white;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--card-accent) 40%, transparent);
+  z-index: 2;
+}
+
+/* Card Icon */
+.ts-card-icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border-radius: 16px;
+  color: var(--card-accent);
+  margin-bottom: 16px;
+  transition: all 0.2s;
+}
+
+.ts-card:hover .ts-card-icon {
+  background: color-mix(in srgb, var(--card-accent) 15%, var(--bg-tertiary));
+  transform: scale(1.05);
+}
+
+.ts-card.selected .ts-card-icon {
+  background: var(--card-gradient);
+  color: white;
+}
+
+/* Card Content */
+.ts-card-content {
+  flex: 1;
+  margin-bottom: 12px;
+}
+
+.ts-card-content h3 {
+  margin: 0 0 6px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ts-card-content p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Card Info */
+.ts-card-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ts-info-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.ts-info-item svg {
+  width: 12px;
+  height: 12px;
+  color: var(--card-accent);
+}
+
+/* Card Energy Bar */
+.ts-card-energy {
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ts-energy-fill {
+  height: 100%;
+  background: var(--card-gradient);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ===== SELECTED PREVIEW ===== */
+.ts-selected-preview {
+  padding: 20px 24px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%);
+  border-top: 1px solid var(--border-color);
+}
+
+.ts-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.ts-preview-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: white;
+}
+
+.ts-preview-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.ts-preview-title {
+  flex: 1;
+}
+
+.ts-preview-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.ts-preview-title h3 {
+  margin: 4px 0 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Preview Details */
+.ts-preview-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ts-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ts-detail svg {
+  width: 14px;
+  height: 14px;
+  color: var(--accent-purple);
+}
+
+/* Preview Uses */
+.ts-preview-uses {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ts-uses-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.ts-use-tag {
+  padding: 5px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* ===== COMPACT MODE ===== */
+.template-selector-v2.compact {
+  padding: 0;
+  background: transparent;
+}
+
+.compact-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 0;
+  scrollbar-width: none;
+}
+
+.compact-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.compact-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-color);
+  border-radius: 20px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.compact-chip:hover {
+  border-color: var(--accent);
+  background: var(--bg-secondary);
+}
+
+.compact-chip.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg-secondary));
+}
+
+.chip-icon {
+  display: flex;
+  color: var(--accent);
+}
+
+.chip-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.chip-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chip-check {
+  color: var(--accent);
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 768px) {
+  .ts-header {
+    padding: 16px 20px;
+  }
+
+  .ts-header-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .ts-header-text h2 {
+    font-size: 18px;
+  }
+
+  .ts-categories {
+    padding: 12px 20px;
+  }
+
+  .ts-category-pill {
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+
+  .ts-cards-container {
+    padding: 16px;
+  }
+
+  .ts-cards {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+
+  .ts-card {
+    padding: 16px;
+    min-height: 180px;
+  }
+
+  .ts-card-icon {
+    width: 52px;
+    height: 52px;
+  }
+
+  .ts-card-icon svg {
+    width: 26px;
+    height: 26px;
+  }
+
+  .ts-card-content h3 {
+    font-size: 14px;
+  }
+
+  .ts-selected-preview {
+    padding: 16px 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ts-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ts-card {
+    min-height: 160px;
+    padding: 14px;
+  }
+
+  .ts-card-icon {
+    width: 44px;
+    height: 44px;
+    margin-bottom: 12px;
+  }
+
+  .ts-card-content h3 {
+    font-size: 13px;
+  }
+
+  .ts-card-content p {
+    font-size: 11px;
+    -webkit-line-clamp: 1;
+  }
+
+  .ts-card-info {
+    display: none;
+  }
+}
+
+/* ===== ANIMATIONS ===== */
+@keyframes cardSelect {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.98);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.ts-card.selected {
+  animation: cardSelect 0.3s ease;
+}
+
+@keyframes checkPop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.ts-card-check {
+  animation: checkPop 0.3s ease;
+}
+
+/* Smooth hover transitions */
+.ts-card,
+.ts-category-pill,
+.compact-chip {
+  will-change: transform, box-shadow;
+}

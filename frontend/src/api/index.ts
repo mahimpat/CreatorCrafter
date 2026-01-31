@@ -24,5 +24,5 @@ export type {
   BackgroundAudio,
 } from './projects'
 export type { VideoUploadResponse, VideoMetadata, AudioExtractResponse } from './video'
-export type { TaskResponse, TaskStatus, SFXGenerateRequest } from './ai'
+export type { TaskResponse, TaskStatus, SFXGenerateRequest, AutoGenerateRequest, AutoGenerateResult, TemplateSettings } from './ai'
 export type { FileInfo, FileListResponse, FileUploadResponse } from './files'

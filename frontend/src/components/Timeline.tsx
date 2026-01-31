@@ -1,23 +1,44 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { useProject } from '../context/ProjectContext'
+import { VideoClip, Transition, projectsApi } from '../api'
 import {
   Film, Volume2, MessageSquare, Type, Eye, EyeOff, Lock, Unlock, Music,
-  Trash2, ZoomIn, ZoomOut
+  Trash2, ZoomIn, ZoomOut, Scissors, Copy, Play, Square,
+  SkipBack, SkipForward, ArrowRightLeft, ChevronsLeft, ChevronsRight
 } from 'lucide-react'
 import './Timeline.css'
 
 interface DragState {
   id: number
-  type: 'subtitle' | 'sfx' | 'overlay'
-  mode: 'move' | 'resize-start' | 'resize-end'
+  type: 'subtitle' | 'sfx' | 'overlay' | 'clip'
+  mode: 'move' | 'resize-start' | 'resize-end' | 'trim-start' | 'trim-end'
   startX: number
   originalStart: number
   originalEnd: number
+  originalTrimStart?: number
+  originalTrimEnd?: number
 }
 
 interface Selection {
   id: number
-  type: 'subtitle' | 'sfx' | 'overlay'
+  type: 'subtitle' | 'sfx' | 'overlay' | 'clip'
+}
+
+interface IntroOutroEffect {
+  type: string
+  duration: number
+}
+
+interface TimelineProps {
+  videoClips?: VideoClip[]
+  onClipsChange?: (clips: VideoClip[]) => void
+  projectId?: number
+  transitions?: Transition[]
+  onTransitionClick?: (fromClipId: number, toClipId: number, existingTransition?: Transition) => void
+  introEffect?: IntroOutroEffect | null
+  outroEffect?: IntroOutroEffect | null
+  onIntroEffectClick?: () => void
+  onOutroEffectClick?: () => void
 }
 
 interface TrackVisibility {
@@ -34,7 +55,17 @@ interface TrackLock {
   overlays: boolean
 }
 
-export default function Timeline() {
+export default function Timeline({
+  videoClips = [],
+  onClipsChange,
+  projectId,
+  transitions = [],
+  onTransitionClick,
+  introEffect,
+  outroEffect,
+  onIntroEffectClick,
+  onOutroEffectClick
+}: TimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -58,12 +89,23 @@ export default function Timeline() {
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [snapEnabled, setSnapEnabled] = useState(true)
+  // Clipboard for copy/paste (future feature)
+  const [, setClipboard] = useState<{ type: string; data: unknown } | null>(null)
   const [trackVisibility, setTrackVisibility] = useState<TrackVisibility>({
     video: true, audio: true, subtitles: true, overlays: true
   })
   const [trackLock, setTrackLock] = useState<TrackLock>({
     video: false, audio: false, subtitles: false, overlays: false
   })
+  // Clip reorder drag state
+  const [clipDragState, setClipDragState] = useState<{
+    draggedId: number | null
+    dragOverId: number | null
+    dragOverPosition: 'before' | 'after' | null
+  }>({ draggedId: null, dragOverId: null, dragOverPosition: null })
+
+  // Sort clips by timeline order
+  const sortedClips = [...videoClips].sort((a, b) => a.timeline_order - b.timeline_order)
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -137,12 +179,325 @@ export default function Timeline() {
     setSelection(null) // Deselect when clicking empty area
   }
 
-  // Drag handlers
+  // Calculate clip timeline position
+  const getClipTimelinePosition = (clip: VideoClip) => {
+    let position = 0
+    for (const c of sortedClips) {
+      if (c.id === clip.id) break
+      position += (c.duration || 0) - c.start_trim - c.end_trim
+    }
+    return position
+  }
+
+  // Get effective clip duration after trimming
+  const getClipEffectiveDuration = (clip: VideoClip) => {
+    return (clip.duration || 0) - clip.start_trim - clip.end_trim
+  }
+
+  // Get clip at current playhead position
+  const getClipAtPlayhead = useCallback(() => {
+    let position = 0
+    for (const clip of sortedClips) {
+      const clipDuration = getClipEffectiveDuration(clip)
+      if (currentTime >= position && currentTime < position + clipDuration) {
+        return { clip, position, clipTime: currentTime - position + clip.start_trim }
+      }
+      position += clipDuration
+    }
+    return null
+  }, [sortedClips, currentTime, getClipEffectiveDuration])
+
+  // Split clip at current playhead position
+  const handleSplitAtPlayhead = async () => {
+    if (!projectId || sortedClips.length === 0) return
+
+    const clipInfo = getClipAtPlayhead()
+    if (!clipInfo) return
+
+    const { clip, clipTime } = clipInfo
+
+    // Trim the current clip to end at playhead
+    const newEndTrim = (clip.duration || 0) - clipTime
+
+    try {
+      await projectsApi.updateClip(projectId, clip.id, {
+        end_trim: newEndTrim
+      })
+      // Refresh clips
+      const res = await projectsApi.listClips(projectId)
+      onClipsChange?.(res.data)
+    } catch (error) {
+      console.error('Failed to split clip:', error)
+    }
+  }
+
+  // Trim clip start to playhead (Set In Point)
+  const handleSetInPoint = async () => {
+    if (!projectId) return
+
+    // If a clip is selected, trim its start
+    if (selection?.type === 'clip') {
+      const clip = sortedClips.find(c => c.id === selection.id)
+      if (!clip) return
+
+      // Get the clip's position on timeline
+      let clipStartPosition = 0
+      for (const c of sortedClips) {
+        if (c.id === clip.id) break
+        clipStartPosition += getClipEffectiveDuration(c)
+      }
+
+      // Calculate new start trim
+      if (currentTime > clipStartPosition) {
+        const newStartTrim = clip.start_trim + (currentTime - clipStartPosition)
+        // Don't trim past the end
+        if (newStartTrim < (clip.duration || 0) - clip.end_trim - 0.1) {
+          await updateClipTrim(clip.id, { start_trim: newStartTrim })
+        }
+      }
+    } else {
+      // If no selection, trim the clip at playhead
+      const clipInfo = getClipAtPlayhead()
+      if (clipInfo) {
+        const { clip, clipTime } = clipInfo
+        const newStartTrim = clipTime
+        if (newStartTrim < (clip.duration || 0) - clip.end_trim - 0.1) {
+          await updateClipTrim(clip.id, { start_trim: newStartTrim })
+        }
+      }
+    }
+  }
+
+  // Trim clip end to playhead (Set Out Point)
+  const handleSetOutPoint = async () => {
+    if (!projectId) return
+
+    // If a clip is selected, trim its end
+    if (selection?.type === 'clip') {
+      const clip = sortedClips.find(c => c.id === selection.id)
+      if (!clip) return
+
+      // Get the clip's position on timeline
+      let clipStartPosition = 0
+      for (const c of sortedClips) {
+        if (c.id === clip.id) break
+        clipStartPosition += getClipEffectiveDuration(c)
+      }
+
+      const clipEndPosition = clipStartPosition + getClipEffectiveDuration(clip)
+
+      // Calculate new end trim
+      if (currentTime < clipEndPosition && currentTime > clipStartPosition) {
+        const timeIntoClip = currentTime - clipStartPosition
+        const newEndTrim = (clip.duration || 0) - clip.start_trim - timeIntoClip
+        if (newEndTrim >= 0) {
+          await updateClipTrim(clip.id, { end_trim: newEndTrim })
+        }
+      }
+    } else {
+      // If no selection, trim the clip at playhead
+      const clipInfo = getClipAtPlayhead()
+      if (clipInfo) {
+        const { clip, clipTime } = clipInfo
+        const newEndTrim = (clip.duration || 0) - clipTime
+        if (newEndTrim >= 0) {
+          await updateClipTrim(clip.id, { end_trim: newEndTrim })
+        }
+      }
+    }
+  }
+
+  // Duplicate selected clip
+  const handleDuplicateClip = async () => {
+    if (!projectId || !selection || selection.type !== 'clip') return
+
+    try {
+      // Use the duplicateClip API endpoint
+      await projectsApi.duplicateClip(projectId, selection.id)
+      const res = await projectsApi.listClips(projectId)
+      onClipsChange?.(res.data)
+    } catch (error) {
+      console.error('Failed to duplicate clip:', error)
+    }
+  }
+
+  // Update clip trim
+  const updateClipTrim = async (clipId: number, updates: { start_trim?: number; end_trim?: number }) => {
+    if (!projectId) return
+    try {
+      await projectsApi.updateClip(projectId, clipId, updates)
+      const res = await projectsApi.listClips(projectId)
+      onClipsChange?.(res.data)
+    } catch (error) {
+      console.error('Failed to update clip trim:', error)
+    }
+  }
+
+  // Delete selected clip
+  const handleDeleteClip = async (clipId: number) => {
+    if (!projectId) return
+    try {
+      await projectsApi.deleteClip(projectId, clipId)
+      const res = await projectsApi.listClips(projectId)
+      onClipsChange?.(res.data)
+      setSelection(null)
+    } catch (error) {
+      console.error('Failed to delete clip:', error)
+    }
+  }
+
+  // Duplicate selected item
+  const handleDuplicate = async () => {
+    if (!selection) return
+
+    if (selection.type === 'subtitle') {
+      const item = subtitles.find(s => s.id === selection.id)
+      if (item) {
+        // Copy would need to be handled by context
+        setClipboard({ type: 'subtitle', data: item })
+      }
+    } else if (selection.type === 'sfx') {
+      const item = sfxTracks.find(s => s.id === selection.id)
+      if (item) {
+        setClipboard({ type: 'sfx', data: item })
+      }
+    } else if (selection.type === 'overlay') {
+      const item = textOverlays.find(o => o.id === selection.id)
+      if (item) {
+        setClipboard({ type: 'overlay', data: item })
+      }
+    }
+  }
+
+  // Jump to previous/next clip
+  const jumpToPreviousClip = () => {
+    let position = 0
+    let prevPosition = 0
+    for (const clip of sortedClips) {
+      const clipDuration = getClipEffectiveDuration(clip)
+      if (currentTime <= position + 0.1) {
+        setCurrentTime(Math.max(0, prevPosition))
+        return
+      }
+      prevPosition = position
+      position += clipDuration
+    }
+    setCurrentTime(prevPosition)
+  }
+
+  const jumpToNextClip = () => {
+    let position = 0
+    for (const clip of sortedClips) {
+      const clipDuration = getClipEffectiveDuration(clip)
+      position += clipDuration
+      if (position > currentTime + 0.1) {
+        setCurrentTime(Math.min(safeDuration, position))
+        return
+      }
+    }
+  }
+
+  // Clip reorder drag handlers
+  const handleClipDragStart = (e: React.DragEvent, clipId: number) => {
+    if (trackLock.video) {
+      e.preventDefault()
+      return
+    }
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', clipId.toString())
+    setClipDragState({ draggedId: clipId, dragOverId: null, dragOverPosition: null })
+  }
+
+  const handleClipDragOver = (e: React.DragEvent, clipId: number) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+
+    if (clipDragState.draggedId === clipId) return
+
+    // Determine if dropping before or after based on mouse position
+    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    const midPoint = rect.left + rect.width / 2
+    const position = e.clientX < midPoint ? 'before' : 'after'
+
+    setClipDragState(prev => ({
+      ...prev,
+      dragOverId: clipId,
+      dragOverPosition: position
+    }))
+  }
+
+  const handleClipDragLeave = () => {
+    setClipDragState(prev => ({
+      ...prev,
+      dragOverId: null,
+      dragOverPosition: null
+    }))
+  }
+
+  const handleClipDrop = async (e: React.DragEvent, targetClipId: number) => {
+    e.preventDefault()
+
+    const draggedId = clipDragState.draggedId
+    if (!draggedId || draggedId === targetClipId || !projectId) {
+      setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
+      return
+    }
+
+    // Find indices
+    const draggedIndex = sortedClips.findIndex(c => c.id === draggedId)
+    let targetIndex = sortedClips.findIndex(c => c.id === targetClipId)
+
+    if (draggedIndex === -1 || targetIndex === -1) {
+      setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
+      return
+    }
+
+    // Adjust target index based on drop position
+    if (clipDragState.dragOverPosition === 'after') {
+      targetIndex += 1
+    }
+
+    // If dragging from before target, adjust for removal
+    if (draggedIndex < targetIndex) {
+      targetIndex -= 1
+    }
+
+    // Reorder clips
+    const newClips = [...sortedClips]
+    const [movedClip] = newClips.splice(draggedIndex, 1)
+    newClips.splice(targetIndex, 0, movedClip)
+
+    // Update timeline_order
+    const reorderedClips = newClips.map((clip, index) => ({
+      ...clip,
+      timeline_order: index
+    }))
+
+    onClipsChange?.(reorderedClips)
+
+    // Save to backend
+    try {
+      await projectsApi.reorderClips(
+        projectId,
+        reorderedClips.map(c => ({ id: c.id, timeline_order: c.timeline_order }))
+      )
+    } catch (error) {
+      console.error('Failed to reorder clips:', error)
+    }
+
+    setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
+  }
+
+  const handleClipDragEnd = () => {
+    setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
+  }
+
+  // Item drag handlers (for subtitles, sfx, overlays)
   const handleItemMouseDown = (
     e: React.MouseEvent,
     id: number,
-    type: 'subtitle' | 'sfx' | 'overlay',
-    mode: 'move' | 'resize-start' | 'resize-end' = 'move'
+    type: 'subtitle' | 'sfx' | 'overlay' | 'clip',
+    mode: 'move' | 'resize-start' | 'resize-end' | 'trim-start' | 'trim-end' = 'move'
   ) => {
     e.stopPropagation()
 
@@ -150,9 +505,10 @@ export default function Timeline() {
     if (type === 'sfx' && trackLock.audio) return
     if (type === 'subtitle' && trackLock.subtitles) return
     if (type === 'overlay' && trackLock.overlays) return
+    if (type === 'clip' && trackLock.video) return
 
     // Get original times
-    let originalStart = 0, originalEnd = 0
+    let originalStart = 0, originalEnd = 0, originalTrimStart = 0, originalTrimEnd = 0
     if (type === 'subtitle') {
       const item = subtitles.find(s => s.id === id)
       if (item) { originalStart = item.start_time; originalEnd = item.end_time }
@@ -162,6 +518,14 @@ export default function Timeline() {
     } else if (type === 'overlay') {
       const item = textOverlays.find(o => o.id === id)
       if (item) { originalStart = item.start_time; originalEnd = item.end_time }
+    } else if (type === 'clip') {
+      const clip = videoClips.find(c => c.id === id)
+      if (clip) {
+        originalStart = getClipTimelinePosition(clip)
+        originalEnd = originalStart + getClipEffectiveDuration(clip)
+        originalTrimStart = clip.start_trim
+        originalTrimEnd = clip.end_trim
+      }
     }
 
     setDragState({
@@ -170,7 +534,9 @@ export default function Timeline() {
       mode,
       startX: e.clientX,
       originalStart,
-      originalEnd
+      originalEnd,
+      originalTrimStart,
+      originalTrimEnd
     })
     setSelection({ id, type })
   }
@@ -232,8 +598,29 @@ export default function Timeline() {
         newEnd = Math.max(dragState.originalStart + 0.1, Math.min(safeDuration, newEnd))
         updateTextOverlay(dragState.id, { end_time: newEnd })
       }
+    } else if (dragState.type === 'clip') {
+      const clip = videoClips.find(c => c.id === dragState.id)
+      if (!clip) return
+
+      const clipTotalDuration = clip.duration || 0
+
+      if (dragState.mode === 'trim-start') {
+        // Trim from the start of the clip
+        const newTrimStart = Math.max(0, Math.min(
+          clipTotalDuration - clip.end_trim - 0.1,
+          (dragState.originalTrimStart || 0) + deltaTime
+        ))
+        updateClipTrim(dragState.id, { start_trim: newTrimStart })
+      } else if (dragState.mode === 'trim-end') {
+        // Trim from the end of the clip
+        const newTrimEnd = Math.max(0, Math.min(
+          clipTotalDuration - clip.start_trim - 0.1,
+          (dragState.originalTrimEnd || 0) - deltaTime
+        ))
+        updateClipTrim(dragState.id, { end_trim: newTrimEnd })
+      }
     }
-  }, [dragState, pixelsPerSecond, subtitles, sfxTracks, textOverlays, safeDuration, snapToValue, getSnapPoints, updateSubtitle, updateSFXTrack, updateTextOverlay])
+  }, [dragState, pixelsPerSecond, subtitles, sfxTracks, textOverlays, videoClips, safeDuration, snapToValue, getSnapPoints, updateSubtitle, updateSFXTrack, updateTextOverlay, updateClipTrim])
 
   const handleMouseUp = useCallback(() => {
     setDragState(null)
@@ -260,7 +647,38 @@ export default function Timeline() {
         if (selection.type === 'subtitle') deleteSubtitle(selection.id)
         else if (selection.type === 'sfx') deleteSFXTrack(selection.id)
         else if (selection.type === 'overlay') deleteTextOverlay(selection.id)
+        else if (selection.type === 'clip') handleDeleteClip(selection.id)
         setSelection(null)
+      }
+
+      // Only process shortcuts if not in a text input
+      const isTextInput = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA'
+      if (isTextInput) return
+
+      // Split at playhead (S key)
+      if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        handleSplitAtPlayhead()
+      }
+
+      // Set In Point (I key) - Trim start to playhead
+      if (e.key === 'i' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        handleSetInPoint()
+      }
+
+      // Set Out Point (O key) - Trim end to playhead
+      if (e.key === 'o' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        handleSetOutPoint()
+      }
+
+      // Duplicate clip (D key)
+      if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey && selection?.type === 'clip') {
+        handleDuplicateClip()
+      }
+
+      // Copy to clipboard (Cmd/Ctrl + C)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selection) {
+        e.preventDefault()
+        handleDuplicate()
       }
 
       // Arrow keys for nudging
@@ -393,6 +811,81 @@ export default function Timeline() {
             <span className="total">{formatTime(safeDuration)}</span>
           </div>
           <div className="timeline-tools">
+            {/* Navigation */}
+            <div className="tool-group">
+              <button
+                className="tool-btn"
+                onClick={jumpToPreviousClip}
+                title="Previous clip"
+              >
+                <SkipBack size={14} />
+              </button>
+              <button
+                className="tool-btn"
+                onClick={jumpToNextClip}
+                title="Next clip"
+              >
+                <SkipForward size={14} />
+              </button>
+            </div>
+
+            {/* Trim tools */}
+            <div className="tool-group">
+              <button
+                className="tool-btn"
+                onClick={handleSetInPoint}
+                disabled={sortedClips.length === 0}
+                title="Set In Point - Trim start to playhead (I)"
+              >
+                <ChevronsRight size={14} />
+              </button>
+              <button
+                className="tool-btn"
+                onClick={handleSetOutPoint}
+                disabled={sortedClips.length === 0}
+                title="Set Out Point - Trim end to playhead (O)"
+              >
+                <ChevronsLeft size={14} />
+              </button>
+              <button
+                className="tool-btn"
+                onClick={handleSplitAtPlayhead}
+                disabled={sortedClips.length === 0}
+                title="Split at playhead (S)"
+              >
+                <Scissors size={14} />
+              </button>
+            </div>
+
+            {/* Edit tools */}
+            <div className="tool-group">
+              <button
+                className="tool-btn"
+                onClick={handleDuplicateClip}
+                disabled={!selection || selection.type !== 'clip'}
+                title="Duplicate clip"
+              >
+                <Copy size={14} />
+              </button>
+              <button
+                className="tool-btn delete"
+                onClick={() => {
+                  if (selection) {
+                    if (selection.type === 'subtitle') deleteSubtitle(selection.id)
+                    else if (selection.type === 'sfx') deleteSFXTrack(selection.id)
+                    else if (selection.type === 'overlay') deleteTextOverlay(selection.id)
+                    else if (selection.type === 'clip') handleDeleteClip(selection.id)
+                    setSelection(null)
+                  }
+                }}
+                disabled={!selection}
+                title="Delete selected (Del)"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+
+            {/* View controls */}
             <button
               className={`snap-btn ${snapEnabled ? 'active' : ''}`}
               onClick={() => setSnapEnabled(!snapEnabled)}
@@ -529,10 +1022,158 @@ export default function Timeline() {
 
               {/* Video Track */}
               {trackVisibility.video && (
-                <div className="track video">
-                  <div className="video-clip" style={{ width: `${timelineWidth}px` }}>
-                    <span>Main Video</span>
-                  </div>
+                <div className={`track video ${trackLock.video ? 'locked' : ''}`}>
+                  {sortedClips.length > 0 ? (
+                    // Render multiple clips
+                    sortedClips.map((clip, index) => {
+                      const clipPosition = getClipTimelinePosition(clip)
+                      const clipDuration = getClipEffectiveDuration(clip)
+                      const isSelected = selection?.id === clip.id && selection?.type === 'clip'
+                      const isDragging = dragState?.id === clip.id && dragState?.type === 'clip'
+                      const isBeingDragged = clipDragState.draggedId === clip.id
+                      const isDragOver = clipDragState.dragOverId === clip.id
+                      const dragOverPosition = isDragOver ? clipDragState.dragOverPosition : null
+
+                      return (
+                        <div
+                          key={clip.id}
+                          className={`video-clip multi-clip ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isBeingDragged ? 'clip-dragging' : ''} ${isDragOver ? `drag-over drag-over-${dragOverPosition}` : ''}`}
+                          style={{
+                            left: `${clipPosition * pixelsPerSecond}px`,
+                            width: `${clipDuration * pixelsPerSecond}px`,
+                          }}
+                          draggable={!trackLock.video}
+                          onDragStart={(e) => handleClipDragStart(e, clip.id)}
+                          onDragOver={(e) => handleClipDragOver(e, clip.id)}
+                          onDragLeave={handleClipDragLeave}
+                          onDrop={(e) => handleClipDrop(e, clip.id)}
+                          onDragEnd={handleClipDragEnd}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelection({ id: clip.id, type: 'clip' })
+                          }}
+                          title={`${clip.original_name || `Clip ${index + 1}`} (${formatTime(clipDuration)}) - Drag to reorder`}
+                        >
+                          {/* Trim handle - start */}
+                          <div
+                            className="trim-handle start"
+                            onMouseDown={(e) => {
+                              e.stopPropagation()
+                              handleItemMouseDown(e, clip.id, 'clip', 'trim-start')
+                            }}
+                            title="Drag to trim start"
+                          />
+
+                          <div className="clip-content">
+                            <Film size={14} />
+                            <span className="clip-name">{clip.original_name || `Clip ${index + 1}`}</span>
+                            <span className="clip-duration">{formatTime(clipDuration)}</span>
+                          </div>
+
+                          {/* Trim handle - end */}
+                          <div
+                            className="trim-handle end"
+                            onMouseDown={(e) => {
+                              e.stopPropagation()
+                              handleItemMouseDown(e, clip.id, 'clip', 'trim-end')
+                            }}
+                            title="Drag to trim end"
+                          />
+
+                          {/* Trim indicators */}
+                          {clip.start_trim > 0 && (
+                            <div className="trim-indicator start" title={`Trimmed ${formatTime(clip.start_trim)} from start`} />
+                          )}
+                          {clip.end_trim > 0 && (
+                            <div className="trim-indicator end" title={`Trimmed ${formatTime(clip.end_trim)} from end`} />
+                          )}
+
+                          {/* Transition indicator after clip (except last) */}
+                          {index < sortedClips.length - 1 && (() => {
+                            const nextClip = sortedClips[index + 1]
+                            const appliedTransition = transitions.find(
+                              t => t.from_clip_id === clip.id && t.to_clip_id === nextClip.id
+                            )
+                            const transitionType = appliedTransition?.type || 'none'
+                            const transitionDuration = appliedTransition?.duration || 0
+
+                            return (
+                              <div
+                                className={`clip-transition-indicator ${transitionType !== 'none' ? 'has-transition' : ''} transition-${transitionType}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onTransitionClick?.(clip.id, nextClip.id, appliedTransition)
+                                }}
+                                title={appliedTransition
+                                  ? `${transitionType.toUpperCase()} (${transitionDuration}s) - Click to edit`
+                                  : 'Click to add transition'
+                                }
+                              >
+                                <ArrowRightLeft size={10} />
+                                {appliedTransition && (
+                                  <span className="transition-type-label">{transitionType}</span>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )
+                    })
+                  ) : (
+                    // Fallback for single video
+                    <div className="video-clip" style={{ width: `${timelineWidth}px` }}>
+                      <span>Main Video</span>
+                    </div>
+                  )}
+
+                  {/* Transition markers */}
+                  {analysis?.suggestedTransitions?.map((transition, index) => (
+                    transition.type !== 'start' && transition.type !== 'end' && (
+                      <div
+                        key={`trans-${index}`}
+                        className={`transition-marker ${transition.suggested_transition}`}
+                        style={{ left: `${transition.timestamp * pixelsPerSecond}px` }}
+                        title={`${transition.suggested_transition.toUpperCase()}: ${transition.reason} (${Math.round(transition.confidence * 100)}%)`}
+                      >
+                        <Scissors size={10} />
+                      </div>
+                    )
+                  ))}
+
+                  {/* Intro effect indicator */}
+                  {introEffect && (
+                    <div
+                      className="intro-effect-indicator"
+                      style={{ width: `${introEffect.duration * pixelsPerSecond}px` }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onIntroEffectClick?.()
+                      }}
+                      title={`Intro: ${introEffect.type} (${introEffect.duration}s) - Click to edit`}
+                    >
+                      <span className="effect-icon"><Play size={10} /></span>
+                      <span className="effect-label">Fade In</span>
+                    </div>
+                  )}
+
+                  {/* Outro effect indicator */}
+                  {outroEffect && sortedClips.length > 0 && (
+                    <div
+                      className="outro-effect-indicator"
+                      style={{
+                        left: `${(safeDuration - outroEffect.duration) * pixelsPerSecond}px`,
+                        width: `${outroEffect.duration * pixelsPerSecond}px`
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOutroEffectClick?.()
+                      }}
+                      title={`Outro: ${outroEffect.type} (${outroEffect.duration}s) - Click to edit`}
+                    >
+                      <span className="effect-icon"><Square size={10} /></span>
+                      <span className="effect-label">Fade Out</span>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -2,8 +2,8 @@
  * ExportDialog - Modal for exporting video with options
  */
 import { useState } from 'react'
-import { X, Download, FileVideo, FileText, Loader2 } from 'lucide-react'
-import { videoApi } from '../api'
+import { X, Download, FileVideo, FileText, Loader2, CheckCircle } from 'lucide-react'
+import { videoApi, projectsApi } from '../api'
 import './ExportDialog.css'
 
 interface ExportDialogProps {
@@ -23,41 +23,54 @@ export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialo
   const [includeBgm, setIncludeBgm] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
   const [exportProgress, setExportProgress] = useState(0)
+  const [exportResult, setExportResult] = useState<{ url: string; filename: string } | null>(null)
 
   if (!isOpen) return null
 
   const handleExportVideo = async () => {
     setIsExporting(true)
     setExportProgress(0)
+    setExportResult(null)
 
     try {
-      const response = await videoApi.render(projectId, {
-        format,
-        include_subtitles: includeSubtitles,
-        include_sfx: includeSfx,
-        include_bgm: includeBgm,
-      })
+      // Show indeterminate progress
+      setExportProgress(10)
 
-      // Poll for progress or use WebSocket
-      console.log('Export started:', response.data)
+      // Call the stitch endpoint to render video with transitions
+      const response = await projectsApi.stitchClips(projectId)
 
-      // Simulate progress for now
-      const interval = setInterval(() => {
-        setExportProgress(prev => {
-          if (prev >= 100) {
-            clearInterval(interval)
-            setIsExporting(false)
-            return 100
-          }
-          return prev + 10
+      if (response.data.success) {
+        setExportProgress(100)
+        setExportResult({
+          url: response.data.url,
+          filename: response.data.filename
         })
-      }, 500)
+        console.log('Export complete:', response.data)
+      } else {
+        throw new Error('Export failed')
+      }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Export failed:', error)
       setIsExporting(false)
-      alert('Export failed. Please try again.')
+      setExportProgress(0)
+      const message = error.response?.data?.detail || error.message || 'Export failed. Please try again.'
+      alert(message)
     }
+  }
+
+  const handleDownload = () => {
+    if (exportResult) {
+      // Open the video URL in a new tab or trigger download
+      window.open(exportResult.url, '_blank')
+    }
+  }
+
+  const handleClose = () => {
+    setExportResult(null)
+    setIsExporting(false)
+    setExportProgress(0)
+    onClose()
   }
 
   const handleExportSubtitles = async () => {
@@ -95,11 +108,11 @@ export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialo
   }
 
   return (
-    <div className="export-dialog-overlay" onClick={onClose}>
+    <div className="export-dialog-overlay" onClick={handleClose}>
       <div className="export-dialog" onClick={e => e.stopPropagation()}>
         <div className="dialog-header">
           <h2>Export Project</h2>
-          <button className="close-btn" onClick={onClose}>
+          <button className="close-btn" onClick={handleClose}>
             <X size={20} />
           </button>
         </div>
@@ -182,33 +195,51 @@ export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialo
           )}
 
           {/* Progress */}
-          {isExporting && exportType === 'video' && (
+          {isExporting && exportType === 'video' && !exportResult && (
             <div className="export-progress">
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${exportProgress}%` }} />
               </div>
-              <span>{exportProgress}% - Rendering video...</span>
+              <span>
+                <Loader2 size={14} className="spinning" style={{ marginRight: 8 }} />
+                Rendering video with transitions...
+              </span>
+            </div>
+          )}
+
+          {/* Export Complete */}
+          {exportResult && (
+            <div className="export-complete">
+              <CheckCircle size={48} color="#10b981" />
+              <h3>Export Complete!</h3>
+              <p>Your video has been rendered with all transitions applied.</p>
+              <button className="download-btn" onClick={handleDownload}>
+                <Download size={18} />
+                Download Video
+              </button>
             </div>
           )}
         </div>
 
         <div className="dialog-footer">
-          <button className="cancel-btn" onClick={onClose} disabled={isExporting}>
-            Cancel
+          <button className="cancel-btn" onClick={handleClose} disabled={isExporting && !exportResult}>
+            {exportResult ? 'Close' : 'Cancel'}
           </button>
-          <button className="export-btn" onClick={handleExport} disabled={isExporting}>
-            {isExporting ? (
-              <>
-                <Loader2 size={18} className="spinning" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download size={18} />
-                Export
-              </>
-            )}
-          </button>
+          {!exportResult && (
+            <button className="export-btn" onClick={handleExport} disabled={isExporting}>
+              {isExporting ? (
+                <>
+                  <Loader2 size={18} className="spinning" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download size={18} />
+                  Export
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>

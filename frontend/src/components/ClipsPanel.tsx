@@ -13,13 +13,15 @@ interface ClipsPanelProps {
   clips: VideoClip[]
   onClipsChange: (clips: VideoClip[]) => void
   onClipSelect?: (clip: VideoClip) => void
+  compact?: boolean
 }
 
 export default function ClipsPanel({
   projectId,
   clips,
   onClipsChange,
-  onClipSelect
+  onClipSelect,
+  compact = false
 }: ClipsPanelProps) {
   const [selectedClipId, setSelectedClipId] = useState<number | undefined>()
   const [showUploader, setShowUploader] = useState(clips.length === 0)
@@ -42,21 +44,23 @@ export default function ClipsPanel({
   }
 
   return (
-    <div className="clips-panel">
-      <div className="panel-header">
-        <h3>
-          <Film size={18} />
-          Video Clips
-        </h3>
-        {clips.length > 0 && (
-          <button
-            className="toggle-uploader-btn"
-            onClick={() => setShowUploader(!showUploader)}
-          >
-            {showUploader ? 'Hide Uploader' : 'Add More Clips'}
-          </button>
-        )}
-      </div>
+    <div className={`clips-panel ${compact ? 'compact' : ''}`}>
+      {!compact && (
+        <div className="panel-header">
+          <h3>
+            <Film size={18} />
+            Video Clips
+          </h3>
+          {clips.length > 0 && (
+            <button
+              className="toggle-uploader-btn"
+              onClick={() => setShowUploader(!showUploader)}
+            >
+              {showUploader ? 'Hide Uploader' : 'Add More Clips'}
+            </button>
+          )}
+        </div>
+      )}
 
       {showUploader && (
         <ClipUploader

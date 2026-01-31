@@ -143,15 +143,18 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
   )
 
   const analyzeVideo = useCallback(async () => {
-    if (!state.projectId || !state.videoUrl) return
+    if (!state.projectId) return
 
     setState((prev) => ({ ...prev, isAnalyzing: true }))
 
     try {
-      // Extract audio first
-      await videoApi.extractAudio(state.projectId)
+      // Extract audio first (only for single video mode, clips handle audio extraction in backend)
+      if (state.videoUrl) {
+        await videoApi.extractAudio(state.projectId)
+      }
 
-      // Start analysis
+      // Start analysis - works for both single video and multi-clip projects
+      console.log('[ProjectContext] Starting video analysis for project:', state.projectId)
       await aiApi.analyzeVideo(state.projectId)
 
       // Analysis runs in background, results come via WebSocket

@@ -43,8 +43,18 @@ class Settings(BaseSettings):
 
     # AI Models
     WHISPER_MODEL: str = "base"
-    AUDIOGEN_MODEL: str = "facebook/audiogen-medium"
     BLIP_MODEL: str = "Salesforce/blip-image-captioning-base"
+
+    # ElevenLabs API for SFX generation
+    ELEVENLABS_API_KEY: str = ""
+
+    # LLM for intelligent audio description (optional - enables smarter SFX prompts)
+    # Set one of these in .env for LLM-based audio description generation
+    OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+
+    # Use semantic matching for SFX (requires sentence-transformers)
+    USE_SEMANTIC_SFX_MATCHING: bool = True
 
     # Task timeouts (seconds)
     VIDEO_ANALYSIS_TIMEOUT: int = 1800  # 30 minutes

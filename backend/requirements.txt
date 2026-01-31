@@ -12,6 +12,7 @@ asyncpg>=0.29.0
 # Authentication
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt==4.0.1  # Pin to 4.0.1 for passlib compatibility (4.1+ breaks passlib)
 
 # Async file operations
 aiofiles>=23.2.1
@@ -35,8 +36,15 @@ librosa>=0.10.0
 soundfile>=0.12.0
 Pillow>=10.0.0
 
-# AudioCraft (install from GitHub)
-# pip install 'audiocraft @ git+https://github.com/facebookresearch/audiocraft.git'
+# Semantic SFX matching (for intelligent audio description)
+sentence-transformers>=2.2.0
+
+# HTTP client for API calls (ElevenLabs, etc.)
+requests>=2.31.0
+
+# Optional: LLM APIs for best audio descriptions (uncomment if needed)
+# openai>=1.0.0
+# anthropic>=0.18.0
 
 # WebSockets
 websockets>=12.0

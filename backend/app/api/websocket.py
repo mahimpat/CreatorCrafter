@@ -139,9 +139,11 @@ async def websocket_endpoint(
     """
     # Authenticate user
     db = SessionLocal()
+    user = None
     try:
         user = await get_current_user_ws(token, db)
         if not user:
+            await websocket.accept()  # Accept first to send close reason
             await websocket.close(code=4001, reason="Authentication failed")
             return
 
@@ -158,13 +160,26 @@ async def websocket_endpoint(
         try:
             while True:
                 # Keep connection alive and handle incoming messages
-                data = await websocket.receive_text()
+                try:
+                    data = await asyncio.wait_for(
+                        websocket.receive_text(),
+                        timeout=60.0  # 60 second timeout
+                    )
+                except asyncio.TimeoutError:
+                    # Send keepalive ping
+                    try:
+                        await websocket.send_text("ping")
+                    except Exception:
+                        break
+                    continue
 
                 # Handle ping/pong for connection keepalive
                 if data == "ping":
                     await websocket.send_text("pong")
+                elif data == "pong":
+                    pass  # Keepalive response
                 else:
-                    # Echo back any other messages (for debugging)
+                    # Handle JSON messages
                     try:
                         msg = json.loads(data)
                         if msg.get("type") == "get_status":
@@ -182,9 +197,13 @@ async def websocket_endpoint(
                         pass
 
         except WebSocketDisconnect:
-            manager.disconnect(user.id)
+            pass
+        except Exception as e:
+            print(f"WebSocket error for user {user.id if user else 'unknown'}: {e}")
 
     finally:
+        if user:
+            manager.disconnect(user.id)
         db.close()
 
 

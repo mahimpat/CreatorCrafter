@@ -132,6 +132,16 @@ async def extract_audio(
         current_user.id, project_id, "source", audio_filename
     )
 
+    # Check if video file exists
+    if not os.path.exists(video_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Video file not found at {video_path}"
+        )
+
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(audio_path), exist_ok=True)
+
     # Extract audio using FFmpeg
     try:
         result = subprocess.run(
@@ -150,15 +160,19 @@ async def extract_audio(
         )
 
         if result.returncode != 0:
+            print(f"FFmpeg stderr: {result.stderr}")
             raise HTTPException(
                 status_code=500,
-                detail=f"FFmpeg error: {result.stderr}"
+                detail=f"FFmpeg error: {result.stderr[:500]}"
             )
 
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=500, detail="Audio extraction timed out")
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="FFmpeg not found")
+        raise HTTPException(
+            status_code=500,
+            detail="FFmpeg not found. Please install FFmpeg: brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
+        )
 
     return {
         "audio_filename": audio_filename,

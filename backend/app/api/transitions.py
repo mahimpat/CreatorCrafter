@@ -84,10 +84,10 @@ async def create_transition(
             detail="Transition already exists between these clips"
         )
 
-    # Create the transition
+    # Create the transition (store type as string)
     transition = Transition(
         project_id=project_id,
-        type=data.type,
+        type=data.type.value,
         from_clip_id=data.from_clip_id,
         to_clip_id=data.to_clip_id,
         duration=data.duration,
@@ -153,7 +153,7 @@ async def update_transition(
     if not transition:
         raise HTTPException(status_code=404, detail="Transition not found")
 
-    # Update fields
+    # Update fields (type is stored as string)
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(transition, key, value)

@@ -96,7 +96,7 @@ export default function SFXEditor() {
       <div className="generate-sfx">
         <h4>
           <Wand2 size={16} />
-          Generate with AI (AudioCraft)
+          Generate with AI (ElevenLabs)
         </h4>
 
         <textarea
@@ -113,9 +113,9 @@ export default function SFXEditor() {
               type="number"
               step="0.5"
               min="0.5"
-              max="30"
+              max="22"
               value={duration}
-              onChange={e => setDuration(parseFloat(e.target.value) || 3)}
+              onChange={e => setDuration(Math.min(22, parseFloat(e.target.value) || 3))}
             />
           </div>
 

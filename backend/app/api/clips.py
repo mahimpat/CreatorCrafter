@@ -20,6 +20,8 @@ from app.schemas.clip import (
 )
 from app.api.deps import get_current_user
 from app.services.file_service import file_service
+from app.services.video_stitcher import VideoStitcher, ClipInfo, TransitionInfo
+from app.models.transition import Transition
 from app.config import settings
 
 router = APIRouter()
@@ -252,6 +254,58 @@ async def delete_clip(
     return {"message": "Clip deleted successfully"}
 
 
+@router.post("/{project_id}/clips/{clip_id}/duplicate", response_model=VideoClipResponse)
+async def duplicate_clip(
+    project_id: int,
+    clip_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Duplicate a video clip."""
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    original_clip = db.query(VideoClip).filter(
+        VideoClip.id == clip_id,
+        VideoClip.project_id == project_id
+    ).first()
+
+    if not original_clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    # Get current clip count for ordering
+    clip_count = db.query(VideoClip).filter(
+        VideoClip.project_id == project_id
+    ).count()
+
+    # Create a duplicate clip record (uses same video file)
+    new_clip = VideoClip(
+        project_id=project_id,
+        filename=original_clip.filename,  # Same file
+        original_name=f"{original_clip.original_name or 'Clip'} (copy)",
+        original_order=clip_count,
+        timeline_order=clip_count,  # Add at end
+        duration=original_clip.duration,
+        start_trim=original_clip.start_trim,
+        end_trim=original_clip.end_trim,
+        width=original_clip.width,
+        height=original_clip.height,
+        fps=original_clip.fps,
+        clip_metadata=original_clip.clip_metadata
+    )
+
+    db.add(new_clip)
+    db.commit()
+    db.refresh(new_clip)
+
+    return new_clip
+
+
 @router.put("/{project_id}/clips/reorder")
 async def reorder_clips(
     project_id: int,
@@ -285,3 +339,112 @@ async def reorder_clips(
     ).order_by(VideoClip.timeline_order).all()
 
     return [VideoClipResponse.model_validate(c) for c in clips]
+
+
+@router.post("/{project_id}/clips/stitch")
+async def stitch_clips(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Stitch all clips together with transitions and export the final video.
+    Returns the URL to the exported video.
+    """
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get all clips in timeline order
+    clips = db.query(VideoClip).filter(
+        VideoClip.project_id == project_id
+    ).order_by(VideoClip.timeline_order).all()
+
+    if not clips:
+        raise HTTPException(status_code=400, detail="No clips to stitch")
+
+    # Get all transitions
+    transitions = db.query(Transition).filter(
+        Transition.project_id == project_id
+    ).all()
+
+    # Build a map of transitions by from_clip_id
+    transition_map = {t.from_clip_id: t for t in transitions}
+
+    # Prepare clip and transition info for stitcher
+    clip_infos = []
+    transition_infos = []
+
+    for i, clip in enumerate(clips):
+        # Get file path
+        file_path = file_service.get_file_path(
+            current_user.id, project_id, "clips", clip.filename
+        )
+
+        if not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Clip file not found: {clip.filename}"
+            )
+
+        clip_infos.append(ClipInfo(
+            path=file_path,
+            duration=clip.duration or 0,
+            start_trim=clip.start_trim or 0,
+            end_trim=clip.end_trim or 0
+        ))
+
+        # Get transition to next clip (if not the last clip)
+        if i < len(clips) - 1:
+            next_clip = clips[i + 1]
+            transition = transition_map.get(clip.id)
+
+            if transition:
+                transition_infos.append(TransitionInfo(
+                    type=transition.type,
+                    duration=transition.duration,
+                    parameters=transition.parameters
+                ))
+            else:
+                # Default to cut (no transition)
+                transition_infos.append(TransitionInfo(
+                    type='cut',
+                    duration=0
+                ))
+
+    # Get output directory for exports
+    export_dir = file_service.get_file_path(
+        current_user.id, project_id, "exports", ""
+    )
+    os.makedirs(export_dir, exist_ok=True)
+
+    # Generate output filename
+    import uuid
+    output_filename = f"export_{uuid.uuid4().hex[:8]}.mp4"
+
+    # Create stitcher and render
+    stitcher = VideoStitcher(export_dir)
+    success, result = stitcher.stitch_clips(
+        clip_infos,
+        transition_infos,
+        output_filename
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Stitch failed: {result}")
+
+    # Return the URL to the exported video
+    export_url = file_service.get_file_url(
+        current_user.id, project_id, "exports", output_filename
+    )
+
+    return {
+        "success": True,
+        "filename": output_filename,
+        "url": export_url,
+        "message": f"Successfully stitched {len(clips)} clips with {len(transition_infos)} transitions"
+    }
