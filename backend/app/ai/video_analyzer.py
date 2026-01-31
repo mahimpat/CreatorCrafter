@@ -8,10 +8,18 @@ Features intelligent audio description generation:
 1. LLM-based (OpenAI/Anthropic) when API keys configured
 2. Semantic embedding matching using sentence-transformers
 3. Keyword-based fallback with comprehensive mappings
+
+Enhanced with:
+- Adaptive frame sampling based on motion detection
+- Audio peak detection for emphasis points
+- Silence detection for SFX/cut placement
+- Emotion detection from scene descriptions
+- Content-aware transition suggestions
 """
-from typing import Callable, Optional, Dict, Any, List
+from typing import Callable, Optional, Dict, Any, List, Tuple
 from pathlib import Path
 import sys
+import numpy as np
 
 # Lazy load models to save memory
 _whisper_model = None
@@ -159,6 +167,403 @@ def get_sound_embeddings():
     except Exception as e:
         print(f"Failed to compute sound embeddings: {e}", file=sys.stderr)
         return None
+
+
+# =============================================================================
+# AUDIO ANALYSIS FUNCTIONS (Quick Win #2 & #3)
+# =============================================================================
+
+def analyze_audio_features(
+    audio_path: str,
+    progress_callback: Optional[Callable] = None
+) -> Dict[str, Any]:
+    """
+    Analyze audio for peaks, silence, and energy levels.
+
+    Quick Win #2: Audio Peak Detection - Find emphasis points
+    Quick Win #3: Silence Detection - Find gaps for cuts/SFX
+
+    Args:
+        audio_path: Path to audio file (WAV format preferred)
+        progress_callback: Optional callback(stage, progress, message)
+
+    Returns:
+        Dict with peaks, silences, and energy profile
+    """
+    try:
+        import wave
+        import struct
+
+        if progress_callback:
+            progress_callback("audio_analysis", 25, "Analyzing audio features...")
+
+        # Read audio file
+        with wave.open(audio_path, 'rb') as wav:
+            n_channels = wav.getnchannels()
+            sample_width = wav.getsampwidth()
+            frame_rate = wav.getframerate()
+            n_frames = wav.getnframes()
+            duration = n_frames / frame_rate
+
+            # Read all frames
+            raw_data = wav.readframes(n_frames)
+
+        # Convert to numpy array
+        if sample_width == 2:  # 16-bit audio
+            fmt = f"<{n_frames * n_channels}h"
+            samples = np.array(struct.unpack(fmt, raw_data), dtype=np.float32)
+        elif sample_width == 1:  # 8-bit audio
+            samples = np.array(list(raw_data), dtype=np.float32) - 128
+        else:
+            # Fallback for other formats
+            samples = np.frombuffer(raw_data, dtype=np.int16).astype(np.float32)
+
+        # If stereo, convert to mono
+        if n_channels == 2:
+            samples = samples.reshape(-1, 2).mean(axis=1)
+
+        # Normalize to -1 to 1
+        max_val = np.max(np.abs(samples))
+        if max_val > 0:
+            samples = samples / max_val
+
+        # Calculate energy in windows (100ms windows)
+        window_size = int(frame_rate * 0.1)  # 100ms
+        hop_size = int(frame_rate * 0.05)    # 50ms hop
+
+        energy_profile = []
+        timestamps = []
+
+        for i in range(0, len(samples) - window_size, hop_size):
+            window = samples[i:i + window_size]
+            energy = np.sqrt(np.mean(window ** 2))  # RMS energy
+            timestamp = i / frame_rate
+            energy_profile.append(energy)
+            timestamps.append(timestamp)
+
+        energy_profile = np.array(energy_profile)
+        timestamps = np.array(timestamps)
+
+        # Detect peaks (Quick Win #2)
+        # Find local maxima that are significantly above average
+        mean_energy = np.mean(energy_profile)
+        std_energy = np.std(energy_profile)
+        peak_threshold = mean_energy + 1.5 * std_energy
+
+        peaks = []
+        min_peak_gap = 0.5  # Minimum 0.5s between peaks
+        last_peak_time = -min_peak_gap
+
+        for i in range(1, len(energy_profile) - 1):
+            if energy_profile[i] > peak_threshold:
+                # Check if local maximum
+                if energy_profile[i] > energy_profile[i-1] and energy_profile[i] > energy_profile[i+1]:
+                    timestamp = timestamps[i]
+                    if timestamp - last_peak_time >= min_peak_gap:
+                        peaks.append({
+                            'timestamp': timestamp,
+                            'energy': float(energy_profile[i]),
+                            'intensity': 'high' if energy_profile[i] > mean_energy + 2 * std_energy else 'medium',
+                            'type': 'audio_peak'
+                        })
+                        last_peak_time = timestamp
+
+        # Detect silences (Quick Win #3)
+        # Find regions where energy is below threshold for extended period
+        silence_threshold = mean_energy * 0.1  # 10% of mean energy
+        min_silence_duration = 0.3  # At least 300ms of silence
+
+        silences = []
+        silence_start = None
+
+        for i, (timestamp, energy) in enumerate(zip(timestamps, energy_profile)):
+            if energy < silence_threshold:
+                if silence_start is None:
+                    silence_start = timestamp
+            else:
+                if silence_start is not None:
+                    silence_duration = timestamp - silence_start
+                    if silence_duration >= min_silence_duration:
+                        silences.append({
+                            'start': silence_start,
+                            'end': timestamp,
+                            'duration': silence_duration,
+                            'type': 'silence'
+                        })
+                    silence_start = None
+
+        # Check for trailing silence
+        if silence_start is not None:
+            silence_duration = duration - silence_start
+            if silence_duration >= min_silence_duration:
+                silences.append({
+                    'start': silence_start,
+                    'end': duration,
+                    'duration': silence_duration,
+                    'type': 'silence'
+                })
+
+        if progress_callback:
+            progress_callback("audio_analysis", 30,
+                           f"Found {len(peaks)} audio peaks, {len(silences)} silence regions")
+
+        return {
+            'peaks': peaks,
+            'silences': silences,
+            'duration': duration,
+            'mean_energy': float(mean_energy),
+            'energy_profile': {
+                'timestamps': timestamps.tolist()[::10],  # Subsample for storage
+                'values': energy_profile.tolist()[::10]
+            }
+        }
+
+    except Exception as e:
+        print(f"Error analyzing audio features: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return {
+            'peaks': [],
+            'silences': [],
+            'duration': 0,
+            'mean_energy': 0,
+            'energy_profile': {'timestamps': [], 'values': []}
+        }
+
+
+# =============================================================================
+# EMOTION DETECTION (Quick Win #4)
+# =============================================================================
+
+# Emotion keywords for scene mood detection
+EMOTION_KEYWORDS = {
+    'happy': {
+        'keywords': ['smiling', 'laughing', 'happy', 'joy', 'cheerful', 'excited', 'celebration',
+                     'party', 'fun', 'playing', 'dancing', 'bright', 'sunny', 'colorful'],
+        'transitions': ['zoom_in', 'flash', 'spin'],
+        'sfx_mood': 'upbeat, cheerful'
+    },
+    'sad': {
+        'keywords': ['sad', 'crying', 'tears', 'alone', 'lonely', 'dark', 'rain', 'gloomy',
+                     'depressed', 'grief', 'mourning', 'somber'],
+        'transitions': ['dissolve', 'fade', 'blur'],
+        'sfx_mood': 'melancholic, soft'
+    },
+    'exciting': {
+        'keywords': ['action', 'running', 'fast', 'explosion', 'chase', 'fight', 'sports',
+                     'racing', 'jumping', 'extreme', 'intense', 'battle', 'competition'],
+        'transitions': ['glitch', 'flash', 'zoom_in', 'cut'],
+        'sfx_mood': 'intense, dynamic'
+    },
+    'calm': {
+        'keywords': ['peaceful', 'calm', 'quiet', 'serene', 'nature', 'forest', 'beach',
+                     'sunset', 'sunrise', 'meditation', 'relaxing', 'gentle', 'slow'],
+        'transitions': ['dissolve', 'fade', 'cross_zoom'],
+        'sfx_mood': 'ambient, peaceful'
+    },
+    'dramatic': {
+        'keywords': ['dramatic', 'intense', 'serious', 'confrontation', 'argument', 'tension',
+                     'suspense', 'climax', 'revelation', 'shocking', 'surprised'],
+        'transitions': ['zoom_in', 'flash', 'wipe_left'],
+        'sfx_mood': 'dramatic, impactful'
+    },
+    'romantic': {
+        'keywords': ['romantic', 'love', 'couple', 'kiss', 'wedding', 'embrace', 'holding hands',
+                     'date', 'flowers', 'candlelight', 'intimate'],
+        'transitions': ['dissolve', 'fade', 'blur'],
+        'sfx_mood': 'soft, romantic'
+    },
+    'mysterious': {
+        'keywords': ['mysterious', 'dark', 'shadow', 'fog', 'mist', 'unknown', 'hidden',
+                     'secret', 'night', 'eerie', 'strange', 'unusual'],
+        'transitions': ['dissolve', 'fade', 'blur'],
+        'sfx_mood': 'mysterious, atmospheric'
+    },
+    'funny': {
+        'keywords': ['funny', 'comedy', 'laughing', 'joke', 'silly', 'humor', 'comic',
+                     'prank', 'amusing', 'hilarious', 'goofy'],
+        'transitions': ['zoom_in', 'spin', 'flash'],
+        'sfx_mood': 'comedic, playful'
+    }
+}
+
+
+def detect_emotion_from_description(description: str) -> Dict[str, Any]:
+    """
+    Detect emotional tone from scene description.
+    Quick Win #4: Emotion keyword detection for mood-aware editing.
+
+    Args:
+        description: Scene description text
+
+    Returns:
+        Dict with detected emotion, confidence, and editing suggestions
+    """
+    desc_lower = description.lower()
+
+    emotion_scores = {}
+
+    for emotion, data in EMOTION_KEYWORDS.items():
+        # Count matching keywords
+        matches = sum(1 for kw in data['keywords'] if kw in desc_lower)
+        if matches > 0:
+            # Score based on number of matches and keyword specificity
+            emotion_scores[emotion] = matches
+
+    if not emotion_scores:
+        # Default to neutral
+        return {
+            'emotion': 'neutral',
+            'confidence': 0.3,
+            'suggested_transitions': ['dissolve', 'fade'],
+            'sfx_mood': 'ambient, neutral'
+        }
+
+    # Get dominant emotion
+    dominant_emotion = max(emotion_scores, key=emotion_scores.get)
+    max_score = emotion_scores[dominant_emotion]
+
+    # Calculate confidence based on number of matches
+    confidence = min(0.5 + (max_score * 0.15), 0.95)
+
+    emotion_data = EMOTION_KEYWORDS[dominant_emotion]
+
+    return {
+        'emotion': dominant_emotion,
+        'confidence': confidence,
+        'suggested_transitions': emotion_data['transitions'],
+        'sfx_mood': emotion_data['sfx_mood'],
+        'all_emotions': emotion_scores
+    }
+
+
+# =============================================================================
+# MOTION DETECTION FOR ADAPTIVE SAMPLING (Quick Win #1)
+# =============================================================================
+
+def calculate_frame_motion(prev_frame, curr_frame) -> float:
+    """
+    Calculate motion score between two frames using frame differencing.
+
+    Args:
+        prev_frame: Previous frame (grayscale, resized)
+        curr_frame: Current frame (grayscale, resized)
+
+    Returns:
+        Motion score (0.0 to 1.0)
+    """
+    if prev_frame is None:
+        return 0.0
+
+    # Calculate absolute difference
+    diff = np.abs(curr_frame.astype(float) - prev_frame.astype(float))
+
+    # Motion score is normalized mean difference
+    motion_score = np.mean(diff) / 255.0
+
+    return motion_score
+
+
+def get_adaptive_sample_points(
+    video_path: str,
+    base_interval: float = 3.0,
+    min_interval: float = 1.0,
+    max_interval: float = 5.0,
+    motion_threshold: float = 0.05
+) -> List[float]:
+    """
+    Determine adaptive sample points based on motion detection.
+    Quick Win #1: Sample more frames during motion, fewer during static scenes.
+
+    Args:
+        video_path: Path to video file
+        base_interval: Default sampling interval in seconds
+        min_interval: Minimum interval during high motion
+        max_interval: Maximum interval during low motion
+        motion_threshold: Threshold to consider motion significant
+
+    Returns:
+        List of timestamps to sample
+    """
+    import cv2
+
+    try:
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = frame_count / fps
+
+        # First pass: Calculate motion scores at regular intervals
+        motion_scores = []
+        motion_timestamps = []
+
+        # Sample every 0.5 seconds for motion detection
+        motion_sample_interval = int(fps * 0.5)
+        prev_frame = None
+        frame_idx = 0
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_idx % motion_sample_interval == 0:
+                # Convert to grayscale and resize for fast processing
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                small = cv2.resize(gray, (160, 90))
+
+                motion = calculate_frame_motion(prev_frame, small)
+                motion_scores.append(motion)
+                motion_timestamps.append(frame_idx / fps)
+
+                prev_frame = small
+
+            frame_idx += 1
+
+        cap.release()
+
+        if not motion_scores:
+            # Fallback to uniform sampling
+            return list(np.arange(0, duration, base_interval))
+
+        # Second pass: Determine adaptive sample points
+        sample_points = [0.0]  # Always start at beginning
+        current_time = 0.0
+
+        motion_scores = np.array(motion_scores)
+        motion_timestamps = np.array(motion_timestamps)
+        mean_motion = np.mean(motion_scores)
+
+        while current_time < duration - 0.5:
+            # Find motion score near current time
+            idx = np.argmin(np.abs(motion_timestamps - current_time))
+            local_motion = motion_scores[max(0, idx-2):min(len(motion_scores), idx+3)].mean()
+
+            # Adjust interval based on motion
+            if local_motion > motion_threshold * 2:
+                # High motion - sample more frequently
+                interval = min_interval
+            elif local_motion > motion_threshold:
+                # Medium motion - use base interval
+                interval = base_interval
+            else:
+                # Low motion - sample less frequently
+                interval = max_interval
+
+            current_time += interval
+            if current_time < duration - 0.5:
+                sample_points.append(current_time)
+
+        # Always include end
+        if sample_points[-1] < duration - 1.0:
+            sample_points.append(duration - 0.5)
+
+        return sample_points
+
+    except Exception as e:
+        print(f"Error in adaptive sampling: {e}", file=sys.stderr)
+        # Fallback to uniform sampling
+        return list(np.arange(0, duration if 'duration' in dir() else 60, base_interval))
 
 
 def generate_audio_description_llm(visual_description: str) -> Optional[str]:
@@ -539,17 +944,20 @@ def analyze_frame_content(frame, model, processor) -> Dict[str, Any]:
 
 def analyze_scenes(
     video_path: str,
-    progress_callback: Optional[Callable] = None
+    progress_callback: Optional[Callable] = None,
+    use_adaptive_sampling: bool = True
 ) -> List[Dict]:
     """
     Dynamically analyze video using vision-language model.
+    Enhanced with adaptive sampling and emotion detection.
 
     Args:
         video_path: Path to video file
         progress_callback: Optional callback(stage, progress, message)
+        use_adaptive_sampling: Use motion-based adaptive sampling (Quick Win #1)
 
     Returns:
-        List of scenes with natural language descriptions
+        List of scenes with natural language descriptions and emotion data
     """
     import cv2
 
@@ -562,47 +970,79 @@ def analyze_scenes(
         duration = frame_count / fps
 
         scenes = []
-        frame_idx = 0
 
-        # Analyze keyframes every 3 seconds
-        sample_rate = int(fps * 3)
-        total_samples = int(duration / 3)
+        # Quick Win #1: Use adaptive sampling based on motion detection
+        if use_adaptive_sampling:
+            if progress_callback:
+                progress_callback("scene_analysis", 35, "Detecting motion for adaptive sampling...")
+
+            sample_points = get_adaptive_sample_points(
+                video_path,
+                base_interval=3.0,
+                min_interval=1.5,  # More samples during action
+                max_interval=5.0,  # Fewer samples during static scenes
+                motion_threshold=0.03
+            )
+            total_samples = len(sample_points)
+
+            if progress_callback:
+                progress_callback("scene_analysis", 40,
+                                f"Adaptive sampling: {total_samples} frames selected")
+        else:
+            # Uniform sampling every 3 seconds
+            sample_points = list(np.arange(0, duration, 3.0))
+            total_samples = len(sample_points)
+
         processed_samples = 0
 
-        while cap.isOpened():
+        for timestamp in sample_points:
+            frame_idx = int(timestamp * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
+
             if not ret:
-                break
+                continue
 
-            if frame_idx % sample_rate == 0:
-                timestamp = frame_idx / fps
+            # Analyze frame
+            analysis = analyze_frame_content(frame, model, processor)
 
-                # Analyze frame
-                analysis = analyze_frame_content(frame, model, processor)
+            # Quick Win #4: Detect emotion from description
+            emotion_data = detect_emotion_from_description(analysis['description'])
 
-                scene = {
-                    'timestamp': timestamp,
-                    'type': 'dynamic_moment',
-                    'description': analysis['description'],
-                    'action_description': analysis['action_description'],
-                    'sound_description': analysis['sound_description'],
-                    'confidence': analysis['confidence']
-                }
+            scene = {
+                'timestamp': timestamp,
+                'type': 'dynamic_moment',
+                'description': analysis['description'],
+                'action_description': analysis['action_description'],
+                'sound_description': analysis['sound_description'],
+                'confidence': analysis['confidence'],
+                # Enhanced with emotion data
+                'emotion': emotion_data['emotion'],
+                'emotion_confidence': emotion_data['confidence'],
+                'suggested_transitions': emotion_data['suggested_transitions'],
+                'sfx_mood': emotion_data['sfx_mood']
+            }
 
-                scenes.append(scene)
-                processed_samples += 1
+            scenes.append(scene)
+            processed_samples += 1
 
-                if progress_callback:
-                    progress = int((processed_samples / max(total_samples, 1)) * 100)
-                    progress_callback(
-                        "scene_analysis",
-                        40 + int(progress * 0.4),
-                        f"Analyzing scene {processed_samples}/{total_samples}"
-                    )
-
-            frame_idx += 1
+            if progress_callback:
+                progress = int((processed_samples / max(total_samples, 1)) * 100)
+                progress_callback(
+                    "scene_analysis",
+                    40 + int(progress * 0.4),
+                    f"Analyzing scene {processed_samples}/{total_samples} ({scene['emotion']})"
+                )
 
         cap.release()
+
+        # Log emotion distribution
+        emotion_counts = {}
+        for scene in scenes:
+            emotion = scene.get('emotion', 'neutral')
+            emotion_counts[emotion] = emotion_counts.get(emotion, 0) + 1
+        print(f"Emotion distribution: {emotion_counts}", file=sys.stderr)
+
         return scenes
 
     except Exception as e:
@@ -698,7 +1138,8 @@ def suggest_sfx(scenes: List[Dict], transcription: List[Dict]) -> List[Dict]:
 
 def detect_transitions(
     video_path: str,
-    progress_callback: Optional[Callable] = None
+    progress_callback: Optional[Callable] = None,
+    scenes: Optional[List[Dict]] = None
 ) -> List[Dict]:
     """
     Detect scene transitions/cuts in the video using frame differencing.
@@ -773,14 +1214,26 @@ def detect_transitions(
                     # Combined score
                     combined_score = (hist_diff + frame_diff) / 2
 
+                    # Find nearby scenes for content-aware suggestions (Quick Win #5)
+                    scene_before = None
+                    scene_after = None
+                    if scenes:
+                        for scene in scenes:
+                            scene_time = scene.get('timestamp', 0)
+                            if scene_time <= timestamp and (scene_before is None or scene_time > scene_before.get('timestamp', 0)):
+                                scene_before = scene
+                            if scene_time > timestamp and (scene_after is None or scene_time < scene_after.get('timestamp', float('inf'))):
+                                scene_after = scene
+
                     if combined_score > HARD_CUT_THRESHOLD:
                         # Hard cut detected
                         transitions.append({
                             'timestamp': timestamp,
                             'type': 'cut',
                             'confidence': min(combined_score, 1.0),
-                            'suggested_transition': suggest_transition_type(combined_score, 'hard'),
-                            'reason': 'Significant visual change detected'
+                            'suggested_transition': suggest_transition_type(combined_score, 'hard', scene_before, scene_after),
+                            'reason': 'Significant visual change detected',
+                            'emotion_context': scene_before.get('emotion') if scene_before else None
                         })
                         last_transition_time = timestamp
 
@@ -790,8 +1243,9 @@ def detect_transitions(
                             'timestamp': timestamp,
                             'type': 'gradual',
                             'confidence': combined_score,
-                            'suggested_transition': suggest_transition_type(combined_score, 'soft'),
-                            'reason': 'Gradual scene change detected'
+                            'suggested_transition': suggest_transition_type(combined_score, 'soft', scene_before, scene_after),
+                            'reason': 'Gradual scene change detected',
+                            'emotion_context': scene_before.get('emotion') if scene_before else None
                         })
                         last_transition_time = timestamp
 
@@ -837,17 +1291,50 @@ def detect_transitions(
         return []
 
 
-def suggest_transition_type(score: float, transition_style: str) -> str:
+def suggest_transition_type(
+    score: float,
+    transition_style: str,
+    scene_before: Optional[Dict] = None,
+    scene_after: Optional[Dict] = None
+) -> str:
     """
     Suggest appropriate transition type based on the detected change.
+    Quick Win #5: Content-aware transition suggestions.
 
     Args:
         score: The transition detection score (0-1)
         transition_style: 'hard' or 'soft'
+        scene_before: Scene data before transition (optional)
+        scene_after: Scene data after transition (optional)
 
     Returns:
         Suggested transition type
     """
+    # Quick Win #5: Use scene emotions if available
+    if scene_before and scene_after:
+        emotion_before = scene_before.get('emotion', 'neutral')
+        emotion_after = scene_after.get('emotion', 'neutral')
+        suggested = scene_before.get('suggested_transitions', [])
+
+        # Emotion-based transition selection
+        if emotion_before == 'exciting' or emotion_after == 'exciting':
+            return 'glitch' if score > 0.7 else 'zoom_in'
+        elif emotion_before == 'sad' or emotion_after == 'sad':
+            return 'dissolve' if score > 0.5 else 'fade'
+        elif emotion_before == 'happy' or emotion_after == 'happy':
+            return 'zoom_in' if score > 0.7 else 'slide'
+        elif emotion_before == 'dramatic' or emotion_after == 'dramatic':
+            return 'flash' if score > 0.7 else 'wipe'
+        elif emotion_before == 'calm' or emotion_after == 'calm':
+            return 'dissolve'
+        elif emotion_before == 'mysterious' or emotion_after == 'mysterious':
+            return 'fade' if score > 0.5 else 'blur'
+
+        # Use scene's suggested transitions if available
+        if suggested and len(suggested) > 0:
+            return suggested[0]
+
+    # Fallback to score-based selection
     if transition_style == 'hard':
         # For hard cuts, suggest more dynamic transitions
         if score > 0.85:
@@ -870,7 +1357,14 @@ def analyze_video(
     progress_callback: Optional[Callable[[str, int, str], None]] = None
 ) -> Dict[str, Any]:
     """
-    Perform complete video analysis.
+    Perform complete video analysis with enhanced features.
+
+    Enhanced with Quick Wins:
+    - Quick Win #1: Adaptive frame sampling based on motion
+    - Quick Win #2: Audio peak detection for emphasis points
+    - Quick Win #3: Silence detection for SFX/cut placement
+    - Quick Win #4: Emotion detection from scene descriptions
+    - Quick Win #5: Content-aware transition suggestions
 
     Args:
         video_path: Path to video file
@@ -878,7 +1372,8 @@ def analyze_video(
         progress_callback: Optional callback(stage, progress_percent, message)
 
     Returns:
-        Analysis results dict with scenes, suggestedSFX, transcription, transitions
+        Analysis results dict with scenes, suggestedSFX, transcription, transitions,
+        audio_features (peaks, silences)
     """
     if progress_callback:
         progress_callback("loading_models", 5, "Loading AI models...")
@@ -888,27 +1383,164 @@ def analyze_video(
         progress_callback("transcription", 10, "Transcribing audio...")
     transcription = transcribe_audio(audio_path, progress_callback)
 
-    # Analyze scenes
+    # Quick Win #2 & #3: Analyze audio for peaks and silences
     if progress_callback:
-        progress_callback("scene_analysis", 40, "Analyzing video scenes...")
-    scenes = analyze_scenes(video_path, progress_callback)
+        progress_callback("audio_analysis", 25, "Analyzing audio features...")
+    audio_features = analyze_audio_features(audio_path, progress_callback)
 
-    # Detect transitions
+    # Analyze scenes (with Quick Win #1: adaptive sampling & #4: emotion detection)
+    if progress_callback:
+        progress_callback("scene_analysis", 35, "Analyzing video scenes with adaptive sampling...")
+    scenes = analyze_scenes(video_path, progress_callback, use_adaptive_sampling=True)
+
+    # Detect transitions (with Quick Win #5: content-aware suggestions)
     if progress_callback:
         progress_callback("transition_detection", 80, "Detecting scene transitions...")
-    transitions = detect_transitions(video_path, progress_callback)
+    transitions = detect_transitions(video_path, progress_callback, scenes=scenes)
 
-    # Generate SFX suggestions
+    # Generate SFX suggestions (enhanced with audio peaks and silences)
     if progress_callback:
         progress_callback("sfx_suggestions", 90, "Generating SFX suggestions...")
-    sfx_suggestions = suggest_sfx(scenes, transcription)
+    sfx_suggestions = suggest_sfx_enhanced(scenes, transcription, audio_features)
 
     if progress_callback:
         progress_callback("completed", 100, "Analysis complete")
+
+    # Summary stats
+    emotion_distribution = {}
+    for scene in scenes:
+        emotion = scene.get('emotion', 'neutral')
+        emotion_distribution[emotion] = emotion_distribution.get(emotion, 0) + 1
+
+    print(f"Analysis complete: {len(scenes)} scenes, {len(transitions)} transitions, "
+          f"{len(sfx_suggestions)} SFX suggestions, {len(audio_features.get('peaks', []))} audio peaks, "
+          f"{len(audio_features.get('silences', []))} silence regions", file=sys.stderr)
+    print(f"Emotion distribution: {emotion_distribution}", file=sys.stderr)
 
     return {
         "scenes": scenes,
         "suggestedSFX": sfx_suggestions,
         "suggestedTransitions": transitions,
-        "transcription": transcription
+        "transcription": transcription,
+        # Enhanced data
+        "audio_features": {
+            "peaks": audio_features.get('peaks', []),
+            "silences": audio_features.get('silences', []),
+            "mean_energy": audio_features.get('mean_energy', 0)
+        },
+        "emotion_distribution": emotion_distribution
     }
+
+
+def suggest_sfx_enhanced(
+    scenes: List[Dict],
+    transcription: List[Dict],
+    audio_features: Dict
+) -> List[Dict]:
+    """
+    Enhanced SFX suggestions using audio peak/silence information.
+
+    Improvements:
+    - Place SFX at audio peaks for emphasis
+    - Use silence regions for ambient SFX
+    - Avoid placing SFX during speech
+
+    Args:
+        scenes: List of analyzed scenes
+        transcription: List of transcription segments
+        audio_features: Dict with peaks, silences, energy profile
+
+    Returns:
+        List of SFX suggestions with optimized timing
+    """
+    # Get base suggestions from scenes
+    base_suggestions = suggest_sfx(scenes, transcription)
+
+    # Get audio peaks and silences
+    peaks = audio_features.get('peaks', [])
+    silences = audio_features.get('silences', [])
+
+    enhanced_suggestions = []
+
+    # Add suggestions at audio peaks (emphasis points)
+    for peak in peaks[:10]:  # Limit to top 10 peaks
+        timestamp = peak['timestamp']
+        intensity = peak.get('intensity', 'medium')
+
+        # Find nearby scene for context
+        nearby_scene = None
+        for scene in scenes:
+            if abs(scene['timestamp'] - timestamp) < 2.0:
+                nearby_scene = scene
+                break
+
+        # Check if we already have a suggestion near this peak
+        has_nearby = any(abs(s['timestamp'] - timestamp) < 1.5 for s in base_suggestions)
+
+        if not has_nearby and nearby_scene:
+            # Create emphasis SFX suggestion
+            if intensity == 'high':
+                sfx_prompt = "dramatic impact hit, bass drop, powerful emphasis sound"
+            else:
+                sfx_prompt = "subtle emphasis whoosh, soft impact, accent sound"
+
+            enhanced_suggestions.append({
+                'timestamp': timestamp,
+                'prompt': sfx_prompt,
+                'reason': f'Audio peak detected ({intensity} intensity)',
+                'confidence': 0.75 if intensity == 'high' else 0.6,
+                'visual_context': nearby_scene.get('description', ''),
+                'type': 'audio_peak',
+                'duration_hint': 1.5
+            })
+
+    # Add ambient suggestions for longer silences
+    for silence in silences:
+        if silence['duration'] >= 1.0:  # Only for silences >= 1 second
+            timestamp = silence['start'] + 0.3  # Start slightly after silence begins
+
+            # Find nearby scene for context
+            nearby_scene = None
+            for scene in scenes:
+                if abs(scene['timestamp'] - timestamp) < 3.0:
+                    nearby_scene = scene
+                    break
+
+            # Check if we already have a suggestion in this silence
+            has_nearby = any(
+                silence['start'] <= s['timestamp'] <= silence['end']
+                for s in base_suggestions + enhanced_suggestions
+            )
+
+            if not has_nearby and nearby_scene:
+                # Use scene's mood for ambient sound
+                sfx_mood = nearby_scene.get('sfx_mood', 'ambient, atmospheric')
+                enhanced_suggestions.append({
+                    'timestamp': timestamp,
+                    'prompt': f"soft {sfx_mood} background atmosphere, subtle environmental sounds",
+                    'reason': f'Silence detected ({silence["duration"]:.1f}s) - adding ambient',
+                    'confidence': 0.55,
+                    'visual_context': nearby_scene.get('description', ''),
+                    'type': 'silence_fill',
+                    'duration_hint': min(silence['duration'] - 0.5, 3.0)
+                })
+
+    # Combine and sort all suggestions
+    all_suggestions = base_suggestions + enhanced_suggestions
+    all_suggestions.sort(key=lambda x: x['timestamp'])
+
+    # Deduplicate - keep suggestions that are at least 2 seconds apart
+    unique_suggestions = []
+    for suggestion in all_suggestions:
+        similar = next((s for s in unique_suggestions
+                       if abs(s['timestamp'] - suggestion['timestamp']) < 2.0), None)
+
+        if similar:
+            # Keep the one with higher confidence
+            if suggestion.get('confidence', 0) > similar.get('confidence', 0):
+                unique_suggestions.remove(similar)
+                unique_suggestions.append(suggestion)
+        else:
+            unique_suggestions.append(suggestion)
+
+    return unique_suggestions
