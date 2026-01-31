@@ -7,8 +7,10 @@ export { projectsApi } from './projects'
 export { videoApi } from './video'
 export { aiApi } from './ai'
 export { filesApi } from './files'
+export { usersApi } from './users'
 
 export type { User, LoginResponse } from './auth'
+export type { UserUsage, UserLimits, OnboardingStatus, ReviewStatus, ReviewSubmit, TimeTrackingResponse } from './users'
 export type {
   Project,
   ProjectSummary,

@@ -56,8 +56,21 @@ async def create_project(
 ):
     """
     Create a new project.
+    Limited to 3 projects per user.
     """
     from app.models.project import ProjectMode
+    from app.models.user import MAX_PROJECTS_PER_USER
+
+    # Refresh user to get current project count
+    db.refresh(current_user)
+
+    # Check project limit
+    if not current_user.can_create_project:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Project limit reached. You can only create {MAX_PROJECTS_PER_USER} projects. "
+                   f"Please delete an existing project to create a new one."
+        )
 
     project = Project(
         name=project_data.name,

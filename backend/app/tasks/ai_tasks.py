@@ -821,7 +821,21 @@ def run_sfx_generation(
             progress_callback=progress_callback
         )
 
-        # Send completion with file URL
+        # Track SFX usage (update user's sfx_seconds_used)
+        db = SessionLocal()
+        try:
+            from app.models.user import User
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                user.sfx_seconds_used = (user.sfx_seconds_used or 0) + duration
+                db.commit()
+                print(f"Updated SFX usage for user {user_id}: +{duration}s, total: {user.sfx_seconds_used}s", file=sys.stderr)
+        except Exception as e:
+            print(f"Failed to update SFX usage: {e}", file=sys.stderr)
+        finally:
+            db.close()
+
+        # Send completion with file URL and usage info
         manager = get_connection_manager()
         file_url = file_service.get_file_url(user_id, project_id, "sfx", output_filename)
 
@@ -831,7 +845,8 @@ def run_sfx_generation(
                 "filename": output_filename,
                 "url": file_url,
                 "prompt": prompt,
-                "duration": duration
+                "duration": duration,
+                "seconds_used": duration
             }
         ))
 

@@ -175,9 +175,12 @@ async def generate_sfx(
     db: Session = Depends(get_db)
 ):
     """
-    Generate a sound effect using AudioCraft.
+    Generate a sound effect using ElevenLabs API.
     This is a long-running task that will be executed in the background.
+    Limited to 3 minutes (180 seconds) total per user.
     """
+    from app.models.user import MAX_SFX_SECONDS_PER_USER
+
     project = db.query(Project).filter(
         Project.id == project_id,
         Project.owner_id == current_user.id
@@ -191,6 +194,25 @@ async def generate_sfx(
         raise HTTPException(
             status_code=400,
             detail="Duration must be between 0.5 and 22 seconds"
+        )
+
+    # Refresh user to get latest usage
+    db.refresh(current_user)
+
+    # Check SFX generation limit
+    if not current_user.can_generate_sfx:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"SFX generation limit reached. You have used all {MAX_SFX_SECONDS_PER_USER / 60:.0f} minutes "
+                   f"of SFX generation. Contact support to upgrade your account."
+        )
+
+    # Check if this request would exceed the limit
+    if request.duration > current_user.sfx_seconds_remaining:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not enough SFX quota remaining. You have {current_user.sfx_seconds_remaining:.1f}s left, "
+                   f"but requested {request.duration}s. Try a shorter duration."
         )
 
     # Generate output filename
@@ -218,7 +240,7 @@ async def generate_sfx(
     return {
         "task_id": task_id,
         "status": "started",
-        "message": "SFX generation has been started. Progress updates will be sent via WebSocket."
+        "message": f"SFX generation started. You have {current_user.sfx_seconds_remaining - request.duration:.1f}s quota remaining after this."
     }
 
 
