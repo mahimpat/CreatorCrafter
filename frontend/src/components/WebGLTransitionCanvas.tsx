@@ -94,8 +94,14 @@ export function WebGLTransitionCanvas({
       ref={canvasRef}
       className={`webgl-transition-canvas ${isVisible ? 'visible' : ''} ${className}`}
       style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
         opacity: isVisible ? 1 : 0,
         pointerEvents: 'none',
+        zIndex: 26,
       }}
       aria-hidden="true"
     />

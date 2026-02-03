@@ -24,6 +24,32 @@
   color: var(--accent-primary);
 }
 
+/* Auth Logo - Theme-aware */
+.auth-logo {
+  height: 80px;
+  width: auto;
+  object-fit: contain;
+  margin-bottom: 12px;
+}
+
+/* Dark theme (default): show dark logo, hide light logo */
+.auth-logo.logo-dark {
+  display: inline-block;
+}
+
+.auth-logo.logo-light {
+  display: none;
+}
+
+/* Light theme: show light logo, hide dark logo */
+[data-theme="light"] .auth-logo.logo-dark {
+  display: none;
+}
+
+[data-theme="light"] .auth-logo.logo-light {
+  display: inline-block;
+}
+
 .auth-header p {
   margin: 8px 0 0 0;
   color: var(--text-secondary);

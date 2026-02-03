@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { Trash2, Upload, Wand2, Play, Volume2 } from 'lucide-react'
+import { Trash2, Wand2, Play, Volume2 } from 'lucide-react'
+import { useToast } from './Toast'
 import './SFXEditor.css'
 
 interface SFXSuggestion {
@@ -21,11 +22,11 @@ export default function SFXEditor() {
     getSFXStreamUrl
   } = useProject()
 
+  const { showError, showSuccess } = useToast()
   const [isGenerating, setIsGenerating] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState(3)
   const [generatingIndex, setGeneratingIndex] = useState<number | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleGenerateSFX = async () => {
     if (!prompt) return
@@ -34,22 +35,13 @@ export default function SFXEditor() {
       setIsGenerating(true)
       await generateSFX(prompt, duration)
       setPrompt('')
+      showSuccess('SFX generated successfully!')
     } catch (error) {
       console.error('Error generating SFX:', error)
-      alert('Failed to generate SFX. Please try again.')
+      showError('Failed to generate SFX. Please try again.')
     } finally {
       setIsGenerating(false)
     }
-  }
-
-  const handleImportSFX = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    // TODO: Implement file upload for SFX
-    // For now, show a message
-    alert('SFX file upload coming soon. Use AI generation for now.')
-    e.target.value = ''
   }
 
   const handleUseSuggestion = async (suggestion: SFXSuggestion, index: number) => {
@@ -59,9 +51,10 @@ export default function SFXEditor() {
       // Use the suggestion prompt for generation
       const finalPrompt = suggestion.prompt
       await generateSFX(finalPrompt, duration)
+      showSuccess('SFX generated successfully!')
     } catch (error) {
       console.error('Error generating suggested SFX:', error)
-      alert('Failed to generate SFX. Please try again.')
+      showError('Failed to generate SFX. Please try again.')
     } finally {
       setGeneratingIndex(null)
     }
@@ -77,20 +70,6 @@ export default function SFXEditor() {
     <div className="sfx-editor">
       <div className="editor-header">
         <h3>Sound Effects</h3>
-        <button
-          className="btn-small"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Upload size={14} />
-          Import Audio
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="audio/*"
-          onChange={handleImportSFX}
-          style={{ display: 'none' }}
-        />
       </div>
 
       <div className="generate-sfx">
@@ -189,9 +168,15 @@ export default function SFXEditor() {
       <div className="sfx-list">
         <h4>SFX Tracks ({sfxTracks.length})</h4>
         {sfxTracks.length === 0 ? (
-          <p className="empty-message">
-            No SFX tracks added yet. Use AI suggestions or generate custom SFX above.
-          </p>
+          <div className="empty-state">
+            <Volume2 size={32} className="empty-icon" />
+            <p className="empty-title">No sound effects yet</p>
+            <p className="empty-message">
+              {analysis?.suggestedSFX && analysis.suggestedSFX.length > 0
+                ? 'Use AI suggestions above or describe a custom sound effect to generate.'
+                : 'Analyze your video to get AI suggestions, or describe a sound effect above.'}
+            </p>
+          </div>
         ) : (
           sfxTracks.map(track => (
             <div key={track.id} className="sfx-item">

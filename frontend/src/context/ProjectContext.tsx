@@ -154,7 +154,6 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
       }
 
       // Start analysis - works for both single video and multi-clip projects
-      console.log('[ProjectContext] Starting video analysis for project:', state.projectId)
       await aiApi.analyzeVideo(state.projectId)
 
       // Analysis runs in background, results come via WebSocket

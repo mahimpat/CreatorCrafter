@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react'
 import { Film, Trash2, RefreshCw, Download, Play, Pause, FolderOpen, Music, FileVideo } from 'lucide-react'
 import { filesApi } from '../api'
+import { useToast } from './Toast'
 import './AssetsPanel.css'
 
 interface AssetFile {
@@ -20,6 +21,7 @@ interface AssetsPanelProps {
 type AssetTab = 'all' | 'video' | 'audio' | 'exports'
 
 export default function AssetsPanel({ projectId }: AssetsPanelProps) {
+  const { showError, showSuccess } = useToast()
   const [sourceFiles, setSourceFiles] = useState<AssetFile[]>([])
   const [sfxFiles, setSfxFiles] = useState<AssetFile[]>([])
   const [exportFiles, setExportFiles] = useState<AssetFile[]>([])
@@ -64,9 +66,10 @@ export default function AssetsPanel({ projectId }: AssetsPanelProps) {
     try {
       await filesApi.delete(projectId, file.asset_type, file.filename)
       await loadAssets()
+      showSuccess('File deleted successfully')
     } catch (error) {
       console.error('Failed to delete file:', error)
-      alert('Failed to delete file')
+      showError('Failed to delete file')
     }
   }
 

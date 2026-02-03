@@ -36,6 +36,15 @@ class TransitionInfo:
     parameters: Optional[Dict] = None
 
 
+@dataclass
+class SFXTrackInfo:
+    """Information about an SFX track to mix into the output."""
+    path: str
+    start_time: float  # seconds from start of timeline
+    duration: float  # seconds
+    volume: float = 1.0
+
+
 # ===== TRANSITION MAPPINGS =====
 # Maps our transition types to FFmpeg xfade transitions
 
@@ -212,7 +221,8 @@ class VideoStitcher:
         transitions: List[TransitionInfo],
         output_filename: str,
         background_audio: Optional[str] = None,
-        audio_volume: float = 0.3
+        audio_volume: float = 0.3,
+        sfx_tracks: Optional[List[SFXTrackInfo]] = None
     ) -> Tuple[bool, str]:
         """
         Stitch multiple clips together with transitions.
@@ -223,6 +233,7 @@ class VideoStitcher:
             output_filename: Name of output file
             background_audio: Optional background music path
             audio_volume: Volume for background audio (0-1)
+            sfx_tracks: Optional list of SFX tracks to mix in
 
         Returns:
             Tuple of (success, output_path or error_message)
@@ -230,18 +241,21 @@ class VideoStitcher:
         if len(clips) < 1:
             return False, "No clips provided"
 
-        if len(clips) == 1:
-            # Single clip, no transitions needed
+        if len(clips) == 1 and not sfx_tracks and not background_audio:
+            # Single clip with no audio mixing needed
             return self._render_single_clip(clips[0], output_filename)
 
-        if len(transitions) != len(clips) - 1:
+        if len(clips) > 1 and len(transitions) != len(clips) - 1:
             return False, f"Expected {len(clips) - 1} transitions, got {len(transitions)}"
 
         output_path = os.path.join(self.output_dir, output_filename)
 
         try:
             # Build the FFmpeg command
-            cmd = self._build_stitch_command(clips, transitions, output_path, background_audio, audio_volume)
+            cmd = self._build_stitch_command(
+                clips, transitions, output_path,
+                background_audio, audio_volume, sfx_tracks
+            )
             print(f"FFmpeg command: {' '.join(cmd)}")
 
             # Execute FFmpeg
@@ -296,94 +310,128 @@ class VideoStitcher:
         transitions: List[TransitionInfo],
         output_path: str,
         background_audio: Optional[str],
-        audio_volume: float
+        audio_volume: float,
+        sfx_tracks: Optional[List[SFXTrackInfo]] = None
     ) -> List[str]:
-        """Build the FFmpeg command for stitching clips with transitions."""
-
-        # For complex transitions with xfade, we need to chain them
-        # FFmpeg xfade syntax: [0:v][1:v]xfade=transition=fade:duration=0.5:offset=4.5[v01]
+        """Build the FFmpeg command for stitching clips with transitions, BGM, and SFX."""
 
         cmd = ['ffmpeg', '-y']
 
-        # Add all input files
+        # Add all input files: clips, then BGM, then SFX
         for clip in clips:
             cmd.extend(['-i', clip.path])
 
         if background_audio:
             cmd.extend(['-i', background_audio])
 
+        if sfx_tracks:
+            for sfx in sfx_tracks:
+                cmd.extend(['-i', sfx.path])
+
         # Build the filter complex
         filter_parts = []
         audio_filter_parts = []
 
-        # First, trim each clip if needed
-        for i, clip in enumerate(clips):
+        if len(clips) == 1:
+            # Single clip - simple trim/passthrough
+            clip = clips[0]
             if clip.start_trim > 0 or clip.end_trim > 0:
                 filter_parts.append(
-                    f"[{i}:v]trim=start={clip.start_trim}:duration={clip.effective_duration},"
-                    f"setpts=PTS-STARTPTS[v{i}]"
+                    f"[0:v]trim=start={clip.start_trim}:duration={clip.effective_duration},"
+                    f"setpts=PTS-STARTPTS[vout]"
                 )
                 audio_filter_parts.append(
-                    f"[{i}:a]atrim=start={clip.start_trim}:duration={clip.effective_duration},"
-                    f"asetpts=PTS-STARTPTS[a{i}]"
+                    f"[0:a]atrim=start={clip.start_trim}:duration={clip.effective_duration},"
+                    f"asetpts=PTS-STARTPTS[aout]"
                 )
             else:
-                filter_parts.append(f"[{i}:v]null[v{i}]")
-                audio_filter_parts.append(f"[{i}:a]anull[a{i}]")
+                filter_parts.append("[0:v]null[vout]")
+                audio_filter_parts.append("[0:a]anull[aout]")
+        else:
+            # Multi-clip: trim each clip, then apply xfade transitions
+            for i, clip in enumerate(clips):
+                if clip.start_trim > 0 or clip.end_trim > 0:
+                    filter_parts.append(
+                        f"[{i}:v]trim=start={clip.start_trim}:duration={clip.effective_duration},"
+                        f"setpts=PTS-STARTPTS[v{i}]"
+                    )
+                    audio_filter_parts.append(
+                        f"[{i}:a]atrim=start={clip.start_trim}:duration={clip.effective_duration},"
+                        f"asetpts=PTS-STARTPTS[a{i}]"
+                    )
+                else:
+                    filter_parts.append(f"[{i}:v]null[v{i}]")
+                    audio_filter_parts.append(f"[{i}:a]anull[a{i}]")
 
-        # Apply xfade transitions between clips
-        current_offset = clips[0].effective_duration
-        prev_video = "v0"
-        prev_audio = "a0"
+            # Apply xfade transitions between clips
+            current_offset = clips[0].effective_duration
+            prev_video = "v0"
+            prev_audio = "a0"
 
-        for i, transition in enumerate(transitions):
-            next_video = f"v{i + 1}"
-            next_audio = f"a{i + 1}"
-            output_video = f"vt{i}" if i < len(transitions) - 1 else "vout"
-            output_audio = f"at{i}" if i < len(transitions) - 1 else "aout"
+            for i, transition in enumerate(transitions):
+                next_video = f"v{i + 1}"
+                next_audio = f"a{i + 1}"
+                output_video = f"vt{i}" if i < len(transitions) - 1 else "vout"
+                output_audio = f"at{i}" if i < len(transitions) - 1 else "aout"
 
-            xfade_type = self.get_xfade_transition(transition.type)
+                xfade_type = self.get_xfade_transition(transition.type)
 
-            if xfade_type is None or transition.type == 'cut':
-                # No transition (cut) - just concatenate
-                filter_parts.append(
-                    f"[{prev_video}][{next_video}]concat=n=2:v=1:a=0[{output_video}]"
-                )
-                audio_filter_parts.append(
-                    f"[{prev_audio}][{next_audio}]concat=n=2:v=0:a=1[{output_audio}]"
-                )
-            else:
-                # Calculate offset (when the transition starts)
-                offset = current_offset - transition.duration
+                if xfade_type is None or transition.type == 'cut':
+                    filter_parts.append(
+                        f"[{prev_video}][{next_video}]concat=n=2:v=1:a=0[{output_video}]"
+                    )
+                    audio_filter_parts.append(
+                        f"[{prev_audio}][{next_audio}]concat=n=2:v=0:a=1[{output_audio}]"
+                    )
+                else:
+                    offset = current_offset - transition.duration
+                    filter_parts.append(
+                        f"[{prev_video}][{next_video}]xfade=transition={xfade_type}:"
+                        f"duration={transition.duration}:offset={offset}[{output_video}]"
+                    )
+                    audio_filter_parts.append(
+                        f"[{prev_audio}][{next_audio}]acrossfade=d={transition.duration}[{output_audio}]"
+                    )
 
-                filter_parts.append(
-                    f"[{prev_video}][{next_video}]xfade=transition={xfade_type}:"
-                    f"duration={transition.duration}:offset={offset}[{output_video}]"
-                )
-
-                # Audio crossfade
-                audio_filter_parts.append(
-                    f"[{prev_audio}][{next_audio}]acrossfade=d={transition.duration}[{output_audio}]"
-                )
-
-            # Update offset for next transition
-            current_offset = offset + clips[i + 1].effective_duration
-            prev_video = output_video
-            prev_audio = output_audio
+                current_offset = offset + clips[i + 1].effective_duration
+                prev_video = output_video
+                prev_audio = output_audio
 
         # Combine filter parts
         all_filters = filter_parts + audio_filter_parts
+        final_audio = "aout"
 
         # Add background audio mix if provided
         if background_audio:
             bgm_index = len(clips)
             all_filters.append(
-                f"[aout][{bgm_index}:a]amix=inputs=2:duration=first:"
-                f"weights=1 {audio_volume}[afinal]"
+                f"[{final_audio}][{bgm_index}:a]amix=inputs=2:duration=first:"
+                f"weights=1 {audio_volume}[abgm]"
             )
-            final_audio = "afinal"
-        else:
-            final_audio = "aout"
+            final_audio = "abgm"
+
+        # Add SFX mixing if provided
+        if sfx_tracks:
+            sfx_start_idx = len(clips) + (1 if background_audio else 0)
+
+            sfx_labels = []
+            for i, sfx in enumerate(sfx_tracks):
+                input_idx = sfx_start_idx + i
+                delay_ms = int(sfx.start_time * 1000)
+                label = f"sfxd{i}"
+                all_filters.append(
+                    f"[{input_idx}:a]adelay={delay_ms}|{delay_ms},"
+                    f"volume={sfx.volume}[{label}]"
+                )
+                sfx_labels.append(label)
+
+            # Mix all SFX with main audio
+            mix_inputs = f"[{final_audio}]" + "".join(f"[{l}]" for l in sfx_labels)
+            num_inputs = 1 + len(sfx_tracks)
+            all_filters.append(
+                f"{mix_inputs}amix=inputs={num_inputs}:duration=first:normalize=0[asfx]"
+            )
+            final_audio = "asfx"
 
         # Build the complete filter_complex
         filter_complex = ";".join(all_filters)

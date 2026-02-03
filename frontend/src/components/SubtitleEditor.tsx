@@ -1,7 +1,29 @@
 import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { Pencil, Trash2, Wand2 } from 'lucide-react'
+import { Pencil, Trash2, Wand2, Bold, Italic, AlignLeft, AlignCenter, AlignRight, Move } from 'lucide-react'
+import { useToast } from './Toast'
 import './SubtitleEditor.css'
+
+// Popular web-safe and Google fonts
+const FONT_OPTIONS = [
+  { value: 'Arial', label: 'Arial' },
+  { value: 'Helvetica', label: 'Helvetica' },
+  { value: 'Times New Roman', label: 'Times New Roman' },
+  { value: 'Georgia', label: 'Georgia' },
+  { value: 'Verdana', label: 'Verdana' },
+  { value: 'Courier New', label: 'Courier New' },
+  { value: 'Impact', label: 'Impact' },
+  { value: 'Comic Sans MS', label: 'Comic Sans' },
+  { value: 'Trebuchet MS', label: 'Trebuchet' },
+  { value: 'Palatino Linotype', label: 'Palatino' },
+  // Modern fonts (require @import in CSS)
+  { value: 'Roboto', label: 'Roboto' },
+  { value: 'Open Sans', label: 'Open Sans' },
+  { value: 'Montserrat', label: 'Montserrat' },
+  { value: 'Poppins', label: 'Poppins' },
+  { value: 'Oswald', label: 'Oswald' },
+  { value: 'Bebas Neue', label: 'Bebas Neue' },
+]
 
 export default function SubtitleEditor() {
   const {
@@ -13,6 +35,7 @@ export default function SubtitleEditor() {
     analysis
   } = useProject()
 
+  const { showWarning, showSuccess } = useToast()
   const [editingId, setEditingId] = useState<number | null>(null)
   const [newSubtitle, setNewSubtitle] = useState({
     text: '',
@@ -38,9 +61,11 @@ export default function SubtitleEditor() {
 
   const handleAutoGenerateFromTranscription = () => {
     if (!analysis?.transcription) {
-      alert('Please analyze the video first to generate transcription')
+      showWarning('Please analyze the video first to generate transcription')
       return
     }
+
+    showSuccess('Subtitles generated from transcription!')
 
     analysis.transcription.forEach((transcript: { text: string; start: number; end: number }) => {
       addSubtitle({
@@ -135,53 +160,9 @@ export default function SubtitleEditor() {
                   />
 
                   <div className="subtitle-style-controls">
-                    <div className="input-group">
-                      <label>Font Size</label>
-                      <input
-                        type="number"
-                        value={subtitle.style.fontSize}
-                        onChange={e =>
-                          updateSubtitle(subtitle.id, {
-                            style: { ...subtitle.style, fontSize: parseInt(e.target.value) }
-                          })
-                        }
-                      />
-                    </div>
-
-                    <div className="input-group">
-                      <label>Position</label>
-                      <select
-                        value={subtitle.style.position}
-                        onChange={e =>
-                          updateSubtitle(subtitle.id, {
-                            style: {
-                              ...subtitle.style,
-                              position: e.target.value as 'top' | 'center' | 'bottom'
-                            }
-                          })
-                        }
-                      >
-                        <option value="top">Top</option>
-                        <option value="center">Center</option>
-                        <option value="bottom">Bottom</option>
-                      </select>
-                    </div>
-
-                    <div className="input-group">
-                      <label>Color</label>
-                      <input
-                        type="color"
-                        value={subtitle.style.color}
-                        onChange={e =>
-                          updateSubtitle(subtitle.id, {
-                            style: { ...subtitle.style, color: e.target.value }
-                          })
-                        }
-                      />
-                    </div>
-
-                    <div className="input-group">
-                      <label>Font</label>
+                    {/* Font Family */}
+                    <div className="input-group full-width">
+                      <label>Font Family</label>
                       <select
                         value={subtitle.style.fontFamily}
                         onChange={e =>
@@ -190,14 +171,200 @@ export default function SubtitleEditor() {
                           })
                         }
                       >
-                        <option value="Arial">Arial</option>
-                        <option value="Helvetica">Helvetica</option>
-                        <option value="Times New Roman">Times New Roman</option>
-                        <option value="Georgia">Georgia</option>
-                        <option value="Verdana">Verdana</option>
-                        <option value="Courier New">Courier New</option>
+                        {FONT_OPTIONS.map(font => (
+                          <option key={font.value} value={font.value} style={{ fontFamily: font.value }}>
+                            {font.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
+
+                    {/* Font Size & Style */}
+                    <div className="style-row">
+                      <div className="input-group">
+                        <label>Size</label>
+                        <input
+                          type="number"
+                          min="12"
+                          max="120"
+                          value={subtitle.style.fontSize}
+                          onChange={e =>
+                            updateSubtitle(subtitle.id, {
+                              style: { ...subtitle.style, fontSize: parseInt(e.target.value) || 24 }
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div className="style-buttons">
+                        <button
+                          className={`style-btn ${subtitle.style.fontWeight === 'bold' ? 'active' : ''}`}
+                          onClick={() =>
+                            updateSubtitle(subtitle.id, {
+                              style: {
+                                ...subtitle.style,
+                                fontWeight: subtitle.style.fontWeight === 'bold' ? 'normal' : 'bold'
+                              }
+                            })
+                          }
+                          title="Bold"
+                        >
+                          <Bold size={14} />
+                        </button>
+                        <button
+                          className={`style-btn ${subtitle.style.fontStyle === 'italic' ? 'active' : ''}`}
+                          onClick={() =>
+                            updateSubtitle(subtitle.id, {
+                              style: {
+                                ...subtitle.style,
+                                fontStyle: subtitle.style.fontStyle === 'italic' ? 'normal' : 'italic'
+                              }
+                            })
+                          }
+                          title="Italic"
+                        >
+                          <Italic size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Text Alignment */}
+                    <div className="input-group">
+                      <label>Alignment</label>
+                      <div className="style-buttons">
+                        <button
+                          className={`style-btn ${(subtitle.style.textAlign || 'center') === 'left' ? 'active' : ''}`}
+                          onClick={() =>
+                            updateSubtitle(subtitle.id, {
+                              style: { ...subtitle.style, textAlign: 'left' }
+                            })
+                          }
+                          title="Align Left"
+                        >
+                          <AlignLeft size={14} />
+                        </button>
+                        <button
+                          className={`style-btn ${(subtitle.style.textAlign || 'center') === 'center' ? 'active' : ''}`}
+                          onClick={() =>
+                            updateSubtitle(subtitle.id, {
+                              style: { ...subtitle.style, textAlign: 'center' }
+                            })
+                          }
+                          title="Align Center"
+                        >
+                          <AlignCenter size={14} />
+                        </button>
+                        <button
+                          className={`style-btn ${(subtitle.style.textAlign || 'center') === 'right' ? 'active' : ''}`}
+                          onClick={() =>
+                            updateSubtitle(subtitle.id, {
+                              style: { ...subtitle.style, textAlign: 'right' }
+                            })
+                          }
+                          title="Align Right"
+                        >
+                          <AlignRight size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Colors */}
+                    <div className="style-row">
+                      <div className="input-group">
+                        <label>Text Color</label>
+                        <input
+                          type="color"
+                          value={subtitle.style.color}
+                          onChange={e =>
+                            updateSubtitle(subtitle.id, {
+                              style: { ...subtitle.style, color: e.target.value }
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="input-group">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={subtitle.style.textShadow !== false}
+                            onChange={e =>
+                              updateSubtitle(subtitle.id, {
+                                style: { ...subtitle.style, textShadow: e.target.checked }
+                              })
+                            }
+                          />
+                          Text Shadow
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Position */}
+                    <div className="input-group">
+                      <label>Position</label>
+                      <select
+                        value={subtitle.style.position}
+                        onChange={e => {
+                          const newPosition = e.target.value as 'top' | 'center' | 'bottom' | 'custom'
+                          const updates: any = {
+                            style: { ...subtitle.style, position: newPosition }
+                          }
+                          // Set default x/y for custom position
+                          if (newPosition === 'custom' && !subtitle.style.x) {
+                            updates.style.x = 50
+                            updates.style.y = 80
+                          }
+                          updateSubtitle(subtitle.id, updates)
+                        }}
+                      >
+                        <option value="top">Top</option>
+                        <option value="center">Center</option>
+                        <option value="bottom">Bottom</option>
+                        <option value="custom">Custom (Drag on video)</option>
+                      </select>
+                    </div>
+
+                    {/* Custom position controls */}
+                    {subtitle.style.position === 'custom' && (
+                      <div className="custom-position-controls">
+                        <div className="style-row">
+                          <div className="input-group">
+                            <label>X Position (%)</label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={subtitle.style.x || 50}
+                              onChange={e =>
+                                updateSubtitle(subtitle.id, {
+                                  style: { ...subtitle.style, x: parseInt(e.target.value) }
+                                })
+                              }
+                            />
+                            <span className="range-value">{subtitle.style.x || 50}%</span>
+                          </div>
+                        </div>
+                        <div className="style-row">
+                          <div className="input-group">
+                            <label>Y Position (%)</label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={subtitle.style.y || 80}
+                              onChange={e =>
+                                updateSubtitle(subtitle.id, {
+                                  style: { ...subtitle.style, y: parseInt(e.target.value) }
+                                })
+                              }
+                            />
+                            <span className="range-value">{subtitle.style.y || 80}%</span>
+                          </div>
+                        </div>
+                        <p className="hint">
+                          <Move size={12} /> Drag the subtitle on the video preview to position
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="subtitle-timing">

@@ -371,9 +371,7 @@ export default function TransitionsEditor({
     setError(null)
 
     try {
-      console.log('Adding transition:', { type, duration, from: newTransitionFrom, to: newTransitionTo })
       await onAddTransition(newTransitionFrom, newTransitionTo, type, duration)
-      console.log('Transition added successfully!')
       // Only close picker on success
       setNewTransitionFrom(null)
       setNewTransitionTo(null)

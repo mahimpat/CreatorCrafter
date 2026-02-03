@@ -1,11 +1,12 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { VideoClip, Transition, projectsApi } from '../api'
+import { VideoClip, Transition, BackgroundAudio, projectsApi } from '../api'
 import {
-  Film, Volume2, MessageSquare, Type, Eye, EyeOff, Lock, Unlock, Music,
+  Film, Volume2, VolumeX, MessageSquare, Type, Eye, EyeOff, Lock, Unlock, Music,
   Trash2, ZoomIn, ZoomOut, Scissors, Copy, Play, Square,
   SkipBack, SkipForward, ArrowRightLeft, ChevronsLeft, ChevronsRight
 } from 'lucide-react'
+import AudioWaveform from './AudioWaveform'
 import './Timeline.css'
 
 interface DragState {
@@ -39,11 +40,15 @@ interface TimelineProps {
   outroEffect?: IntroOutroEffect | null
   onIntroEffectClick?: () => void
   onOutroEffectClick?: () => void
+  bgmTracks?: BackgroundAudio[]
+  onBGMChange?: (tracks: BackgroundAudio[]) => void
 }
 
 interface TrackVisibility {
   video: boolean
-  audio: boolean
+  audio: boolean  // Clip audio waveforms
+  sfx: boolean    // Sound effects
+  bgm: boolean    // Background music
   subtitles: boolean
   overlays: boolean
 }
@@ -51,6 +56,8 @@ interface TrackVisibility {
 interface TrackLock {
   video: boolean
   audio: boolean
+  sfx: boolean
+  bgm: boolean
   subtitles: boolean
   overlays: boolean
 }
@@ -64,10 +71,14 @@ export default function Timeline({
   introEffect,
   outroEffect,
   onIntroEffectClick,
-  onOutroEffectClick
+  onOutroEffectClick,
+  bgmTracks = [],
+  onBGMChange
 }: TimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const trackLabelsRef = useRef<HTMLDivElement>(null)
+  const tracksContainerRef = useRef<HTMLDivElement>(null)
 
   const {
     currentTime,
@@ -92,10 +103,10 @@ export default function Timeline({
   // Clipboard for copy/paste (future feature)
   const [, setClipboard] = useState<{ type: string; data: unknown } | null>(null)
   const [trackVisibility, setTrackVisibility] = useState<TrackVisibility>({
-    video: true, audio: true, subtitles: true, overlays: true
+    video: true, audio: true, sfx: true, bgm: true, subtitles: true, overlays: true
   })
   const [trackLock, setTrackLock] = useState<TrackLock>({
-    video: false, audio: false, subtitles: false, overlays: false
+    video: false, audio: false, sfx: false, bgm: false, subtitles: false, overlays: false
   })
   // Clip reorder drag state
   const [clipDragState, setClipDragState] = useState<{
@@ -104,8 +115,42 @@ export default function Timeline({
     dragOverPosition: 'before' | 'after' | null
   }>({ draggedId: null, dragOverId: null, dragOverPosition: null })
 
+  // Trash bin drag state - for drag-to-delete
+  const [trashDragState, setTrashDragState] = useState<{
+    isDragging: boolean
+    itemType: 'clip' | 'sfx' | 'bgm' | 'subtitle' | 'overlay' | null
+    itemId: number | null
+    isOverTrash: boolean
+  }>({ isDragging: false, itemType: null, itemId: null, isOverTrash: false })
+
+  // Muted clips state - track which clips have their audio muted
+  const [mutedClips, setMutedClips] = useState<Set<number>>(new Set())
+
   // Sort clips by timeline order
   const sortedClips = [...videoClips].sort((a, b) => a.timeline_order - b.timeline_order)
+
+  // Get audio URL for a clip
+  const getClipAudioUrl = useCallback((clip: VideoClip): string | null => {
+    if (!projectId || !clip.filename) return null
+    // Audio files are named: audio_{filename_without_extension}.wav
+    const filenameWithoutExt = clip.filename.replace(/\.[^/.]+$/, '')
+    const audioFilename = `audio_${filenameWithoutExt}.wav`
+    const token = localStorage.getItem('access_token')
+    return `/api/files/${projectId}/stream/clips/${audioFilename}?token=${token}`
+  }, [projectId])
+
+  // Toggle clip audio mute
+  const toggleClipMute = useCallback((clipId: number) => {
+    setMutedClips(prev => {
+      const next = new Set(prev)
+      if (next.has(clipId)) {
+        next.delete(clipId)
+      } else {
+        next.add(clipId)
+      }
+      return next
+    })
+  }, [])
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -207,22 +252,27 @@ export default function Timeline({
     return null
   }, [sortedClips, currentTime, getClipEffectiveDuration])
 
-  // Split clip at current playhead position
+  // Split clip at current playhead position into two separate clips
   const handleSplitAtPlayhead = async () => {
     if (!projectId || sortedClips.length === 0) return
 
     const clipInfo = getClipAtPlayhead()
     if (!clipInfo) return
 
-    const { clip, clipTime } = clipInfo
+    const { clip, position } = clipInfo
 
-    // Trim the current clip to end at playhead
-    const newEndTrim = (clip.duration || 0) - clipTime
+    // Calculate split time relative to the start of the clip's visible portion
+    const splitTimeInClip = currentTime - position
+
+    // Ensure we're not splitting at the very start or end
+    const clipDuration = getClipEffectiveDuration(clip)
+    if (splitTimeInClip <= 0.1 || splitTimeInClip >= clipDuration - 0.1) {
+      return
+    }
 
     try {
-      await projectsApi.updateClip(projectId, clip.id, {
-        end_trim: newEndTrim
-      })
+      // Use the split API endpoint which creates two clips
+      await projectsApi.splitClip(projectId, clip.id, splitTimeInClip)
       // Refresh clips
       const res = await projectsApi.listClips(projectId)
       onClipsChange?.(res.data)
@@ -397,36 +447,73 @@ export default function Timeline({
     }
   }
 
-  // Clip reorder drag handlers
+  // Clip reorder drag handlers - optimized for smooth performance
   const handleClipDragStart = (e: React.DragEvent, clipId: number) => {
     if (trackLock.video) {
       e.preventDefault()
       return
     }
+
+    // Set drag data
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', clipId.toString())
-    setClipDragState({ draggedId: clipId, dragOverId: null, dragOverPosition: null })
+    e.dataTransfer.setData('application/json', JSON.stringify({ id: clipId, type: 'clip' }))
+
+    // Create custom drag image for better visual feedback
+    const dragElement = e.currentTarget as HTMLElement
+    if (dragElement) {
+      // Use a slightly transparent version of the element
+      e.dataTransfer.setDragImage(dragElement, dragElement.offsetWidth / 2, dragElement.offsetHeight / 2)
+    }
+
+    // Use requestAnimationFrame to ensure smooth state update
+    requestAnimationFrame(() => {
+      setClipDragState({ draggedId: clipId, dragOverId: null, dragOverPosition: null })
+      setTrashDragState({ isDragging: true, itemType: 'clip', itemId: clipId, isOverTrash: false })
+    })
   }
+
+  // Throttle drag over updates to reduce re-renders
+  const lastDragOverUpdate = useRef<{ clipId: number; position: 'before' | 'after'; time: number } | null>(null)
 
   const handleClipDragOver = (e: React.DragEvent, clipId: number) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
 
+    // Skip if dragging over itself
     if (clipDragState.draggedId === clipId) return
 
     // Determine if dropping before or after based on mouse position
-    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const midPoint = rect.left + rect.width / 2
     const position = e.clientX < midPoint ? 'before' : 'after'
 
-    setClipDragState(prev => ({
-      ...prev,
-      dragOverId: clipId,
-      dragOverPosition: position
-    }))
+    // Throttle updates - only update if position changed or enough time passed
+    const now = Date.now()
+    const last = lastDragOverUpdate.current
+    if (last && last.clipId === clipId && last.position === position && (now - last.time) < 50) {
+      return
+    }
+
+    lastDragOverUpdate.current = { clipId, position, time: now }
+
+    // Only update state if something actually changed
+    if (clipDragState.dragOverId !== clipId || clipDragState.dragOverPosition !== position) {
+      setClipDragState(prev => ({
+        ...prev,
+        dragOverId: clipId,
+        dragOverPosition: position
+      }))
+    }
   }
 
-  const handleClipDragLeave = () => {
+  const handleClipDragLeave = (e: React.DragEvent) => {
+    // Only clear if we're actually leaving the clip area
+    const relatedTarget = e.relatedTarget as HTMLElement
+    if (relatedTarget && (e.currentTarget as HTMLElement).contains(relatedTarget)) {
+      return
+    }
+
     setClipDragState(prev => ({
       ...prev,
       dragOverId: null,
@@ -436,10 +523,16 @@ export default function Timeline({
 
   const handleClipDrop = async (e: React.DragEvent, targetClipId: number) => {
     e.preventDefault()
+    e.stopPropagation()
 
     const draggedId = clipDragState.draggedId
+    const dropPosition = clipDragState.dragOverPosition
+
+    // Clear drag state immediately for visual responsiveness
+    setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
+    lastDragOverUpdate.current = null
+
     if (!draggedId || draggedId === targetClipId || !projectId) {
-      setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
       return
     }
 
@@ -448,18 +541,22 @@ export default function Timeline({
     let targetIndex = sortedClips.findIndex(c => c.id === targetClipId)
 
     if (draggedIndex === -1 || targetIndex === -1) {
-      setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
       return
     }
 
     // Adjust target index based on drop position
-    if (clipDragState.dragOverPosition === 'after') {
+    if (dropPosition === 'after') {
       targetIndex += 1
     }
 
     // If dragging from before target, adjust for removal
     if (draggedIndex < targetIndex) {
       targetIndex -= 1
+    }
+
+    // Check if position actually changed
+    if (draggedIndex === targetIndex) {
+      return
     }
 
     // Reorder clips
@@ -473,9 +570,10 @@ export default function Timeline({
       timeline_order: index
     }))
 
+    // Update UI immediately
     onClipsChange?.(reorderedClips)
 
-    // Save to backend
+    // Save to backend in background
     try {
       await projectsApi.reorderClips(
         projectId,
@@ -483,13 +581,72 @@ export default function Timeline({
       )
     } catch (error) {
       console.error('Failed to reorder clips:', error)
+      // Revert on error
+      onClipsChange?.(sortedClips)
     }
-
-    setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
   }
 
   const handleClipDragEnd = () => {
+    // Clean up all drag state
     setClipDragState({ draggedId: null, dragOverId: null, dragOverPosition: null })
+    setTrashDragState({ isDragging: false, itemType: null, itemId: null, isOverTrash: false })
+    lastDragOverUpdate.current = null
+  }
+
+  // Generic drag handlers for any track item (for trash bin feature)
+  const handleItemDragStart = (e: React.DragEvent, itemId: number, itemType: 'clip' | 'sfx' | 'bgm' | 'subtitle' | 'overlay') => {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('application/json', JSON.stringify({ id: itemId, type: itemType }))
+    setTrashDragState({ isDragging: true, itemType, itemId, isOverTrash: false })
+  }
+
+  const handleTrashDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setTrashDragState(prev => ({ ...prev, isOverTrash: true }))
+  }
+
+  const handleTrashDragLeave = () => {
+    setTrashDragState(prev => ({ ...prev, isOverTrash: false }))
+  }
+
+  const handleTrashDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    const dataStr = e.dataTransfer.getData('application/json')
+    if (!dataStr) {
+      setTrashDragState({ isDragging: false, itemType: null, itemId: null, isOverTrash: false })
+      return
+    }
+
+    try {
+      const { id, type } = JSON.parse(dataStr)
+
+      // Delete the item based on type
+      if (type === 'clip' && projectId) {
+        await handleDeleteClip(id)
+      } else if (type === 'sfx') {
+        deleteSFXTrack(id)
+      } else if (type === 'bgm' && projectId) {
+        await projectsApi.deleteBGM(projectId, id)
+        // Refresh BGM tracks
+        const res = await projectsApi.listBGM(projectId)
+        onBGMChange?.(res.data)
+      } else if (type === 'subtitle') {
+        deleteSubtitle(id)
+      } else if (type === 'overlay') {
+        deleteTextOverlay(id)
+      }
+
+      setSelection(null)
+    } catch (error) {
+      console.error('Failed to delete item:', error)
+    }
+
+    setTrashDragState({ isDragging: false, itemType: null, itemId: null, isOverTrash: false })
+  }
+
+  const handleItemDragEnd = () => {
+    setTrashDragState({ isDragging: false, itemType: null, itemId: null, isOverTrash: false })
   }
 
   // Item drag handlers (for subtitles, sfx, overlays)
@@ -638,6 +795,29 @@ export default function Timeline({
     }
   }, [dragState, handleMouseMove, handleMouseUp])
 
+  // Sync vertical scroll between track labels and tracks container
+  useEffect(() => {
+    const trackLabels = trackLabelsRef.current
+    const tracksContainer = tracksContainerRef.current
+
+    if (!trackLabels || !tracksContainer) return
+
+    const syncScroll = (source: HTMLElement, target: HTMLElement) => {
+      target.scrollTop = source.scrollTop
+    }
+
+    const handleLabelsScroll = () => syncScroll(trackLabels, tracksContainer)
+    const handleTracksScroll = () => syncScroll(tracksContainer, trackLabels)
+
+    trackLabels.addEventListener('scroll', handleLabelsScroll)
+    tracksContainer.addEventListener('scroll', handleTracksScroll)
+
+    return () => {
+      trackLabels.removeEventListener('scroll', handleLabelsScroll)
+      tracksContainer.removeEventListener('scroll', handleTracksScroll)
+    }
+  }, [])
+
   // Keyboard shortcuts for timeline
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -737,7 +917,7 @@ export default function Timeline({
     setTrackLock(prev => ({ ...prev, [track]: !prev[track] }))
   }
 
-  // Render a track item with resize handles
+  // Render a track item with resize handles and drag-to-trash support
   const renderTrackItem = (
     id: number,
     type: 'subtitle' | 'sfx' | 'overlay',
@@ -749,16 +929,20 @@ export default function Timeline({
   ) => {
     const isSelected = selection?.id === id && selection?.type === type
     const isDragging = dragState?.id === id && dragState?.type === type
+    const isBeingDraggedToTrash = trashDragState.itemId === id && trashDragState.itemType === type
     const left = startTime * pixelsPerSecond
     const width = Math.max((endTime - startTime) * pixelsPerSecond, 40)
 
     return (
       <div
         key={`${type}-${id}`}
-        className={`track-item ${className} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+        className={`track-item ${className} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isBeingDraggedToTrash ? 'dragging-to-trash' : ''}`}
         style={{ left: `${left}px`, width: `${width}px` }}
+        draggable
+        onDragStart={(e) => handleItemDragStart(e, id, type)}
+        onDragEnd={handleItemDragEnd}
         onMouseDown={(e) => handleItemMouseDown(e, id, type, 'move')}
-        title={`${label} (${formatTime(startTime)} - ${formatTime(endTime)})`}
+        title={`${label} (${formatTime(startTime)} - ${formatTime(endTime)}) - Drag to trash to delete`}
       >
         {/* Resize handle - start */}
         <div
@@ -868,7 +1052,7 @@ export default function Timeline({
                 <Copy size={14} />
               </button>
               <button
-                className="tool-btn delete"
+                className={`tool-btn delete ${trashDragState.isOverTrash ? 'drag-over' : ''}`}
                 onClick={() => {
                   if (selection) {
                     if (selection.type === 'subtitle') deleteSubtitle(selection.id)
@@ -878,8 +1062,11 @@ export default function Timeline({
                     setSelection(null)
                   }
                 }}
-                disabled={!selection}
-                title="Delete selected (Del)"
+                onDragOver={handleTrashDragOver}
+                onDragLeave={handleTrashDragLeave}
+                onDrop={handleTrashDrop}
+                disabled={!selection && !trashDragState.isDragging}
+                title="Delete selected (Del) - or drag items here"
               >
                 <Trash2 size={14} />
               </button>
@@ -912,7 +1099,7 @@ export default function Timeline({
         {/* Sidebar with labels */}
         <div className="timeline-sidebar">
           <div className="ruler-spacer" />
-          <div className="track-labels">
+          <div className="track-labels" ref={trackLabelsRef}>
             {/* Video Track Label */}
             <div className={`track-label ${!trackVisibility.video ? 'hidden-track' : ''}`}>
               <span className="track-icon"><Film size={16} /></span>
@@ -935,10 +1122,10 @@ export default function Timeline({
               </div>
             </div>
 
-            {/* Audio Track Label */}
+            {/* Clip Audio Track Label */}
             <div className={`track-label ${!trackVisibility.audio ? 'hidden-track' : ''}`}>
               <span className="track-icon"><Volume2 size={16} /></span>
-              <span className="track-name">Audio</span>
+              <span className="track-name">Clip Audio</span>
               <div className="track-buttons">
                 <button
                   className={`track-btn ${!trackVisibility.audio ? 'off' : ''}`}
@@ -953,6 +1140,50 @@ export default function Timeline({
                   title="Toggle lock"
                 >
                   {trackLock.audio ? <Lock size={12} /> : <Unlock size={12} />}
+                </button>
+              </div>
+            </div>
+
+            {/* SFX Track Label */}
+            <div className={`track-label ${!trackVisibility.sfx ? 'hidden-track' : ''}`}>
+              <span className="track-icon"><Music size={16} /></span>
+              <span className="track-name">SFX</span>
+              <div className="track-buttons">
+                <button
+                  className={`track-btn ${!trackVisibility.sfx ? 'off' : ''}`}
+                  onClick={() => toggleVisibility('sfx')}
+                  title="Toggle visibility"
+                >
+                  {trackVisibility.sfx ? <Eye size={12} /> : <EyeOff size={12} />}
+                </button>
+                <button
+                  className={`track-btn ${trackLock.sfx ? 'locked' : ''}`}
+                  onClick={() => toggleLock('sfx')}
+                  title="Toggle lock"
+                >
+                  {trackLock.sfx ? <Lock size={12} /> : <Unlock size={12} />}
+                </button>
+              </div>
+            </div>
+
+            {/* BGM Track Label */}
+            <div className={`track-label ${!trackVisibility.bgm ? 'hidden-track' : ''}`}>
+              <span className="track-icon"><Music size={16} /></span>
+              <span className="track-name">BGM</span>
+              <div className="track-buttons">
+                <button
+                  className={`track-btn ${!trackVisibility.bgm ? 'off' : ''}`}
+                  onClick={() => toggleVisibility('bgm')}
+                  title="Toggle visibility"
+                >
+                  {trackVisibility.bgm ? <Eye size={12} /> : <EyeOff size={12} />}
+                </button>
+                <button
+                  className={`track-btn ${trackLock.bgm ? 'locked' : ''}`}
+                  onClick={() => toggleLock('bgm')}
+                  title="Toggle lock"
+                >
+                  {trackLock.bgm ? <Lock size={12} /> : <Unlock size={12} />}
                 </button>
               </div>
             </div>
@@ -1014,7 +1245,10 @@ export default function Timeline({
 
             {/* Tracks */}
             <div
-              ref={timelineRef}
+              ref={(el) => {
+                (timelineRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+                ;(tracksContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+              }}
               className={`tracks-container ${dragState ? 'dragging' : ''}`}
               onClick={handleTimelineClick}
             >
@@ -1178,8 +1412,66 @@ export default function Timeline({
               )}
 
               {/* Audio/SFX Track */}
+              {/* Clip Audio Track */}
               {trackVisibility.audio && (
-                <div className={`track audio ${trackLock.audio ? 'locked' : ''}`}>
+                <div className={`track audio clip-audio ${trackLock.audio ? 'locked' : ''}`}>
+                  {/* Clip Audio Waveforms */}
+                  {sortedClips.map((clip, index) => {
+                    const clipDuration = (clip.duration || 0) - clip.start_trim - clip.end_trim
+                    const clipPosition = getClipTimelinePosition(clip)
+                    const audioUrl = getClipAudioUrl(clip)
+                    const isMuted = mutedClips.has(clip.id)
+                    const clipWidth = clipDuration * pixelsPerSecond
+
+                    return (
+                      <div
+                        key={`clip-audio-${clip.id}`}
+                        className={`clip-audio-container ${isMuted ? 'muted' : ''}`}
+                        style={{
+                          position: 'absolute',
+                          left: `${clipPosition * pixelsPerSecond}px`,
+                          width: `${clipWidth}px`,
+                          height: '100%',
+                        }}
+                        title={`${clip.original_name || `Clip ${index + 1}`} audio${isMuted ? ' (muted)' : ''}`}
+                      >
+                        {audioUrl && (
+                          <AudioWaveform
+                            audioUrl={audioUrl}
+                            width={clipWidth}
+                            height={35}
+                            startTime={clip.start_trim}
+                            endTime={(clip.duration || 0) - clip.end_trim}
+                            color={isMuted ? 'rgba(100, 100, 100, 0.3)' : 'rgba(139, 92, 246, 0.5)'}
+                            progressColor={isMuted ? 'rgba(100, 100, 100, 0.5)' : 'rgba(139, 92, 246, 0.8)'}
+                            progress={
+                              currentTime >= clipPosition && currentTime <= clipPosition + clipDuration
+                                ? (currentTime - clipPosition) / clipDuration
+                                : currentTime > clipPosition + clipDuration ? 1 : 0
+                            }
+                            isMuted={isMuted}
+                          />
+                        )}
+                        {/* Mute toggle button */}
+                        <button
+                          className={`clip-audio-mute-btn ${isMuted ? 'muted' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleClipMute(clip.id)
+                          }}
+                          title={isMuted ? 'Unmute audio' : 'Mute audio'}
+                        >
+                          {isMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* SFX Track */}
+              {trackVisibility.sfx && (
+                <div className={`track sfx ${trackLock.sfx ? 'locked' : ''}`}>
                   {sfxTracks.map(sfx =>
                     renderTrackItem(
                       sfx.id,
@@ -1199,6 +1491,40 @@ export default function Timeline({
                       title={`Suggested: ${suggestion.prompt}`}
                     />
                   ))}
+                </div>
+              )}
+
+              {/* BGM Track */}
+              {trackVisibility.bgm && (
+                <div className={`track bgm ${trackLock.bgm ? 'locked' : ''}`}>
+                  {bgmTracks.map(bgm => {
+                    const isBeingDraggedToTrash = trashDragState.itemId === bgm.id && trashDragState.itemType === 'bgm'
+                    return (
+                      <div
+                        key={`bgm-${bgm.id}`}
+                        className={`track-item bgm-item ${selection?.id === bgm.id && selection?.type === 'sfx' ? 'selected' : ''} ${isBeingDraggedToTrash ? 'dragging-to-trash' : ''}`}
+                        style={{
+                          left: `${(bgm.start_time || 0) * pixelsPerSecond}px`,
+                          width: `${(bgm.duration || 60) * pixelsPerSecond}px`,
+                        }}
+                        draggable={!trackLock.bgm}
+                        onDragStart={(e) => handleItemDragStart(e, bgm.id, 'bgm')}
+                        onDragEnd={handleItemDragEnd}
+                        title={`${bgm.original_name || bgm.filename} - BGM - Drag to trash to delete`}
+                      >
+                        <div className="track-item-content">
+                          <Music size={12} />
+                          <span className="track-item-label">{bgm.original_name || 'BGM'}</span>
+                        </div>
+                        {/* Volume indicator */}
+                        <div
+                          className="volume-indicator"
+                          style={{ opacity: bgm.volume || 0.5 }}
+                          title={`Volume: ${Math.round((bgm.volume || 0.5) * 100)}%`}
+                        />
+                      </div>
+                    )
+                  })}
                 </div>
               )}
 

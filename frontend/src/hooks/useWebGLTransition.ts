@@ -98,6 +98,7 @@ export function useWebGLTransition({
     // Create program
     const program = createProgram(gl, VERTEX_SHADER, fragmentShader);
     if (!program) {
+      console.error('[WebGL] Failed to create shader program for:', transitionType);
       setError('Failed to create shader program');
       return false;
     }
@@ -151,6 +152,12 @@ export function useWebGLTransition({
     const toVideo = toVideoRef.current;
 
     if (!state || !canvas || !fromVideo || !toVideo) {
+      console.warn('[WebGL] renderFrame: Missing required elements', {
+        state: !!state,
+        canvas: !!canvas,
+        fromVideo: !!fromVideo,
+        toVideo: !!toVideo,
+      });
       return;
     }
 
@@ -169,6 +176,8 @@ export function useWebGLTransition({
         canvas.width = fromVideo.videoWidth;
         canvas.height = fromVideo.videoHeight;
       }
+    } else {
+      console.warn('[WebGL] fromVideo has no dimensions:', fromVideo.videoWidth, fromVideo.videoHeight);
     }
 
     // Set viewport
@@ -215,6 +224,7 @@ export function useWebGLTransition({
    */
   const startTransition = useCallback((config: TransitionConfig) => {
     if (!isSupported) {
+      console.error('[WebGL] WebGL not supported');
       setError('WebGL not supported');
       return;
     }
@@ -223,13 +233,14 @@ export function useWebGLTransition({
     const toVideo = toVideoRef.current;
 
     if (!fromVideo || !toVideo) {
+      console.error('[WebGL] Video elements not available', { fromVideo: !!fromVideo, toVideo: !!toVideo });
       setError('Video elements not available');
       return;
     }
 
     // Check if videos are ready
     if (fromVideo.readyState < 2 || toVideo.readyState < 2) {
-      console.warn('Videos not ready, waiting...');
+      console.warn('[WebGL] Videos not ready, waiting...', { from: fromVideo.readyState, to: toVideo.readyState });
       // Try again after a short delay
       setTimeout(() => startTransition(config), 100);
       return;
@@ -248,6 +259,7 @@ export function useWebGLTransition({
       }
 
       if (!initWebGL(config.type)) {
+        console.error('[WebGL] Failed to initialize WebGL');
         return;
       }
     }

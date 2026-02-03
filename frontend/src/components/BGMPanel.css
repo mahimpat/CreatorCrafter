@@ -228,3 +228,210 @@
   text-align: right;
   font-family: monospace;
 }
+
+/* ===== BGM SUGGESTIONS ===== */
+.bgm-suggestions-section {
+  margin-bottom: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+}
+
+.bgm-suggestions-section .suggestions-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.1), rgba(236, 72, 153, 0.05));
+  border: none;
+  color: #a78bfa;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bgm-suggestions-section .suggestions-toggle:hover {
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.15), rgba(236, 72, 153, 0.1));
+}
+
+.bgm-suggestions-section .suggestions-list {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.bgm-suggestions-section .suggestion-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  transition: all 0.2s;
+}
+
+.bgm-suggestions-section .suggestion-item:hover {
+  border-color: var(--border-light);
+}
+
+.bgm-suggestions-section .suggestion-item.primary {
+  border-left: 3px solid #a78bfa;
+}
+
+.bgm-suggestions-section .suggestion-item.alternative {
+  border-left: 3px solid #3b82f6;
+}
+
+.bgm-suggestions-section .suggestion-item.contrast {
+  border-left: 3px solid #f59e0b;
+}
+
+.suggestion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.suggestion-type-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+.suggestion-item.alternative .suggestion-type-badge {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+.suggestion-item.contrast .suggestion-type-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.suggestion-confidence {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.suggestion-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.detail-value.mood {
+  color: #f472b6;
+  text-transform: capitalize;
+}
+
+.detail-value.genre {
+  color: #60a5fa;
+  text-transform: capitalize;
+}
+
+.detail-value.tempo {
+  color: #34d399;
+  font-family: monospace;
+}
+
+.detail-value.energy {
+  text-transform: capitalize;
+}
+
+.detail-value.energy.low {
+  color: #60a5fa;
+}
+
+.detail-value.energy.medium {
+  color: #fbbf24;
+}
+
+.detail-value.energy.high {
+  color: #ef4444;
+}
+
+.suggestion-reason {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0 0 10px 0;
+  line-height: 1.4;
+}
+
+.generation-prompt {
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.generation-prompt .prompt-label {
+  display: block;
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.generation-prompt code {
+  font-size: 10px;
+  color: var(--text-primary);
+  font-family: monospace;
+  word-break: break-word;
+}
+
+.apply-suggestion-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--gradient-primary);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.apply-suggestion-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}

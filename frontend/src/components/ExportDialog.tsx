@@ -1,9 +1,12 @@
 /**
  * ExportDialog - Modal for exporting video with options
+ * Uses WebSocket for real-time progress updates during rendering
  */
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Download, FileVideo, FileText, Loader2, CheckCircle } from 'lucide-react'
 import { videoApi, projectsApi } from '../api'
+import { useToast } from './Toast'
+import { useWebSocket, ProgressUpdate } from '../hooks/useWebSocket'
 import './ExportDialog.css'
 
 interface ExportDialogProps {
@@ -16,6 +19,7 @@ type ExportFormat = '1080p' | '720p' | '480p'
 type ExportType = 'video' | 'subtitles'
 
 export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialogProps) {
+  const { showError } = useToast()
   const [exportType, setExportType] = useState<ExportType>('video')
   const [format, setFormat] = useState<ExportFormat>('1080p')
   const [includeSubtitles, setIncludeSubtitles] = useState(true)
@@ -23,45 +27,83 @@ export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialo
   const [includeBgm, setIncludeBgm] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
   const [exportProgress, setExportProgress] = useState(0)
+  const [progressMessage, setProgressMessage] = useState('')
   const [exportResult, setExportResult] = useState<{ url: string; filename: string } | null>(null)
+  const exportTaskId = useRef<string | null>(null)
+
+  // Listen for WebSocket progress updates
+  useWebSocket({
+    onProgress: (update: ProgressUpdate) => {
+      if (update.task_id && update.task_id === exportTaskId.current) {
+        setExportProgress(update.progress || 0)
+        setProgressMessage(update.message || 'Rendering...')
+      }
+    },
+    onComplete: (update: ProgressUpdate) => {
+      if (update.task_id && update.task_id === exportTaskId.current) {
+        const result = update.result as { url?: string; filename?: string } | undefined
+        if (result?.url) {
+          setExportProgress(100)
+          setProgressMessage('Export complete!')
+          setExportResult({
+            url: result.url,
+            filename: result.filename || 'export.mp4'
+          })
+        }
+      }
+    },
+    onError: (update: ProgressUpdate) => {
+      if (update.task_id && update.task_id === exportTaskId.current) {
+        setIsExporting(false)
+        setExportProgress(0)
+        setProgressMessage('')
+        showError(update.error || 'Export failed. Please try again.')
+        exportTaskId.current = null
+      }
+    },
+    enabled: isOpen,
+  })
+
+  // Clean up on close
+  useEffect(() => {
+    if (!isOpen) {
+      exportTaskId.current = null
+    }
+  }, [isOpen])
 
   if (!isOpen) return null
 
   const handleExportVideo = async () => {
     setIsExporting(true)
-    setExportProgress(0)
+    setExportProgress(5)
+    setProgressMessage('Starting export...')
     setExportResult(null)
 
     try {
-      // Show indeterminate progress
-      setExportProgress(10)
+      // Call the stitch endpoint - returns task_id for WebSocket tracking
+      const response = await projectsApi.stitchClips(projectId, {
+        include_sfx: includeSfx,
+        include_bgm: includeBgm,
+      })
 
-      // Call the stitch endpoint to render video with transitions
-      const response = await projectsApi.stitchClips(projectId)
-
-      if (response.data.success) {
-        setExportProgress(100)
-        setExportResult({
-          url: response.data.url,
-          filename: response.data.filename
-        })
-        console.log('Export complete:', response.data)
+      if (response.data.success && response.data.task_id) {
+        exportTaskId.current = response.data.task_id
+        // Progress updates will come via WebSocket
       } else {
-        throw new Error('Export failed')
+        throw new Error('Export failed to start')
       }
 
     } catch (error: any) {
-      console.error('Export failed:', error)
       setIsExporting(false)
       setExportProgress(0)
+      setProgressMessage('')
       const message = error.response?.data?.detail || error.message || 'Export failed. Please try again.'
-      alert(message)
+      showError(message)
     }
   }
 
   const handleDownload = () => {
     if (exportResult) {
-      // Open the video URL in a new tab or trigger download
       window.open(exportResult.url, '_blank')
     }
   }
@@ -70,6 +112,8 @@ export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialo
     setExportResult(null)
     setIsExporting(false)
     setExportProgress(0)
+    setProgressMessage('')
+    exportTaskId.current = null
     onClose()
   }
 
@@ -93,9 +137,8 @@ export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialo
       setIsExporting(false)
       onClose()
     } catch (error) {
-      console.error('Subtitle export failed:', error)
       setIsExporting(false)
-      alert('Failed to export subtitles.')
+      showError('Failed to export subtitles.')
     }
   }
 
@@ -202,7 +245,7 @@ export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialo
               </div>
               <span>
                 <Loader2 size={14} className="spinning" style={{ marginRight: 8 }} />
-                Rendering video with transitions...
+                {progressMessage || 'Rendering video...'}
               </span>
             </div>
           )}
@@ -212,7 +255,7 @@ export default function ExportDialog({ projectId, isOpen, onClose }: ExportDialo
             <div className="export-complete">
               <CheckCircle size={48} color="#10b981" />
               <h3>Export Complete!</h3>
-              <p>Your video has been rendered with all transitions applied.</p>
+              <p>Your video has been rendered with all effects applied.</p>
               <button className="download-btn" onClick={handleDownload}>
                 <Download size={18} />
                 Download Video

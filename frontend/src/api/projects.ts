@@ -18,9 +18,16 @@ export interface ProjectSummary {
 export interface SubtitleStyle {
   fontSize: number
   fontFamily: string
+  fontWeight?: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900'
+  fontStyle?: 'normal' | 'italic'
   color: string
   backgroundColor: string
-  position: 'top' | 'center' | 'bottom'
+  position: 'top' | 'center' | 'bottom' | 'custom'
+  // Custom positioning (percentage of video dimensions, 0-100)
+  x?: number  // horizontal position (0 = left, 50 = center, 100 = right)
+  y?: number  // vertical position (0 = top, 50 = center, 100 = bottom)
+  textAlign?: 'left' | 'center' | 'right'
+  textShadow?: boolean
 }
 
 export interface Subtitle {
@@ -60,6 +67,18 @@ export interface TextOverlay {
   style: OverlayStyle
 }
 
+export interface BGMSuggestion {
+  type: 'primary' | 'alternative' | 'contrast'
+  mood: string
+  genre: string
+  tempo_range: [number, number]
+  energy_level: 'low' | 'medium' | 'high'
+  duration: number
+  confidence: number
+  reason: string
+  generation_prompt?: string
+}
+
 export interface VideoAnalysisResult {
   scenes: Array<{
     timestamp: number
@@ -84,6 +103,7 @@ export interface VideoAnalysisResult {
     suggested_transition: 'cut' | 'fade' | 'fade_in' | 'fade_out' | 'dissolve' | 'wipe' | 'slide'
     reason: string
   }>
+  suggestedBGM?: BGMSuggestion[]
   transcription: Array<{
     text: string
     start: number
@@ -210,11 +230,17 @@ export const projectsApi = {
     apiClient.delete(`/projects/${projectId}/clips/${clipId}`),
   duplicateClip: (projectId: number, clipId: number) =>
     apiClient.post<VideoClip>(`/projects/${projectId}/clips/${clipId}/duplicate`),
+  splitClip: (projectId: number, clipId: number, splitTime: number) =>
+    apiClient.post<{ original_clip: VideoClip; new_clip: VideoClip; message: string }>(
+      `/projects/${projectId}/clips/${clipId}/split?split_time=${splitTime}`
+    ),
   reorderClips: (projectId: number, clipOrders: Array<{ id: number; timeline_order: number }>) =>
     apiClient.put<VideoClip[]>(`/projects/${projectId}/clips/reorder`, { clip_orders: clipOrders }),
-  stitchClips: (projectId: number) =>
-    apiClient.post<{ success: boolean; filename: string; url: string; message: string }>(
-      `/projects/${projectId}/clips/stitch`
+  stitchClips: (projectId: number, options?: { include_sfx?: boolean; include_bgm?: boolean }) =>
+    apiClient.post<{ success: boolean; task_id: string; message: string }>(
+      `/projects/${projectId}/clips/stitch`,
+      null,
+      { params: options }
     ),
 
   // Transitions

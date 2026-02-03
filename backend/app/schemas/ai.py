@@ -70,10 +70,30 @@ class TranscriptionSegment(BaseModel):
     confidence: float = 0.9
 
 
+class BGMSuggestion(BaseModel):
+    """Schema for BGM (Background Music) suggestion from analysis."""
+    type: str  # 'primary', 'alternative', 'contrast'
+    mood: str  # 'uplifting', 'energetic', 'calm', 'dramatic', etc.
+    genre: str  # 'electronic', 'orchestral', 'ambient', etc.
+    tempo_range: tuple  # (min_bpm, max_bpm)
+    energy_level: str  # 'low', 'medium', 'high'
+    duration: float  # suggested duration in seconds
+    confidence: float = 0.7
+    reason: str  # explanation for this suggestion
+    generation_prompt: Optional[str] = None  # prompt for AI music generation
+
+    class Config:
+        # Allow tuple to be serialized as list in JSON
+        json_encoders = {
+            tuple: list
+        }
+
+
 class VideoAnalysisResult(BaseModel):
     """Schema for complete video analysis result."""
     scenes: List[SceneInfo]
     suggestedSFX: List[SFXSuggestion]
+    suggestedBGM: Optional[List[BGMSuggestion]] = None
     transcription: List[TranscriptionSegment]
 
 

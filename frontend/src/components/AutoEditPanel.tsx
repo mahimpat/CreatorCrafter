@@ -47,7 +47,7 @@ interface AutoEditPanelProps {
   onSetOutroEffect?: (effect: { type: string; duration: number } | null) => void
 }
 
-type WorkflowStep = 'template' | 'clips' | 'analyze' | 'generate'
+type WorkflowStep = 'clips' | 'template' | 'analyze' | 'generate'
 type GenerationStep = 'idle' | 'analyzing' | 'generating' | 'complete' | 'error'
 
 // Map frontend pacing to backend pacing
@@ -138,8 +138,8 @@ export default function AutoEditPanel({
   // Template selection (first step - most important!)
   const [selectedTemplate, setSelectedTemplate] = useState<EditingTemplate | null>(null)
 
-  // Workflow step tracking
-  const [currentStep, setCurrentStep] = useState<WorkflowStep>('template')
+  // Workflow step tracking - start with clips upload
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>('clips')
 
   // Generation progress
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress>({
@@ -150,19 +150,34 @@ export default function AutoEditPanel({
   })
 
   // Determine current step based on state
+  // NEW ORDER: Clips → Template → Analyze → Generate
+  // User uploads clips first, then chooses template
   useEffect(() => {
     if (generationProgress.step !== 'idle') return // Don't change during generation
 
-    if (!selectedTemplate) {
-      setCurrentStep('template')
-    } else if (!hasClips || clips.length === 0) {
-      setCurrentStep('clips')
-    } else if (!hasAnalysis) {
-      setCurrentStep('analyze')
-    } else {
+    // If user is on clips step, let them stay there to add more clips
+    // They'll click "Continue" to manually advance
+    if (currentStep === 'clips') {
+      return // Don't auto-advance from clips step
+    }
+
+    // If user is on template step, let them stay there
+    // They'll click "Continue" to manually advance
+    if (currentStep === 'template') {
+      return // Don't auto-advance from template step
+    }
+
+    // Only auto-advance to analyze/generate if we're already past clips & template
+    if (currentStep === 'analyze' || currentStep === 'generate') {
+      // If not analyzed yet, stay on analyze step
+      if (!hasAnalysis) {
+        setCurrentStep('analyze')
+        return
+      }
+      // Analysis complete, go to generate step
       setCurrentStep('generate')
     }
-  }, [selectedTemplate, hasClips, hasAnalysis, clips.length, generationProgress.step])
+  }, [selectedTemplate, hasClips, hasAnalysis, clips.length, generationProgress.step, currentStep])
 
   // Listen for WebSocket progress updates
   useEffect(() => {
@@ -262,31 +277,48 @@ export default function AutoEditPanel({
   }
 
   // Render step indicator
+  // NEW ORDER: Clips → Style → Analyze → Generate
   const renderStepIndicator = () => {
     const steps = [
-      { id: 'template', label: 'Style', icon: <Wand2 size={14} /> },
       { id: 'clips', label: 'Clips', icon: <Film size={14} /> },
+      { id: 'template', label: 'Style', icon: <Wand2 size={14} /> },
       { id: 'analyze', label: 'Analyze', icon: <Sparkles size={14} /> },
       { id: 'generate', label: 'Generate', icon: <Zap size={14} /> }
     ]
 
     const getStepStatus = (stepId: string) => {
-      const stepOrder = ['template', 'clips', 'analyze', 'generate']
+      const stepOrder = ['clips', 'template', 'analyze', 'generate']
       const currentIndex = stepOrder.indexOf(currentStep)
       const stepIndex = stepOrder.indexOf(stepId)
 
-      if (stepId === 'template' && selectedTemplate) return 'completed'
-      if (stepId === 'clips' && hasClips && clips.length > 0) return 'completed'
+      if (stepId === 'clips' && hasClips && clips.length > 0 && currentIndex > 0) return 'completed'
+      if (stepId === 'template' && selectedTemplate && currentIndex > 1) return 'completed'
       if (stepId === 'analyze' && hasAnalysis) return 'completed'
       if (stepIndex < currentIndex) return 'completed'
       if (stepIndex === currentIndex) return 'active'
       return 'pending'
     }
 
+    // Allow clicking on completed steps to go back
+    const handleStepClick = (stepId: WorkflowStep) => {
+      const stepOrder = ['clips', 'template', 'analyze', 'generate']
+      const currentIndex = stepOrder.indexOf(currentStep)
+      const stepIndex = stepOrder.indexOf(stepId)
+
+      // Can only go back to previous steps
+      if (stepIndex < currentIndex) {
+        setCurrentStep(stepId)
+      }
+    }
+
     return (
       <div className="step-indicator">
         {steps.map((step, idx) => (
-          <div key={step.id} className={`step-item ${getStepStatus(step.id)}`}>
+          <div
+            key={step.id}
+            className={`step-item ${getStepStatus(step.id)} ${getStepStatus(step.id) === 'completed' ? 'clickable' : ''}`}
+            onClick={() => getStepStatus(step.id) === 'completed' && handleStepClick(step.id as WorkflowStep)}
+          >
             <div className="step-dot">
               {getStepStatus(step.id) === 'completed' ? (
                 <CheckCircle2 size={16} />
@@ -302,52 +334,11 @@ export default function AutoEditPanel({
     )
   }
 
-  // STEP 1: Template Selection
-  if (currentStep === 'template' && generationProgress.step === 'idle') {
-    return (
-      <div className="auto-edit-panel">
-        {renderStepIndicator()}
-        <TemplateSelector
-          selectedTemplate={selectedTemplate}
-          onSelectTemplate={(template) => {
-            setSelectedTemplate(template)
-            // Auto-advance if clips already exist
-            if (hasClips && clips.length > 0) {
-              setCurrentStep('analyze')
-            }
-          }}
-        />
-        {selectedTemplate && (
-          <div className="step-footer">
-            <button
-              className="next-step-btn"
-              onClick={() => setCurrentStep('clips')}
-            >
-              Continue with {selectedTemplate.name}
-              <ChevronRight size={18} />
-            </button>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // STEP 2: Upload Clips
+  // STEP 1: Upload Clips (NEW: Clips first, then template)
   if (currentStep === 'clips' && generationProgress.step === 'idle') {
     return (
       <div className="auto-edit-panel">
         {renderStepIndicator()}
-
-        {/* Selected template summary */}
-        {selectedTemplate && (
-          <div className="selected-template-bar" onClick={() => setCurrentStep('template')}>
-            <div className="template-summary">
-              <Wand2 size={16} />
-              <span>{selectedTemplate.name}</span>
-            </div>
-            <button className="change-btn">Change</button>
-          </div>
-        )}
 
         <div className="step-content">
           <div className="step-header-large">
@@ -355,13 +346,13 @@ export default function AutoEditPanel({
               <Upload size={28} />
             </div>
             <h2>Upload Your Clips</h2>
-            <p>Add all the video clips you want to include in your final video</p>
+            <p>Add all the video clips you want to include in your final video. You can upload multiple clips before continuing.</p>
           </div>
 
           {clips.length > 0 && (
             <div className="clips-status">
               <CheckCircle2 size={18} className="success" />
-              <span>{clips.length} clip{clips.length !== 1 ? 's' : ''} added</span>
+              <span>{clips.length} clip{clips.length !== 1 ? 's' : ''} added - add more or click Continue</span>
             </div>
           )}
 
@@ -377,13 +368,9 @@ export default function AutoEditPanel({
 
         {clips.length > 0 && (
           <div className="step-footer">
-            <button className="back-btn" onClick={() => setCurrentStep('template')}>
-              <ArrowLeft size={16} />
-              Back
-            </button>
             <button
               className="next-step-btn"
-              onClick={() => setCurrentStep('analyze')}
+              onClick={() => setCurrentStep('template')}
             >
               Continue with {clips.length} clip{clips.length !== 1 ? 's' : ''}
               <ChevronRight size={18} />
@@ -394,21 +381,60 @@ export default function AutoEditPanel({
     )
   }
 
+  // STEP 2: Template Selection (After clips are uploaded)
+  if (currentStep === 'template' && generationProgress.step === 'idle') {
+    return (
+      <div className="auto-edit-panel">
+        {renderStepIndicator()}
+
+        {/* Clips summary - clickable to go back */}
+        <div className="selected-template-bar" onClick={() => setCurrentStep('clips')}>
+          <div className="template-summary">
+            <Film size={16} />
+            <span>{clips.length} clip{clips.length !== 1 ? 's' : ''} uploaded</span>
+          </div>
+          <button className="change-btn">Add More</button>
+        </div>
+
+        <TemplateSelector
+          selectedTemplate={selectedTemplate}
+          onSelectTemplate={setSelectedTemplate}
+        />
+
+        <div className="step-footer">
+          <button className="back-btn" onClick={() => setCurrentStep('clips')}>
+            <ArrowLeft size={16} />
+            Back
+          </button>
+          {selectedTemplate && (
+            <button
+              className="next-step-btn"
+              onClick={() => setCurrentStep('analyze')}
+            >
+              Continue with {selectedTemplate.name}
+              <ChevronRight size={18} />
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   // STEP 3: Analyze
   if (currentStep === 'analyze' && generationProgress.step === 'idle') {
     return (
       <div className="auto-edit-panel">
         {renderStepIndicator()}
 
-        {/* Completed steps summary */}
+        {/* Completed steps summary - NEW ORDER: clips first, then template */}
         <div className="completed-summary">
+          <div className="summary-item" onClick={() => setCurrentStep('clips')}>
+            <Film size={16} />
+            <span>{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
+          </div>
           <div className="summary-item" onClick={() => setCurrentStep('template')}>
             <Wand2 size={16} />
             <span>{selectedTemplate?.name}</span>
-          </div>
-          <div className="summary-item" onClick={() => setCurrentStep('clips')}>
-            <Film size={16} />
-            <span>{clips.length} clips</span>
           </div>
         </div>
 
@@ -475,15 +501,15 @@ export default function AutoEditPanel({
       <div className="auto-edit-panel">
         {renderStepIndicator()}
 
-        {/* Completed steps summary */}
+        {/* Completed steps summary - NEW ORDER: clips first, then template */}
         <div className="completed-summary">
+          <div className="summary-item" onClick={() => setCurrentStep('clips')}>
+            <Film size={16} />
+            <span>{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
+          </div>
           <div className="summary-item" onClick={() => setCurrentStep('template')}>
             <Wand2 size={16} />
             <span>{selectedTemplate?.name}</span>
-          </div>
-          <div className="summary-item" onClick={() => setCurrentStep('clips')}>
-            <Film size={16} />
-            <span>{clips.length} clips</span>
           </div>
           <div className="summary-item completed">
             <CheckCircle2 size={16} />

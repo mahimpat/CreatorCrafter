@@ -36,7 +36,16 @@ export default function LoginPage() {
     <div className="auth-page">
       <div className="auth-container">
         <div className="auth-header">
-          <h1>CreatorCrafter</h1>
+          <img
+            src="/logo-dark.png"
+            alt="Nirvaa"
+            className="auth-logo logo-dark"
+          />
+          <img
+            src="/logo-light.png"
+            alt="Nirvaa"
+            className="auth-logo logo-light"
+          />
           <p>AI-Powered Video Content Creation</p>
         </div>
 

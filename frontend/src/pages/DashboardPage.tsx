@@ -93,7 +93,16 @@ export default function DashboardPage() {
     <div className="dashboard">
       <header className="dashboard-header">
         <div className="header-left">
-          <h1>CreatorCrafter</h1>
+          <img
+            src="/logo-dark.png"
+            alt="Nirvaa"
+            className="app-logo logo-dark"
+          />
+          <img
+            src="/logo-light.png"
+            alt="Nirvaa"
+            className="app-logo logo-light"
+          />
         </div>
         <div className="header-right">
           <div className="user-info">

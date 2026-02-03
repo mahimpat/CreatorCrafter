@@ -29,6 +29,31 @@
   background-clip: text;
 }
 
+/* App Logo - Theme-aware */
+.app-logo {
+  height: 56px;
+  width: auto;
+  object-fit: contain;
+}
+
+/* Dark theme (default): show dark logo, hide light logo */
+.logo-dark {
+  display: block;
+}
+
+.logo-light {
+  display: none;
+}
+
+/* Light theme: show light logo, hide dark logo */
+[data-theme="light"] .logo-dark {
+  display: none;
+}
+
+[data-theme="light"] .logo-light {
+  display: block;
+}
+
 .header-right {
   display: flex;
   align-items: center;

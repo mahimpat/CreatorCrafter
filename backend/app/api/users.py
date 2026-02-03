@@ -2,11 +2,14 @@
 User management API endpoints.
 Includes onboarding, review/feedback, and usage tracking.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from datetime import datetime
+import httpx
+import logging
 
 from app.database import get_db
+from app.config import settings
 from app.schemas.user import (
     UserResponse,
     UserUpdate,
@@ -21,6 +24,156 @@ from app.api.deps import get_current_user
 from app.services.auth_service import get_password_hash, verify_password
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def send_to_google_forms(review_data: dict, user_email: str):
+    """
+    Send review data to Google Forms for external collection.
+    This runs in the background and doesn't block the API response.
+    """
+    if not settings.GOOGLE_FORM_ID:
+        logger.warning("Google Forms not configured (GOOGLE_FORM_ID is empty)")
+        return
+
+    # Note: The form URL uses the form ID directly, not the /e/ prefilled format
+    form_url = f"https://docs.google.com/forms/d/e/{settings.GOOGLE_FORM_ID}/formResponse"
+    logger.info(f"Submitting to Google Form: {form_url}")
+
+    # Build form data with entry IDs
+    form_data = {}
+
+    if settings.GOOGLE_FORM_ENTRY_RATING and review_data.get("rating"):
+        form_data[settings.GOOGLE_FORM_ENTRY_RATING] = str(review_data["rating"])
+
+    if settings.GOOGLE_FORM_ENTRY_RECOMMEND and review_data.get("would_recommend") is not None:
+        form_data[settings.GOOGLE_FORM_ENTRY_RECOMMEND] = "Yes" if review_data["would_recommend"] else "No"
+
+    if settings.GOOGLE_FORM_ENTRY_USE_CASE and review_data.get("use_case"):
+        form_data[settings.GOOGLE_FORM_ENTRY_USE_CASE] = review_data["use_case"]
+
+    if settings.GOOGLE_FORM_ENTRY_FEATURE_REQUEST and review_data.get("feature_request"):
+        form_data[settings.GOOGLE_FORM_ENTRY_FEATURE_REQUEST] = review_data["feature_request"]
+
+    if settings.GOOGLE_FORM_ENTRY_PAIN_POINTS and review_data.get("pain_points"):
+        form_data[settings.GOOGLE_FORM_ENTRY_PAIN_POINTS] = review_data["pain_points"]
+
+    if settings.GOOGLE_FORM_ENTRY_FEEDBACK and review_data.get("feedback"):
+        form_data[settings.GOOGLE_FORM_ENTRY_FEEDBACK] = review_data["feedback"]
+
+    if settings.GOOGLE_FORM_ENTRY_EMAIL and user_email:
+        form_data[settings.GOOGLE_FORM_ENTRY_EMAIL] = user_email
+
+    if not form_data:
+        logger.warning("No form data to submit")
+        return
+
+    try:
+        logger.info(f"Sending to Google Forms with data: {form_data}")
+
+        # Google Forms works best with these specific headers
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Origin": "https://docs.google.com",
+            "Referer": f"https://docs.google.com/forms/d/e/{settings.GOOGLE_FORM_ID}/viewform",
+        }
+
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            response = await client.post(
+                form_url,
+                data=form_data,
+                headers=headers,
+                timeout=10.0
+            )
+            # Google Forms returns 302 redirect on success, or 200 if it shows confirmation
+            logger.info(f"Google Forms response: status={response.status_code}")
+            if response.status_code in [200, 302, 303]:
+                logger.info("Google Forms submission successful!")
+            else:
+                logger.warning(f"Google Forms returned unexpected status: {response.status_code}")
+    except Exception as e:
+        # Don't fail the review submission if Google Forms fails
+        logger.error(f"Failed to submit to Google Forms: {e}", exc_info=True)
+
+
+@router.post("/me/review/test-google-forms")
+async def test_google_forms(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Test Google Forms submission with sample data.
+    Use this to verify your form configuration is correct.
+    """
+    if not settings.GOOGLE_FORM_ID:
+        return {
+            "success": False,
+            "error": "GOOGLE_FORM_ID not configured in .env"
+        }
+
+    test_data = {
+        "rating": 5,
+        "would_recommend": True,
+        "use_case": "Test submission from CreatorCrafter",
+        "feature_request": "This is a test feature request",
+        "pain_points": "This is a test pain point",
+        "feedback": "This is test feedback - please ignore",
+    }
+
+    # Run synchronously for immediate feedback
+    import httpx
+
+    form_url = f"https://docs.google.com/forms/d/e/{settings.GOOGLE_FORM_ID}/formResponse"
+
+    form_data = {}
+    if settings.GOOGLE_FORM_ENTRY_RATING:
+        form_data[settings.GOOGLE_FORM_ENTRY_RATING] = str(test_data["rating"])
+    if settings.GOOGLE_FORM_ENTRY_RECOMMEND:
+        form_data[settings.GOOGLE_FORM_ENTRY_RECOMMEND] = "Yes"
+    if settings.GOOGLE_FORM_ENTRY_USE_CASE:
+        form_data[settings.GOOGLE_FORM_ENTRY_USE_CASE] = test_data["use_case"]
+    if settings.GOOGLE_FORM_ENTRY_FEATURE_REQUEST:
+        form_data[settings.GOOGLE_FORM_ENTRY_FEATURE_REQUEST] = test_data["feature_request"]
+    if settings.GOOGLE_FORM_ENTRY_PAIN_POINTS:
+        form_data[settings.GOOGLE_FORM_ENTRY_PAIN_POINTS] = test_data["pain_points"]
+    if settings.GOOGLE_FORM_ENTRY_FEEDBACK:
+        form_data[settings.GOOGLE_FORM_ENTRY_FEEDBACK] = test_data["feedback"]
+    if settings.GOOGLE_FORM_ENTRY_EMAIL:
+        form_data[settings.GOOGLE_FORM_ENTRY_EMAIL] = current_user.email
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            response = await client.post(
+                form_url,
+                data=form_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=10.0
+            )
+
+        return {
+            "success": response.status_code == 200,
+            "status_code": response.status_code,
+            "form_url": form_url,
+            "data_sent": form_data,
+            "config": {
+                "GOOGLE_FORM_ID": settings.GOOGLE_FORM_ID,
+                "GOOGLE_FORM_ENTRY_RATING": settings.GOOGLE_FORM_ENTRY_RATING,
+                "GOOGLE_FORM_ENTRY_RECOMMEND": settings.GOOGLE_FORM_ENTRY_RECOMMEND,
+                "GOOGLE_FORM_ENTRY_USE_CASE": settings.GOOGLE_FORM_ENTRY_USE_CASE,
+                "GOOGLE_FORM_ENTRY_FEATURE_REQUEST": settings.GOOGLE_FORM_ENTRY_FEATURE_REQUEST,
+                "GOOGLE_FORM_ENTRY_PAIN_POINTS": settings.GOOGLE_FORM_ENTRY_PAIN_POINTS,
+                "GOOGLE_FORM_ENTRY_FEEDBACK": settings.GOOGLE_FORM_ENTRY_FEEDBACK,
+                "GOOGLE_FORM_ENTRY_EMAIL": settings.GOOGLE_FORM_ENTRY_EMAIL,
+            },
+            "message": "Check your Google Form responses to see if the test data was submitted"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "form_url": form_url,
+            "data_sent": form_data,
+        }
 
 
 @router.get("/me", response_model=UserResponse)
@@ -227,12 +380,14 @@ async def get_review_status(
 @router.post("/me/review", response_model=ReviewResponse)
 async def submit_review(
     review: ReviewSubmit,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Submit app review and feedback for idea validation.
     Quick survey with rating and optional questions.
+    Also sends to Google Forms if configured.
     """
     current_user.review_completed = True
     current_user.review_completed_at = datetime.utcnow()
@@ -241,6 +396,8 @@ async def submit_review(
 
     # Combine all feedback
     feedback_parts = []
+    if review.email:
+        feedback_parts.append(f"Contact email: {review.email}")
     if review.feedback:
         feedback_parts.append(f"General feedback: {review.feedback}")
     if review.use_case:
@@ -253,6 +410,20 @@ async def submit_review(
     current_user.review_feedback = "\n\n".join(feedback_parts) if feedback_parts else None
 
     db.commit()
+
+    # Send to Google Forms in background (non-blocking)
+    # Use provided email if available, otherwise fall back to user's account email
+    if settings.GOOGLE_FORM_ID:
+        review_data = {
+            "rating": review.rating,
+            "would_recommend": review.would_recommend,
+            "use_case": review.use_case,
+            "feature_request": review.feature_request,
+            "pain_points": review.pain_points,
+            "feedback": review.feedback,
+            "email": review.email or current_user.email,
+        }
+        background_tasks.add_task(send_to_google_forms, review_data, review.email or current_user.email)
 
     return {
         "success": True,

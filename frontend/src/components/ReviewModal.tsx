@@ -3,7 +3,7 @@
  * Shown after user spends 15+ minutes in the app
  */
 import { useState } from 'react'
-import { X, Star, Send, Heart, MessageSquare, Lightbulb, AlertCircle } from 'lucide-react'
+import { X, Star, Send, Heart, MessageSquare, Lightbulb, AlertCircle, Mail } from 'lucide-react'
 import { usersApi } from '../api'
 import './ReviewModal.css'
 
@@ -21,6 +21,7 @@ export default function ReviewModal({ isOpen, onClose, onSubmit }: ReviewModalPr
   const [useCase, setUseCase] = useState('')
   const [featureRequest, setFeatureRequest] = useState('')
   const [painPoints, setPainPoints] = useState('')
+  const [email, setEmail] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showThankYou, setShowThankYou] = useState(false)
 
@@ -38,6 +39,7 @@ export default function ReviewModal({ isOpen, onClose, onSubmit }: ReviewModalPr
         use_case: useCase || undefined,
         feature_request: featureRequest || undefined,
         pain_points: painPoints || undefined,
+        email: email || undefined,
       })
       setShowThankYou(true)
       setTimeout(() => {
@@ -133,6 +135,21 @@ export default function ReviewModal({ isOpen, onClose, onSubmit }: ReviewModalPr
                 Not yet
               </button>
             </div>
+          </div>
+
+          {/* Email */}
+          <div className="review-section">
+            <label>
+              <Mail size={16} />
+              Your email (for follow-up)
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="your@email.com (optional)"
+              maxLength={100}
+            />
           </div>
 
           {/* Use Case */}

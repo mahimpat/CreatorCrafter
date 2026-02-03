@@ -859,3 +859,84 @@ def run_sfx_generation(
 
     finally:
         loop.close()
+
+
+def run_video_export(
+    task_id: str,
+    project_id: int,
+    user_id: int,
+    clip_infos: list,
+    transition_infos: list,
+    output_dir: str,
+    output_filename: str,
+    bgm_path: str = None,
+    bgm_volume: float = 0.3,
+    sfx_infos: list = None,
+):
+    """
+    Run video export (stitch + mix) in background with WebSocket progress.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        loop.run_until_complete(send_progress(
+            user_id, "video_render", task_id, project_id,
+            "preparing", 10, "Preparing video export..."
+        ))
+
+        from app.services.video_stitcher import VideoStitcher
+
+        sfx_count = len(sfx_infos) if sfx_infos else 0
+        bgm_label = " + BGM" if bgm_path else ""
+        sfx_label = f" + {sfx_count} SFX" if sfx_count else ""
+
+        loop.run_until_complete(send_progress(
+            user_id, "video_render", task_id, project_id,
+            "rendering", 30,
+            f"Rendering {len(clip_infos)} clips{bgm_label}{sfx_label}..."
+        ))
+
+        stitcher = VideoStitcher(output_dir)
+        success, result = stitcher.stitch_clips(
+            clip_infos,
+            transition_infos,
+            output_filename,
+            background_audio=bgm_path,
+            audio_volume=bgm_volume,
+            sfx_tracks=sfx_infos
+        )
+
+        if not success:
+            raise Exception(f"Export failed: {result}")
+
+        loop.run_until_complete(send_progress(
+            user_id, "video_render", task_id, project_id,
+            "finalizing", 90, "Finalizing export..."
+        ))
+
+        # Build the download URL
+        export_url = file_service.get_file_url(
+            user_id, project_id, "exports", output_filename
+        )
+
+        manager = get_connection_manager()
+        loop.run_until_complete(manager.send_task_complete(
+            user_id, "video_render", task_id, project_id,
+            {
+                "url": export_url,
+                "filename": output_filename,
+                "message": f"Exported {len(clip_infos)} clips{bgm_label}{sfx_label}"
+            }
+        ))
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        manager = get_connection_manager()
+        loop.run_until_complete(manager.send_task_error(
+            user_id, "video_render", task_id, project_id, str(e)
+        ))
+
+    finally:
+        loop.close()

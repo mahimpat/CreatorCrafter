@@ -88,6 +88,16 @@
   background: #22c55e;
 }
 
+/* Clickable completed steps */
+.step-item.clickable {
+  cursor: pointer;
+}
+
+.step-item.clickable:hover {
+  background: rgba(34, 197, 94, 0.15);
+  transform: scale(1.02);
+}
+
 /* ===== SELECTED TEMPLATE BAR ===== */
 .selected-template-bar {
   display: flex;

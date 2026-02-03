@@ -39,17 +39,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (email: string, password: string) => {
-    console.log('[Auth] Logging in...')
     const res = await authApi.login(email, password)
-    console.log('[Auth] Got tokens:', res.data.access_token ? 'yes' : 'no')
 
     localStorage.setItem('access_token', res.data.access_token)
     localStorage.setItem('refresh_token', res.data.refresh_token)
-    console.log('[Auth] Stored tokens. Verify:', localStorage.getItem('access_token')?.substring(0, 20))
 
     const userRes = await authApi.getMe()
     setUser(userRes.data)
-    console.log('[Auth] Login complete, user:', userRes.data.username)
   }
 
   const register = async (email: string, username: string, password: string) => {

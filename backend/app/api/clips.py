@@ -5,7 +5,7 @@ import os
 import json
 import subprocess
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -20,8 +20,10 @@ from app.schemas.clip import (
 )
 from app.api.deps import get_current_user
 from app.services.file_service import file_service
-from app.services.video_stitcher import VideoStitcher, ClipInfo, TransitionInfo
+from app.services.video_stitcher import VideoStitcher, ClipInfo, TransitionInfo, SFXTrackInfo
 from app.models.transition import Transition
+from app.models.sfx_track import SFXTrack
+from app.models.background_audio import BackgroundAudio
 from app.config import settings
 
 router = APIRouter()
@@ -306,6 +308,90 @@ async def duplicate_clip(
     return new_clip
 
 
+@router.post("/{project_id}/clips/{clip_id}/split")
+async def split_clip(
+    project_id: int,
+    clip_id: int,
+    split_time: float,  # Time within the clip (after start_trim) where to split
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Split a clip into two at the specified time.
+
+    Args:
+        split_time: The time (in seconds) within the clip's visible portion where to split.
+                   This is relative to the start_trim (0 = start of visible clip).
+    """
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    original_clip = db.query(VideoClip).filter(
+        VideoClip.id == clip_id,
+        VideoClip.project_id == project_id
+    ).first()
+
+    if not original_clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    # Calculate the actual split point in the original video
+    # split_time is relative to the start of the trimmed clip
+    actual_split_time = original_clip.start_trim + split_time
+
+    # Validate split time
+    clip_duration = original_clip.duration - original_clip.start_trim - original_clip.end_trim
+    if split_time <= 0 or split_time >= clip_duration:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Split time must be between 0 and {clip_duration} seconds"
+        )
+
+    # Shift all clips after this one to make room for the new clip
+    clips_after = db.query(VideoClip).filter(
+        VideoClip.project_id == project_id,
+        VideoClip.timeline_order > original_clip.timeline_order
+    ).all()
+
+    for clip in clips_after:
+        clip.timeline_order += 1
+
+    # Create the second clip (from split point to end)
+    new_clip = VideoClip(
+        project_id=project_id,
+        filename=original_clip.filename,  # Same video file
+        original_name=f"{original_clip.original_name or 'Clip'} (part 2)",
+        original_order=original_clip.original_order,
+        timeline_order=original_clip.timeline_order + 1,  # Right after original
+        duration=original_clip.duration,
+        start_trim=actual_split_time,  # Starts at split point
+        end_trim=original_clip.end_trim,  # Same end trim
+        width=original_clip.width,
+        height=original_clip.height,
+        fps=original_clip.fps,
+        clip_metadata=original_clip.clip_metadata
+    )
+
+    # Update original clip to end at split point
+    original_clip.end_trim = original_clip.duration - actual_split_time
+    original_clip.original_name = f"{original_clip.original_name or 'Clip'} (part 1)"
+
+    db.add(new_clip)
+    db.commit()
+    db.refresh(original_clip)
+    db.refresh(new_clip)
+
+    return {
+        "original_clip": original_clip,
+        "new_clip": new_clip,
+        "message": f"Clip split at {split_time:.2f}s"
+    }
+
+
 @router.put("/{project_id}/clips/reorder")
 async def reorder_clips(
     project_id: int,
@@ -344,12 +430,16 @@ async def reorder_clips(
 @router.post("/{project_id}/clips/stitch")
 async def stitch_clips(
     project_id: int,
+    background_tasks: BackgroundTasks,
+    include_sfx: bool = True,
+    include_bgm: bool = True,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Stitch all clips together with transitions and export the final video.
-    Returns the URL to the exported video.
+    Stitch all clips together with transitions, SFX, and BGM, then export.
+    Runs in background with WebSocket progress updates.
+    Returns a task_id for tracking progress.
     """
     project = db.query(Project).filter(
         Project.id == project_id,
@@ -400,7 +490,6 @@ async def stitch_clips(
 
         # Get transition to next clip (if not the last clip)
         if i < len(clips) - 1:
-            next_clip = clips[i + 1]
             transition = transition_map.get(clip.id)
 
             if transition:
@@ -416,35 +505,72 @@ async def stitch_clips(
                     duration=0
                 ))
 
+    # Gather SFX tracks if requested
+    sfx_infos = None
+    if include_sfx:
+        sfx_tracks = db.query(SFXTrack).filter(
+            SFXTrack.project_id == project_id
+        ).order_by(SFXTrack.start_time).all()
+
+        if sfx_tracks:
+            sfx_infos = []
+            for sfx in sfx_tracks:
+                sfx_path = file_service.get_file_path(
+                    current_user.id, project_id, "sfx", sfx.filename
+                )
+                if os.path.exists(sfx_path):
+                    sfx_infos.append(SFXTrackInfo(
+                        path=sfx_path,
+                        start_time=sfx.start_time,
+                        duration=sfx.duration,
+                        volume=sfx.volume or 1.0
+                    ))
+
+    # Gather BGM if requested
+    bgm_path = None
+    bgm_volume = 0.3
+    if include_bgm:
+        bgm_track = db.query(BackgroundAudio).filter(
+            BackgroundAudio.project_id == project_id
+        ).first()
+
+        if bgm_track:
+            bgm_path = file_service.get_file_path(
+                current_user.id, project_id, "bgm", bgm_track.filename
+            )
+            bgm_volume = bgm_track.volume or 0.3
+            if not os.path.exists(bgm_path):
+                bgm_path = None
+
     # Get output directory for exports
     export_dir = file_service.get_file_path(
         current_user.id, project_id, "exports", ""
     )
     os.makedirs(export_dir, exist_ok=True)
 
-    # Generate output filename
+    # Generate output filename and task ID
     import uuid
+    task_id = f"export_{uuid.uuid4().hex[:8]}"
     output_filename = f"export_{uuid.uuid4().hex[:8]}.mp4"
 
-    # Create stitcher and render
-    stitcher = VideoStitcher(export_dir)
-    success, result = stitcher.stitch_clips(
-        clip_infos,
-        transition_infos,
-        output_filename
-    )
-
-    if not success:
-        raise HTTPException(status_code=500, detail=f"Stitch failed: {result}")
-
-    # Return the URL to the exported video
-    export_url = file_service.get_file_url(
-        current_user.id, project_id, "exports", output_filename
+    # Launch export as background task with WebSocket progress
+    from app.tasks.ai_tasks import run_video_export
+    background_tasks.add_task(
+        run_video_export,
+        task_id=task_id,
+        project_id=project_id,
+        user_id=current_user.id,
+        clip_infos=clip_infos,
+        transition_infos=transition_infos,
+        output_dir=export_dir,
+        output_filename=output_filename,
+        bgm_path=bgm_path,
+        bgm_volume=bgm_volume,
+        sfx_infos=sfx_infos,
     )
 
     return {
         "success": True,
-        "filename": output_filename,
-        "url": export_url,
-        "message": f"Successfully stitched {len(clips)} clips with {len(transition_infos)} transitions"
+        "task_id": task_id,
+        "message": f"Export started for {len(clips)} clips"
     }

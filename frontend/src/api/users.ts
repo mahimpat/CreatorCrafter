@@ -53,6 +53,7 @@ export interface ReviewSubmit {
   use_case?: string
   feature_request?: string
   pain_points?: string
+  email?: string
 }
 
 export interface TimeTrackingResponse {

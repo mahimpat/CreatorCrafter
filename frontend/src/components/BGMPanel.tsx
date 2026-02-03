@@ -9,9 +9,16 @@ import {
   Pause,
   Trash2,
   Volume2,
-  Clock
+  Clock,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  Zap,
+  Gauge
 } from 'lucide-react'
-import { BackgroundAudio, projectsApi } from '../api'
+import { BackgroundAudio, projectsApi, BGMSuggestion } from '../api'
+import { useToast } from './Toast'
 import './BGMPanel.css'
 
 interface BGMPanelProps {
@@ -19,15 +26,19 @@ interface BGMPanelProps {
   bgmTracks: BackgroundAudio[]
   onBGMChange: (tracks: BackgroundAudio[]) => void
   videoDuration?: number
+  suggestedBGM?: BGMSuggestion[]
 }
 
 export default function BGMPanel({
   projectId,
   bgmTracks,
   onBGMChange,
+  suggestedBGM = [],
 }: BGMPanelProps) {
+  const { showError, showWarning, showSuccess, showInfo } = useToast()
   const [isUploading, setIsUploading] = useState(false)
   const [playingId, setPlayingId] = useState<number | null>(null)
+  const [showSuggestions, setShowSuggestions] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -43,7 +54,7 @@ export default function BGMPanel({
     if (!file) return
 
     if (!file.type.startsWith('audio/')) {
-      alert('Please select an audio file')
+      showWarning('Please select an audio file')
       return
     }
 
@@ -51,9 +62,10 @@ export default function BGMPanel({
     try {
       const response = await projectsApi.uploadBGM(projectId, file)
       onBGMChange([...bgmTracks, response.data])
+      showSuccess('Audio uploaded successfully!')
     } catch (error) {
       console.error('Failed to upload BGM:', error)
-      alert('Failed to upload audio file')
+      showError('Failed to upload audio file')
     } finally {
       setIsUploading(false)
       e.target.value = ''
@@ -133,6 +145,88 @@ export default function BGMPanel({
           style={{ display: 'none' }}
         />
       </div>
+
+      {/* AI BGM Suggestions */}
+      {suggestedBGM && suggestedBGM.length > 0 && (
+        <div className="bgm-suggestions-section">
+          <button
+            className="suggestions-toggle"
+            onClick={() => setShowSuggestions(!showSuggestions)}
+          >
+            <Sparkles size={14} />
+            <span>AI Music Suggestions ({suggestedBGM.length})</span>
+            {showSuggestions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          {showSuggestions && (
+            <div className="suggestions-list">
+              {suggestedBGM.map((suggestion, idx) => (
+                <div
+                  key={idx}
+                  className={`suggestion-item ${suggestion.type}`}
+                >
+                  <div className="suggestion-header">
+                    <span className="suggestion-type-badge">
+                      {suggestion.type === 'primary' && <Zap size={12} />}
+                      {suggestion.type}
+                    </span>
+                    <span className="suggestion-confidence">
+                      {Math.round(suggestion.confidence * 100)}% match
+                    </span>
+                  </div>
+
+                  <div className="suggestion-details">
+                    <div className="detail-row">
+                      <span className="detail-label">Mood</span>
+                      <span className="detail-value mood">{suggestion.mood}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Genre</span>
+                      <span className="detail-value genre">{suggestion.genre}</span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Tempo</span>
+                      <span className="detail-value tempo">
+                        {suggestion.tempo_range[0]}-{suggestion.tempo_range[1]} BPM
+                      </span>
+                    </div>
+                    <div className="detail-row">
+                      <span className="detail-label">Energy</span>
+                      <span className={`detail-value energy ${suggestion.energy_level}`}>
+                        <Gauge size={12} />
+                        {suggestion.energy_level}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="suggestion-reason">{suggestion.reason}</p>
+
+                  {suggestion.generation_prompt && (
+                    <div className="generation-prompt">
+                      <span className="prompt-label">AI Generation Prompt:</span>
+                      <code>{suggestion.generation_prompt}</code>
+                    </div>
+                  )}
+
+                  <button
+                    className="apply-suggestion-btn"
+                    onClick={() => {
+                      // Copy the generation prompt to clipboard
+                      if (suggestion.generation_prompt) {
+                        navigator.clipboard.writeText(suggestion.generation_prompt)
+                        showInfo('Music prompt copied to clipboard!')
+                      }
+                    }}
+                  >
+                    <Check size={14} />
+                    Copy Prompt
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {bgmTracks.length === 0 ? (
         <div className="empty-state">

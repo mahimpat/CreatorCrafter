@@ -42,8 +42,9 @@ scenedetect[opencv]>=0.6.0
 # Semantic SFX matching (for intelligent audio description)
 sentence-transformers>=2.2.0
 
-# HTTP client for API calls (ElevenLabs, etc.)
+# HTTP client for API calls (ElevenLabs, Google Forms, etc.)
 requests>=2.31.0
+httpx>=0.27.0
 
 # Optional: LLM APIs for best audio descriptions (uncomment if needed)
 # openai>=1.0.0

@@ -45,20 +45,24 @@ function getOrCreateWebSocket(): WebSocket | null {
 
   // Check max attempts
   if (connectionAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    console.log('Max WebSocket reconnection attempts reached')
+    console.warn('Max WebSocket reconnection attempts reached')
     return null
   }
 
   globalWsConnecting = true
   connectionAttempts++
 
-  const wsUrl = `${import.meta.env.VITE_WS_URL || 'ws://localhost:8000'}/ws?token=${encodeURIComponent(token)}`
+  // Derive WebSocket URL: use VITE_WS_URL env var, or auto-detect from page URL
+  const wsBase = import.meta.env.VITE_WS_URL || (() => {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${proto}//${window.location.hostname}:8000`
+  })()
+  const wsUrl = `${wsBase}/ws?token=${encodeURIComponent(token)}`
 
   try {
     globalWs = new WebSocket(wsUrl)
 
     globalWs.onopen = () => {
-      console.log('WebSocket connected')
       globalWsConnecting = false
       connectionAttempts = 0 // Reset on successful connection
     }
@@ -76,7 +80,6 @@ function getOrCreateWebSocket(): WebSocket | null {
     }
 
     globalWs.onclose = (event) => {
-      console.log('WebSocket disconnected', event.code, event.reason)
       globalWsConnecting = false
       globalWs = null
 

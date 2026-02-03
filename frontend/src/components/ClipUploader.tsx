@@ -4,6 +4,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { Upload, Film, X, AlertCircle } from 'lucide-react'
 import { projectsApi, VideoClip } from '../api'
+import { useToast } from './Toast'
 import './ClipUploader.css'
 
 interface ClipUploaderProps {
@@ -19,6 +20,7 @@ interface UploadingFile {
 }
 
 export default function ClipUploader({ projectId, onClipsUploaded }: ClipUploaderProps) {
+  const { showWarning, showSuccess } = useToast()
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -27,7 +29,7 @@ export default function ClipUploader({ projectId, onClipsUploaded }: ClipUploade
     const fileArray = Array.from(files).filter(f => f.type.startsWith('video/'))
 
     if (fileArray.length === 0) {
-      alert('Please select video files only')
+      showWarning('Please select video files only')
       return
     }
 

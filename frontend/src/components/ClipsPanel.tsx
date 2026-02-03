@@ -2,7 +2,7 @@
  * ClipsPanel - Combined clip upload and list management
  */
 import { useState, useEffect } from 'react'
-import { Film, Layers } from 'lucide-react'
+import { Film, Layers, Plus } from 'lucide-react'
 import { VideoClip } from '../api'
 import ClipUploader from './ClipUploader'
 import ClipList from './ClipList'
@@ -77,7 +77,18 @@ export default function ClipsPanel({
         selectedClipId={selectedClipId}
       />
 
-      {clips.length > 1 && (
+      {/* Add More button for compact mode when uploader is hidden */}
+      {compact && clips.length > 0 && !showUploader && (
+        <button
+          className="add-more-clips-btn"
+          onClick={() => setShowUploader(true)}
+        >
+          <Plus size={16} />
+          Add More Clips
+        </button>
+      )}
+
+      {clips.length > 1 && !compact && (
         <div className="clips-hint">
           <Layers size={14} />
           <span>Drag clips to reorder. Clips will be stitched in this order.</span>

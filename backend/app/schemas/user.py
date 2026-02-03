@@ -71,6 +71,8 @@ class ReviewSubmit(BaseModel):
     use_case: Optional[str] = Field(None, max_length=500, description="Primary use case")
     feature_request: Optional[str] = Field(None, max_length=500, description="Most wanted feature")
     pain_points: Optional[str] = Field(None, max_length=500, description="Current pain points")
+    # Contact info
+    email: Optional[EmailStr] = Field(None, description="Optional email for follow-up")
 
 
 class ReviewResponse(BaseModel):

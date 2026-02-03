@@ -21,7 +21,6 @@ class ApiClient {
     // Request interceptor to add auth token
     this.client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
       const token = localStorage.getItem('access_token')
-      console.log('[API] Request to:', config.url, '| Token:', token ? 'present' : 'MISSING')
       if (token) {
         config.headers.Authorization = `Bearer ${token}`
       }

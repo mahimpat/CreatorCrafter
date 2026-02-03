@@ -42,7 +42,25 @@ export function compileShader(
   gl.compileShader(shader);
 
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+    const errorLog = gl.getShaderInfoLog(shader) || 'Unknown error';
+    console.error('Shader compilation error:', errorLog);
+
+    // Log the shader source with line numbers for debugging
+    if (import.meta.env.DEV) {
+      const lines = source.split('\n');
+      // Extract line number from error (format: "ERROR: 0:32:" or "ERROR: 0:32")
+      const lineMatch = errorLog.match(/ERROR:\s*\d+:(\d+)/);
+      const errorLine = lineMatch ? parseInt(lineMatch[1], 10) : -1;
+
+      console.group('Shader source (error near line ' + errorLine + '):');
+      lines.forEach((line, i) => {
+        const lineNum = i + 1;
+        const marker = lineNum === errorLine ? '>>> ' : '    ';
+        console.error(`${marker}${lineNum.toString().padStart(3)}: ${line}`);
+      });
+      console.groupEnd();
+    }
+
     gl.deleteShader(shader);
     return null;
   }

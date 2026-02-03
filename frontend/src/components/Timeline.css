@@ -7,6 +7,7 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 /* === HEADER === */
@@ -178,6 +179,7 @@
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-height: 0; /* Allow flex item to shrink */
 }
 
 /* Left sidebar with labels */
@@ -199,15 +201,31 @@
 
 .track-labels {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Hide scrollbar but keep functionality */
+.track-labels::-webkit-scrollbar {
+  width: 4px;
+}
+
+.track-labels::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.track-labels::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
 }
 
 .track-label {
-  height: 70px;
+  height: 45px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
-  gap: 10px;
+  padding: 0 10px;
+  gap: 8px;
+  font-size: 12px;
   border-bottom: 1px solid #333;
 }
 
@@ -340,6 +358,21 @@
 .tracks-container {
   position: relative;
   cursor: pointer;
+  overflow-y: auto;
+}
+
+/* Hide scrollbar but keep functionality */
+.tracks-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tracks-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tracks-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
 }
 
 .playhead-line {
@@ -355,15 +388,38 @@
 
 /* Individual Track */
 .track {
-  height: 70px;
+  height: 45px;
   position: relative;
   border-bottom: 1px solid #333;
 }
 
 .track.video { background: linear-gradient(90deg, #1e1e1e 0%, rgba(255,152,0,0.03) 100%); }
-.track.audio { background: linear-gradient(90deg, #1e1e1e 0%, rgba(76,175,80,0.03) 100%); }
+.track.audio,
+.track.clip-audio { background: linear-gradient(90deg, #1e1e1e 0%, rgba(139,92,246,0.03) 100%); }
+.track.sfx { background: linear-gradient(90deg, #1e1e1e 0%, rgba(76,175,80,0.03) 100%); }
+.track.bgm { background: linear-gradient(90deg, #1e1e1e 0%, rgba(59,130,246,0.03) 100%); }
 .track.subtitles { background: linear-gradient(90deg, #1e1e1e 0%, rgba(33,150,243,0.03) 100%); }
 .track.overlays { background: linear-gradient(90deg, #1e1e1e 0%, rgba(156,39,176,0.03) 100%); }
+
+/* BGM Track Item */
+.track-item.bgm-item {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.6));
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.track-item.bgm-item:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.7));
+}
+
+.volume-indicator {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 0 0 4px 4px;
+}
 
 /* Video Clip */
 .video-clip {
@@ -497,6 +553,70 @@
   border-radius: 2px;
 }
 
+/* Clip Audio Waveforms */
+.clip-audio-container {
+  display: flex;
+  align-items: center;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.clip-audio-container:hover {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+.clip-audio-container.muted {
+  background: rgba(100, 100, 100, 0.1);
+  border-color: rgba(100, 100, 100, 0.3);
+}
+
+.clip-audio-container.muted:hover {
+  background: rgba(100, 100, 100, 0.15);
+}
+
+.clip-audio-mute-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.clip-audio-container:hover .clip-audio-mute-btn {
+  opacity: 1;
+}
+
+.clip-audio-mute-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+}
+
+.clip-audio-mute-btn.muted {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.8);
+  color: white;
+}
+
+.clip-audio-mute-btn.muted:hover {
+  background: rgba(239, 68, 68, 1);
+}
+
 /* SFX Suggestion markers */
 .sfx-marker {
   position: absolute;
@@ -625,6 +745,20 @@
 .tool-btn.delete:hover:not(:disabled) {
   background: rgba(239, 83, 80, 0.2);
   color: #ef5350;
+}
+
+/* Delete button drag-over state */
+.tool-btn.delete.drag-over {
+  background: rgba(239, 68, 68, 0.4) !important;
+  color: #ef4444 !important;
+  transform: scale(1.15);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.5);
+  animation: delete-btn-pulse 0.5s ease-in-out infinite;
+}
+
+@keyframes delete-btn-pulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(239, 68, 68, 0.5); }
+  50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.8); }
 }
 
 /* Multi-Clip Styles */
@@ -779,25 +913,57 @@
 }
 
 /* Clip Drag and Drop States */
-.video-clip.multi-clip.clip-dragging {
-  opacity: 0.5;
+.video-clip.multi-clip {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  /* Smooth transitions only for non-dragging properties */
+  transition: filter 0.15s ease, outline 0.1s ease, box-shadow 0.15s ease;
+}
+
+.video-clip.multi-clip:active {
   cursor: grabbing;
 }
 
+/* When being dragged - remove transitions for instant feedback */
+.video-clip.multi-clip.clip-dragging {
+  opacity: 0.4;
+  cursor: grabbing !important;
+  filter: brightness(0.8);
+  /* No transition during drag for instant position updates */
+  transition: none !important;
+  /* Add subtle pulsing effect */
+  animation: clip-dragging-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes clip-dragging-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.55; }
+}
+
+/* Visual feedback during drag-over */
 .video-clip.multi-clip.drag-over {
   position: relative;
+  /* Slight highlight on hover target */
+  filter: brightness(1.1);
 }
 
 .video-clip.multi-clip.drag-over::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: -2px;
+  bottom: -2px;
   width: 4px;
   background: #4fc3f7;
   z-index: 100;
   border-radius: 2px;
-  box-shadow: 0 0 8px rgba(79, 195, 247, 0.8);
+  box-shadow: 0 0 12px rgba(79, 195, 247, 0.9);
+  animation: drop-indicator-pulse 0.5s ease-in-out infinite;
+}
+
+@keyframes drop-indicator-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(79, 195, 247, 0.8); }
+  50% { box-shadow: 0 0 16px rgba(79, 195, 247, 1); }
 }
 
 .video-clip.multi-clip.drag-over-before::before {
@@ -807,15 +973,6 @@
 .video-clip.multi-clip.drag-over-after::before {
   right: -4px;
   left: auto;
-}
-
-/* Draggable cursor */
-.video-clip.multi-clip {
-  cursor: grab;
-}
-
-.video-clip.multi-clip:active {
-  cursor: grabbing;
 }
 
 /* Drop zone hint for empty video track */
@@ -971,4 +1128,66 @@
   color: white;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   white-space: nowrap;
+}
+
+/* === TRASH BIN DROP ZONE === */
+.timeline-trash-bin {
+  position: absolute;
+  top: 60px;
+  right: 20px;
+  width: 120px;
+  height: 80px;
+  background: rgba(239, 68, 68, 0.15);
+  border: 2px dashed rgba(239, 68, 68, 0.5);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: rgba(239, 68, 68, 0.8);
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 1000;
+  transition: all 0.2s ease;
+  animation: trash-appear 0.2s ease-out;
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+@keyframes trash-appear {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.timeline-trash-bin.drag-over {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: #ef4444;
+  color: #ef4444;
+  transform: scale(1.05);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+}
+
+.timeline-trash-bin.drag-over svg {
+  animation: trash-shake 0.3s ease-in-out infinite;
+}
+
+@keyframes trash-shake {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-10deg); }
+  75% { transform: rotate(10deg); }
+}
+
+/* Dragging to trash state for items */
+.track-item.dragging-to-trash,
+.video-clip.dragging-to-trash,
+.bgm-item.dragging-to-trash {
+  opacity: 0.5;
+  transform: scale(0.95);
 }
