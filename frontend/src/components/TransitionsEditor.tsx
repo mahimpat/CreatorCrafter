@@ -290,13 +290,8 @@ interface IntroOutroEffect {
 
 interface TransitionsEditorProps {
   transitions: Transition[]
-  suggestedTransitions?: Array<{
-    timestamp: number
-    type: string
-    confidence: number
-    suggested_transition: string
-    reason: string
-  }>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  suggestedTransitions?: any[]
   onAddTransition: (fromClipId: number, toClipId: number, type: TransitionType, duration: number) => Promise<void>
   onUpdateTransition: (id: number, type: TransitionType, duration: number) => Promise<void>
   onDeleteTransition: (id: number) => Promise<void>

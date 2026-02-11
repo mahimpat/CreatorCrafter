@@ -1191,3 +1191,127 @@
   opacity: 0.5;
   transform: scale(0.95);
 }
+
+/* ========== Phase 4: Manual Mode Intelligence ========== */
+
+/* Beat markers on time ruler */
+.beat-marker {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.beat-marker.strong {
+  background: rgba(255, 152, 0, 0.7);
+  width: 2px;
+}
+
+.beat-marker.medium {
+  background: rgba(255, 152, 0, 0.4);
+}
+
+.beat-marker.weak {
+  background: rgba(255, 152, 0, 0.2);
+}
+
+/* Beat snap button */
+.beat-snap-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.beat-snap-btn.active {
+  background: rgba(255, 152, 0, 0.2) !important;
+  border-color: rgba(255, 152, 0, 0.5) !important;
+  color: #ff9800 !important;
+}
+
+/* Shot type badges on clips */
+.shot-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.shot-type-badge.shot-close_up,
+.shot-type-badge.shot-closeup,
+.shot-type-badge.shot-close {
+  background: rgba(233, 30, 99, 0.25);
+  color: #e91e63;
+}
+
+.shot-type-badge.shot-medium,
+.shot-type-badge.shot-medium_shot {
+  background: rgba(33, 150, 243, 0.25);
+  color: #2196f3;
+}
+
+.shot-type-badge.shot-wide,
+.shot-type-badge.shot-wide_shot,
+.shot-type-badge.shot-establishing {
+  background: rgba(76, 175, 80, 0.25);
+  color: #4caf50;
+}
+
+/* Color consistency warning */
+.color-warning {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 152, 0, 0.9);
+  border-radius: 50%;
+  color: #000;
+  z-index: 5;
+  cursor: help;
+}
+
+.color-warning:hover {
+  background: #ff9800;
+  transform: scale(1.2);
+}
+
+/* Audio conflict indicator on SFX items */
+.track-item.audio-conflict {
+  border: 1px solid rgba(244, 67, 54, 0.6) !important;
+  background: rgba(244, 67, 54, 0.15) !important;
+}
+
+.track-item.audio-conflict .item-icon {
+  color: #f44336;
+}
+
+/* Speech region indicators on SFX track */
+.speech-region {
+  position: absolute;
+  bottom: 0;
+  height: 3px;
+  background: rgba(76, 175, 80, 0.4);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.speech-region:hover {
+  background: rgba(76, 175, 80, 0.6);
+  pointer-events: auto;
+}

@@ -10,6 +10,7 @@ interface SFXSuggestion {
   reason?: string
   visual_context?: string
   action_context?: string
+  confidence?: number
 }
 
 export default function SFXEditor() {
@@ -127,17 +128,68 @@ export default function SFXEditor() {
         </button>
       </div>
 
+      {/* Layered SFX suggestions (from sfx_layers) */}
+      {analysis?.sfx_layers && analysis.sfx_layers.length > 0 && (
+        <div className="sfx-suggestions">
+          <h4>Layered SFX (AI)</h4>
+          <p className="suggestions-hint">Multi-layer sound design per scene</p>
+          {analysis.sfx_layers.slice(0, 8).map((entry, idx) => (
+            <div key={`layer-${idx}`} className="suggestion-item layer-group">
+              <div className="suggestion-content">
+                <div className="suggestion-header">
+                  <strong className="suggestion-scene">Scene at {entry.timestamp.toFixed(1)}s</strong>
+                </div>
+                {(['foley', 'ambient', 'accent', 'contrast'] as const).map(layerType => {
+                  const layer = entry[layerType]
+                  if (!layer?.prompt) return null
+                  return (
+                    <div key={layerType} className="layer-row" style={{ marginTop: 4 }}>
+                      <span className={`layer-badge layer-${layerType}`}>{layerType}</span>
+                      <span className="prompt-text" style={{ fontSize: '0.85em', flex: 1 }}>{layer.prompt}</span>
+                      <button
+                        className="btn-small use-btn"
+                        onClick={() => handleUseSuggestion({ timestamp: entry.timestamp, prompt: layer.prompt, reason: `[${layerType}]` }, idx * 4)}
+                        disabled={generatingIndex !== null}
+                        style={{ marginLeft: 4, padding: '2px 8px', fontSize: '0.8em' }}
+                      >
+                        {generatingIndex === idx * 4 ? <span className="spinner small"></span> : 'Use'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Flat SFX suggestions (fallback) */}
       {analysis?.suggestedSFX && analysis.suggestedSFX.length > 0 && (
         <div className="sfx-suggestions">
           <h4>AI Suggestions</h4>
           <p className="suggestions-hint">Based on video analysis</p>
-          {analysis.suggestedSFX.map((suggestion: SFXSuggestion, index: number) => (
+          {analysis.suggestedSFX
+            .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+            .map((suggestion: SFXSuggestion, index: number) => (
             <div key={index} className="suggestion-item">
               <div className="suggestion-content">
                 <div className="suggestion-header">
                   <strong className="suggestion-scene">{suggestion.reason || 'Sound effect'}</strong>
                   <span className="suggestion-time">
                     at {suggestion.timestamp.toFixed(2)}s
+                  </span>
+                  <span
+                    className="confidence-badge"
+                    style={{
+                      marginLeft: 6,
+                      fontSize: '0.75em',
+                      padding: '1px 6px',
+                      borderRadius: 8,
+                      background: (suggestion.confidence ?? 0) >= 0.7 ? '#4caf50' : (suggestion.confidence ?? 0) >= 0.5 ? '#ff9800' : '#666',
+                      color: '#fff'
+                    }}
+                  >
+                    {Math.round((suggestion.confidence ?? 0) * 100)}%
                   </span>
                 </div>
 
@@ -146,6 +198,11 @@ export default function SFXEditor() {
                     <span className="prompt-label">Audio:</span>
                     <span className="prompt-text">{suggestion.prompt}</span>
                   </div>
+                  {suggestion.visual_context && (
+                    <div style={{ fontSize: '0.8em', color: '#999', marginTop: 2 }}>
+                      Visual: {suggestion.visual_context}
+                    </div>
+                  )}
                 </div>
               </div>
               <button

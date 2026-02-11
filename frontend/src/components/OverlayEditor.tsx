@@ -1,7 +1,15 @@
 import { useState } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { Pencil, Trash2, Type } from 'lucide-react'
+import { Pencil, Trash2, Type, Wand2 } from 'lucide-react'
 import './OverlayEditor.css'
+
+const OVERLAY_TYPE_STYLES: Record<string, any> = {
+  intro_title: { fontSize: 48, fontFamily: 'Impact', position: { x: 50, y: 40 }, animation: 'fade' as const },
+  lower_third: { fontSize: 22, backgroundColor: 'rgba(0,0,0,0.6)', position: { x: 10, y: 80 }, animation: 'slide' as const },
+  section_title: { fontSize: 36, position: { x: 50, y: 50 }, animation: 'zoom' as const },
+  callout: { fontSize: 28, color: '#FFD700', position: { x: 50, y: 30 }, animation: 'fade' as const },
+  outro_title: { fontSize: 40, fontFamily: 'Georgia', position: { x: 50, y: 45 }, animation: 'fade' as const },
+}
 
 export default function OverlayEditor() {
   const {
@@ -9,7 +17,8 @@ export default function OverlayEditor() {
     addTextOverlay,
     updateTextOverlay,
     deleteTextOverlay,
-    currentTime
+    currentTime,
+    analysis
   } = useProject()
 
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -91,6 +100,58 @@ export default function OverlayEditor() {
           Add Overlay
         </button>
       </div>
+
+      {/* AI-Suggested Text Overlays */}
+      {analysis?.suggested_text_overlays && analysis.suggested_text_overlays.length > 0 && (
+        <div className="overlay-suggestions" style={{ margin: '12px 0', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)' }}>
+          <h4 style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Wand2 size={14} />
+            AI Suggestions ({analysis.suggested_text_overlays.length})
+          </h4>
+          {analysis.suggested_text_overlays.map((suggestion, idx) => {
+            const typeStyle = OVERLAY_TYPE_STYLES[suggestion.type] || {}
+            return (
+              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style={{
+                  fontSize: '0.7em', padding: '2px 6px', borderRadius: 4,
+                  background: suggestion.type === 'intro_title' ? '#4caf50' :
+                    suggestion.type === 'callout' ? '#ff9800' :
+                    suggestion.type === 'lower_third' ? '#2196f3' : '#666',
+                  color: '#fff', whiteSpace: 'nowrap'
+                }}>
+                  {suggestion.type.replace('_', ' ')}
+                </span>
+                <span style={{ flex: 1, fontSize: '0.9em' }}>{suggestion.text}</span>
+                <span style={{ fontSize: '0.75em', color: '#999', whiteSpace: 'nowrap' }}>
+                  {(suggestion.start_time ?? suggestion.timestamp ?? 0).toFixed(1)}s
+                </span>
+                <button
+                  className="btn-small"
+                  style={{ padding: '2px 10px', fontSize: '0.8em' }}
+                  onClick={() => {
+                    const startTime = suggestion.start_time ?? suggestion.timestamp ?? 0
+                    addTextOverlay({
+                      text: suggestion.text,
+                      start_time: startTime,
+                      end_time: suggestion.end_time ?? startTime + 3,
+                      style: {
+                        fontSize: typeStyle.fontSize || 32,
+                        fontFamily: typeStyle.fontFamily || 'Arial',
+                        color: typeStyle.color || '#ffffff',
+                        backgroundColor: typeStyle.backgroundColor || 'transparent',
+                        position: typeStyle.position || { x: 50, y: 50 },
+                        animation: typeStyle.animation || 'fade',
+                      }
+                    })
+                  }}
+                >
+                  Use
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <div className="overlay-list">
         <h4>Text Overlays ({textOverlays.length})</h4>

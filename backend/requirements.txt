@@ -30,6 +30,7 @@ torch>=2.2.0
 torchaudio>=2.2.0
 openai-whisper
 transformers>=4.30.0
+accelerate>=0.25.0
 opencv-python>=4.8.1.78
 numpy<2.0.0,>=1.24.0
 librosa>=0.10.0

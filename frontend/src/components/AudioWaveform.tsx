@@ -57,7 +57,7 @@ export default function AudioWaveform({
   // Extract waveform data from audio
   const extractWaveform = useCallback(async (url: string) => {
     // Check cache first
-    const cacheKey = url
+    const cacheKey = url.split('?')[0]
     if (waveformCache.has(cacheKey)) {
       const cached = waveformCache.get(cacheKey)!
       setWaveformData(cached)
@@ -66,6 +66,7 @@ export default function AudioWaveform({
       return
     }
 
+    let audioContext: AudioContext | undefined
     try {
       setIsLoading(true)
 
@@ -77,7 +78,7 @@ export default function AudioWaveform({
       const arrayBuffer = await response.arrayBuffer()
 
       // Create audio context and decode
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
 
       setAudioDuration(audioBuffer.duration)
@@ -112,13 +113,13 @@ export default function AudioWaveform({
       setWaveformData(normalizedPeaks)
       setIsLoading(false)
       onLoad?.()
-
-      // Clean up audio context
-      audioContext.close()
     } catch (err) {
       console.error('Failed to extract waveform:', err)
       setIsLoading(false)
       onError?.(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      // Always clean up audio context to prevent resource leaks
+      audioContext?.close()
     }
   }, [width, onLoad, onError])
 

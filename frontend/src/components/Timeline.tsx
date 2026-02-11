@@ -1,12 +1,14 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { VideoClip, Transition, BackgroundAudio, projectsApi } from '../api'
+import { VideoClip, Transition, BackgroundAudio, AnalysisScene, projectsApi } from '../api'
 import {
   Film, Volume2, VolumeX, MessageSquare, Type, Eye, EyeOff, Lock, Unlock, Music,
   Trash2, ZoomIn, ZoomOut, Scissors, Copy, Play, Square,
-  SkipBack, SkipForward, ArrowRightLeft, ChevronsLeft, ChevronsRight
+  SkipBack, SkipForward, ArrowRightLeft, ChevronsLeft, ChevronsRight,
+  AlertTriangle, Disc3, Camera
 } from 'lucide-react'
 import AudioWaveform from './AudioWaveform'
+import { useToast } from './Toast'
 import './Timeline.css'
 
 interface DragState {
@@ -22,12 +24,22 @@ interface DragState {
 
 interface Selection {
   id: number
-  type: 'subtitle' | 'sfx' | 'overlay' | 'clip'
+  type: 'subtitle' | 'sfx' | 'overlay' | 'clip' | 'bgm'
 }
 
 interface IntroOutroEffect {
   type: string
   duration: number
+}
+
+interface BeatInfo {
+  timestamp: number
+  strength: number
+}
+
+interface SpeechRegion {
+  start: number
+  end: number
 }
 
 interface TimelineProps {
@@ -42,6 +54,13 @@ interface TimelineProps {
   onOutroEffectClick?: () => void
   bgmTracks?: BackgroundAudio[]
   onBGMChange?: (tracks: BackgroundAudio[]) => void
+  // Phase 4: Manual mode intelligence
+  showBeatMarkers?: boolean
+  snapToBeats?: boolean
+  beats?: BeatInfo[]
+  beatSyncPoints?: number[]
+  speechRegions?: SpeechRegion[]
+  scenes?: AnalysisScene[]
 }
 
 interface TrackVisibility {
@@ -73,8 +92,15 @@ export default function Timeline({
   onIntroEffectClick,
   onOutroEffectClick,
   bgmTracks = [],
-  onBGMChange
+  onBGMChange,
+  showBeatMarkers = false,
+  snapToBeats = false,
+  beats = [],
+  beatSyncPoints: _beatSyncPoints = [],
+  speechRegions = [],
+  scenes = [],
 }: TimelineProps) {
+  const { showError } = useToast()
   const timelineRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const trackLabelsRef = useRef<HTMLDivElement>(null)
@@ -176,8 +202,8 @@ export default function Timeline({
     return value
   }, [snapEnabled, pixelsPerSecond])
 
-  // Get snap points (playhead, other items edges)
-  const getSnapPoints = useCallback((): number[] => {
+  // Get snap points (playhead, other items edges, beats) - memoized to avoid recomputation on every mouse move
+  const snapPoints = useMemo((): number[] => {
     const points: number[] = [0, safeDuration, currentTime]
 
     subtitles.forEach(s => {
@@ -196,8 +222,74 @@ export default function Timeline({
       }
     })
 
+    // Add beat timestamps for snap-to-beat (Phase 4)
+    if (snapToBeats && beats.length > 0) {
+      beats.forEach(b => points.push(b.timestamp))
+    }
+
     return points
-  }, [subtitles, sfxTracks, textOverlays, currentTime, safeDuration, selection])
+  }, [subtitles, sfxTracks, textOverlays, currentTime, safeDuration, selection, snapToBeats, beats])
+
+  // Phase 4: Audio conflict detection - find SFX tracks that overlap with speech regions
+  const audioConflicts = useMemo(() => {
+    if (speechRegions.length === 0) return new Set<number>()
+    const conflictIds = new Set<number>()
+    sfxTracks.forEach(sfx => {
+      const sfxEnd = sfx.start_time + sfx.duration
+      for (const speech of speechRegions) {
+        // Check if SFX overlaps with speech
+        if (sfx.start_time < speech.end && sfxEnd > speech.start) {
+          conflictIds.add(sfx.id)
+          break
+        }
+      }
+    })
+    return conflictIds
+  }, [sfxTracks, speechRegions])
+
+  // Phase 4: Shot type lookup - map clip position to scene shot_type
+  const getClipShotType = useCallback((clipStartTime: number, clipEndTime: number): string | null => {
+    if (scenes.length === 0) return null
+    // Find the scene that best overlaps with this clip's timeline position
+    const midpoint = (clipStartTime + clipEndTime) / 2
+    let bestScene: AnalysisScene | null = null
+    let bestDist = Infinity
+    for (const scene of scenes) {
+      const dist = Math.abs(scene.timestamp - midpoint)
+      if (dist < bestDist) {
+        bestDist = dist
+        bestScene = scene
+      }
+    }
+    return bestScene?.shot_type || null
+  }, [scenes])
+
+  // Phase 4: Color consistency warnings between adjacent clips
+  const colorWarnings = useMemo(() => {
+    if (scenes.length === 0 || sortedClips.length < 2) return new Map<number, string>()
+    const warnings = new Map<number, string>()
+
+    for (let i = 0; i < sortedClips.length - 1; i++) {
+      const clipAEnd = (() => {
+        let pos = 0
+        for (let j = 0; j <= i; j++) {
+          pos += (sortedClips[j].duration || 0) - sortedClips[j].start_trim - sortedClips[j].end_trim
+        }
+        return pos
+      })()
+
+      // Find scenes near the cut point
+      const sceneBefore = scenes.filter(s => s.timestamp <= clipAEnd).pop()
+      const sceneAfter = scenes.find(s => s.timestamp >= clipAEnd)
+
+      if (sceneBefore?.color_mood && sceneAfter?.color_mood &&
+          sceneBefore.color_mood !== sceneAfter.color_mood) {
+        warnings.set(sortedClips[i + 1].id,
+          `Color shift: ${sceneBefore.color_mood} → ${sceneAfter.color_mood}`)
+      }
+    }
+    return warnings
+  }, [scenes, sortedClips])
 
   const generateTimeMarkers = () => {
     const markers = []
@@ -583,6 +675,7 @@ export default function Timeline({
       console.error('Failed to reorder clips:', error)
       // Revert on error
       onClipsChange?.(sortedClips)
+      showError('Failed to reorder clips. Changes have been reverted.')
     }
   }
 
@@ -703,7 +796,6 @@ export default function Timeline({
 
     const deltaX = e.clientX - dragState.startX
     const deltaTime = deltaX / pixelsPerSecond
-    const snapPoints = getSnapPoints()
 
     if (dragState.type === 'subtitle') {
       const subtitle = subtitles.find(s => s.id === dragState.id)
@@ -777,7 +869,7 @@ export default function Timeline({
         updateClipTrim(dragState.id, { end_trim: newTrimEnd })
       }
     }
-  }, [dragState, pixelsPerSecond, subtitles, sfxTracks, textOverlays, videoClips, safeDuration, snapToValue, getSnapPoints, updateSubtitle, updateSFXTrack, updateTextOverlay, updateClipTrim])
+  }, [dragState, pixelsPerSecond, subtitles, sfxTracks, textOverlays, videoClips, safeDuration, snapToValue, snapPoints, updateSubtitle, updateSFXTrack, updateTextOverlay, updateClipTrim])
 
   const handleMouseUp = useCallback(() => {
     setDragState(null)
@@ -796,6 +888,7 @@ export default function Timeline({
   }, [dragState, handleMouseMove, handleMouseUp])
 
   // Sync vertical scroll between track labels and tracks container
+  // Re-run when track visibility changes (which can cause conditional rendering of refs)
   useEffect(() => {
     const trackLabels = trackLabelsRef.current
     const tracksContainer = tracksContainerRef.current
@@ -816,11 +909,15 @@ export default function Timeline({
       trackLabels.removeEventListener('scroll', handleLabelsScroll)
       tracksContainer.removeEventListener('scroll', handleTracksScroll)
     }
-  }, [])
+  }, [trackVisibility])
 
   // Keyboard shortcuts for timeline
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't process shortcuts if user is typing in a text input
+      const isTextInput = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA'
+      if (isTextInput) return
+
       // Delete selected item
       if ((e.key === 'Delete' || e.key === 'Backspace') && selection) {
         e.preventDefault()
@@ -830,10 +927,6 @@ export default function Timeline({
         else if (selection.type === 'clip') handleDeleteClip(selection.id)
         setSelection(null)
       }
-
-      // Only process shortcuts if not in a text input
-      const isTextInput = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA'
-      if (isTextInput) return
 
       // Split at playhead (S key)
       if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -1001,6 +1094,7 @@ export default function Timeline({
                 className="tool-btn"
                 onClick={jumpToPreviousClip}
                 title="Previous clip"
+                aria-label="Previous clip"
               >
                 <SkipBack size={14} />
               </button>
@@ -1008,6 +1102,7 @@ export default function Timeline({
                 className="tool-btn"
                 onClick={jumpToNextClip}
                 title="Next clip"
+                aria-label="Next clip"
               >
                 <SkipForward size={14} />
               </button>
@@ -1020,6 +1115,7 @@ export default function Timeline({
                 onClick={handleSetInPoint}
                 disabled={sortedClips.length === 0}
                 title="Set In Point - Trim start to playhead (I)"
+                aria-label="Set in point"
               >
                 <ChevronsRight size={14} />
               </button>
@@ -1028,6 +1124,7 @@ export default function Timeline({
                 onClick={handleSetOutPoint}
                 disabled={sortedClips.length === 0}
                 title="Set Out Point - Trim end to playhead (O)"
+                aria-label="Set out point"
               >
                 <ChevronsLeft size={14} />
               </button>
@@ -1036,6 +1133,7 @@ export default function Timeline({
                 onClick={handleSplitAtPlayhead}
                 disabled={sortedClips.length === 0}
                 title="Split at playhead (S)"
+                aria-label="Split at playhead"
               >
                 <Scissors size={14} />
               </button>
@@ -1048,6 +1146,7 @@ export default function Timeline({
                 onClick={handleDuplicateClip}
                 disabled={!selection || selection.type !== 'clip'}
                 title="Duplicate clip"
+                aria-label="Duplicate clip"
               >
                 <Copy size={14} />
               </button>
@@ -1077,19 +1176,32 @@ export default function Timeline({
               className={`snap-btn ${snapEnabled ? 'active' : ''}`}
               onClick={() => setSnapEnabled(!snapEnabled)}
               title="Toggle snapping"
+              aria-label="Toggle snapping"
             >
               Snap
             </button>
+            {/* Phase 4: Beat snap toggle */}
+            {beats.length > 0 && (
+              <button
+                className={`snap-btn beat-snap-btn ${showBeatMarkers ? 'active' : ''}`}
+                onClick={() => {/* toggled via parent */}}
+                title={`${beats.length} beats detected - Beat markers ${showBeatMarkers ? 'ON' : 'OFF'}`}
+                aria-label="Toggle beat markers"
+                style={{ pointerEvents: 'none', opacity: showBeatMarkers ? 1 : 0.5 }}
+              >
+                <Disc3 size={12} />
+              </button>
+            )}
             <div className="zoom-controls">
-              <button className="zoom-btn" onClick={() => setZoom(Math.max(0.25, zoom - 0.25))}>
+              <button className="zoom-btn" onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} aria-label="Zoom out">
                 <ZoomOut size={14} />
               </button>
               <span className="zoom-level">{Math.round(zoom * 100)}%</span>
-              <button className="zoom-btn" onClick={() => setZoom(Math.min(4, zoom + 0.25))}>
+              <button className="zoom-btn" onClick={() => setZoom(Math.min(4, zoom + 0.25))} aria-label="Zoom in">
                 <ZoomIn size={14} />
               </button>
             </div>
-            <button className="fit-btn" onClick={() => setZoom(1)}>Fit</button>
+            <button className="fit-btn" onClick={() => setZoom(1)} aria-label="Fit to view">Fit</button>
           </div>
         </div>
       </div>
@@ -1240,6 +1352,15 @@ export default function Timeline({
             {/* Time Ruler */}
             <div className="time-ruler">
               {generateTimeMarkers()}
+              {/* Phase 4: Beat markers on ruler */}
+              {showBeatMarkers && beats.map((beat, i) => (
+                <div
+                  key={`beat-${i}`}
+                  className={`beat-marker ${beat.strength > 0.7 ? 'strong' : beat.strength > 0.4 ? 'medium' : 'weak'}`}
+                  style={{ left: `${beat.timestamp * pixelsPerSecond}px` }}
+                  title={`Beat at ${beat.timestamp.toFixed(2)}s (${Math.round(beat.strength * 100)}%)`}
+                />
+              ))}
               <div className="playhead-top" style={{ left: `${playheadPosition}px` }} />
             </div>
 
@@ -1302,7 +1423,24 @@ export default function Timeline({
                             <Film size={14} />
                             <span className="clip-name">{clip.original_name || `Clip ${index + 1}`}</span>
                             <span className="clip-duration">{formatTime(clipDuration)}</span>
+                            {/* Phase 4: Shot type badge */}
+                            {(() => {
+                              const shotType = getClipShotType(clipPosition, clipPosition + clipDuration)
+                              return shotType ? (
+                                <span className={`shot-type-badge shot-${shotType.toLowerCase().replace(/[\s-]+/g, '_')}`} title={`Shot: ${shotType}`}>
+                                  <Camera size={10} />
+                                  {shotType}
+                                </span>
+                              ) : null
+                            })()}
                           </div>
+
+                          {/* Phase 4: Color consistency warning */}
+                          {colorWarnings.has(clip.id) && (
+                            <div className="color-warning" title={colorWarnings.get(clip.id)}>
+                              <AlertTriangle size={10} />
+                            </div>
+                          )}
 
                           {/* Trim handle - end */}
                           <div
@@ -1367,7 +1505,7 @@ export default function Timeline({
                         key={`trans-${index}`}
                         className={`transition-marker ${transition.suggested_transition}`}
                         style={{ left: `${transition.timestamp * pixelsPerSecond}px` }}
-                        title={`${transition.suggested_transition.toUpperCase()}: ${transition.reason} (${Math.round(transition.confidence * 100)}%)`}
+                        title={`${(transition.suggested_transition || transition.type).toUpperCase()}: ${transition.reason} (${Math.round(transition.confidence * 100)}%)`}
                       >
                         <Scissors size={10} />
                       </div>
@@ -1472,23 +1610,40 @@ export default function Timeline({
               {/* SFX Track */}
               {trackVisibility.sfx && (
                 <div className={`track sfx ${trackLock.sfx ? 'locked' : ''}`}>
-                  {sfxTracks.map(sfx =>
-                    renderTrackItem(
-                      sfx.id,
-                      'sfx',
-                      sfx.start_time,
-                      sfx.start_time + sfx.duration,
-                      <Music size={12} />,
-                      sfx.prompt || 'SFX',
-                      'sfx'
+                  {sfxTracks.map(sfx => {
+                    const hasConflict = audioConflicts.has(sfx.id)
+                    return (
+                      <div key={`sfx-wrap-${sfx.id}`} style={{ position: 'relative', display: 'contents' }}>
+                        {renderTrackItem(
+                          sfx.id,
+                          'sfx',
+                          sfx.start_time,
+                          sfx.start_time + sfx.duration,
+                          hasConflict ? <AlertTriangle size={12} /> : <Music size={12} />,
+                          sfx.prompt || 'SFX',
+                          hasConflict ? 'sfx audio-conflict' : 'sfx'
+                        )}
+                      </div>
                     )
-                  )}
+                  })}
                   {analysis?.suggestedSFX?.map((suggestion, index) => (
                     <div
                       key={`sug-${index}`}
                       className="sfx-marker"
                       style={{ left: `${suggestion.timestamp * pixelsPerSecond}px` }}
                       title={`Suggested: ${suggestion.prompt}`}
+                    />
+                  ))}
+                  {/* Phase 4: Speech region indicators on SFX track */}
+                  {speechRegions.map((region, i) => (
+                    <div
+                      key={`speech-${i}`}
+                      className="speech-region"
+                      style={{
+                        left: `${region.start * pixelsPerSecond}px`,
+                        width: `${Math.max((region.end - region.start) * pixelsPerSecond, 2)}px`,
+                      }}
+                      title={`Speech: ${region.start.toFixed(1)}s - ${region.end.toFixed(1)}s`}
                     />
                   ))}
                 </div>
@@ -1502,7 +1657,7 @@ export default function Timeline({
                     return (
                       <div
                         key={`bgm-${bgm.id}`}
-                        className={`track-item bgm-item ${selection?.id === bgm.id && selection?.type === 'sfx' ? 'selected' : ''} ${isBeingDraggedToTrash ? 'dragging-to-trash' : ''}`}
+                        className={`track-item bgm-item ${selection?.id === bgm.id && selection?.type === 'bgm' ? 'selected' : ''} ${isBeingDraggedToTrash ? 'dragging-to-trash' : ''}`}
                         style={{
                           left: `${(bgm.start_time || 0) * pixelsPerSecond}px`,
                           width: `${(bgm.duration || 60) * pixelsPerSecond}px`,

@@ -47,7 +47,8 @@ class Settings(BaseSettings):
     # For multilingual (Hindi, Kannada, Tamil, etc.): use "medium" or "large"
     # "base" works well for English, "medium" recommended for other languages
     WHISPER_MODEL: str = "medium"
-    BLIP_MODEL: str = "Salesforce/blip-image-captioning-base"
+    BLIP_MODEL: str = "Salesforce/blip2-opt-2.7b"
+    BLIP_FALLBACK_MODEL: str = "Salesforce/blip-image-captioning-base"
 
     # ElevenLabs API for SFX generation
     ELEVENLABS_API_KEY: str = ""

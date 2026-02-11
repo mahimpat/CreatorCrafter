@@ -39,8 +39,9 @@ import {
   AlertCircle,
   RefreshCw,
   Loader2,
+  Disc3,
 } from 'lucide-react'
-import { VideoClip, BackgroundAudio, Transition, projectsApi } from '../api'
+import { VideoClip, BackgroundAudio, Transition, VideoAnalysisResult, projectsApi } from '../api'
 import Timeline from './Timeline'
 import SubtitleEditor from './SubtitleEditor'
 import OverlayEditor from './OverlayEditor'
@@ -62,7 +63,7 @@ import './VideoEditor.css'
 import './TransitionEffects.css'
 import './TransitionEffects2.css'
 
-type ActiveTab = 'clips' | 'subtitles' | 'audio' | 'overlays' | 'transitions'
+type ActiveTab = 'clips' | 'subtitles' | 'audio' | 'overlays' | 'transitions' | 'insights'
 
 export default function VideoEditor() {
   const navigate = useNavigate()
@@ -80,6 +81,7 @@ export default function VideoEditor() {
   const isTransitioningRef = useRef(false)
   const shouldAutoPlayRef = useRef(false)
   const sfxAudioRefs = useRef<Map<number, HTMLAudioElement>>(new Map())
+  const currentTimeRef = useRef(0)
 
   // === useProject MUST BE CALLED BEFORE callbacks that use its return values ===
   const {
@@ -227,6 +229,11 @@ export default function VideoEditor() {
   const [showIntroEffect, setShowIntroEffect] = useState(false)
   const [showOutroEffect, setShowOutroEffect] = useState(false)
 
+  // Phase 4: Manual mode intelligence
+  const [showBeatMarkers, setShowBeatMarkers] = useState(false)
+  const [snapToBeats, setSnapToBeats] = useState(false)
+  const [isQuickTranscribing, setIsQuickTranscribing] = useState(false)
+
   // Multi-clip playback state
   const [currentClipIndex, setCurrentClipIndex] = useState(0)
   const [currentClipUrl, setCurrentClipUrl] = useState<string | null>(null)
@@ -246,6 +253,51 @@ export default function VideoEditor() {
 
   // Sort clips by timeline order
   const sortedClips = [...videoClips].sort((a, b) => a.timeline_order - b.timeline_order)
+
+  // Phase 4: Extract beats from analysis for timeline
+  const analysisBeats = useMemo(() => {
+    const beats = analysis?.audio_advanced?.beats
+    if (!beats || !Array.isArray(beats)) return []
+    return beats.map((b: { timestamp: number; strength: number }) => ({
+      timestamp: b.timestamp,
+      strength: b.strength ?? 0.5,
+    }))
+  }, [analysis?.audio_advanced?.beats])
+
+  const analysisBeatSyncPoints = useMemo(() => {
+    const pts = analysis?.audio_advanced?.beat_sync_points
+    if (!pts || !Array.isArray(pts)) return []
+    return pts as number[]
+  }, [analysis?.audio_advanced?.beat_sync_points])
+
+  // Phase 4: Extract speech regions from transcription
+  const speechRegions = useMemo(() => {
+    if (!analysis?.transcription) return []
+    return analysis.transcription.map(seg => ({
+      start: seg.start,
+      end: seg.end,
+    }))
+  }, [analysis?.transcription])
+
+  // Phase 4: Scenes for shot type + color warnings
+  const analysisScenes = useMemo(() => {
+    return analysis?.scenes || []
+  }, [analysis?.scenes])
+
+  // Phase 4: Quick transcribe handler
+  const handleQuickTranscribe = useCallback(async () => {
+    if (!project?.id || isQuickTranscribing) return
+    try {
+      setIsQuickTranscribing(true)
+      // Use the same analyze endpoint - transcription comes from the full analysis
+      await analyzeVideo()
+      showSuccess('Transcription complete! Check the Subtitles tab.')
+    } catch {
+      showError('Failed to transcribe. Please try again.')
+    } finally {
+      setIsQuickTranscribing(false)
+    }
+  }, [project?.id, isQuickTranscribing, analyzeVideo, showSuccess, showError])
 
   // Clip preloading is handled by preloadClip in useEnhancedVideo
 
@@ -369,14 +421,14 @@ export default function VideoEditor() {
       if (update.type === 'video_analysis_complete') {
         setIsAnalyzing(false)
         if (update.result) {
-          setAnalysis(update.result as any)
+          setAnalysis(update.result as unknown as VideoAnalysisResult)
         }
       } else if (update.type === 'sfx_generation_complete') {
         if (update.result) {
           const result = update.result as { filename: string; prompt: string; duration: number }
           addSFXTrack({
             filename: result.filename,
-            start_time: currentTime,
+            start_time: currentTimeRef.current,
             duration: result.duration,
             volume: 1,
             prompt: result.prompt,
@@ -510,10 +562,18 @@ export default function VideoEditor() {
   const handleTimeUpdate = useCallback(() => {
     if (videoRef.current && !isSeekingRef.current) {
       const clipTime = videoRef.current.currentTime
-      const timelineTime = getTimelineTimeFromClip(currentClipIndex, clipTime)
-      setCurrentTime(timelineTime)
+      if (sortedClips.length > 0) {
+        // Multi-clip mode: convert clip-local time to timeline time
+        const timelineTime = getTimelineTimeFromClip(currentClipIndex, clipTime)
+        setCurrentTime(timelineTime)
+        currentTimeRef.current = timelineTime
+      } else {
+        // Single video mode: use raw video time directly
+        setCurrentTime(clipTime)
+        currentTimeRef.current = clipTime
+      }
     }
-  }, [currentClipIndex, getTimelineTimeFromClip, setCurrentTime])
+  }, [currentClipIndex, sortedClips.length, getTimelineTimeFromClip, setCurrentTime])
 
   // Direct clip switch without transition effects
   const switchToNextClipDirect = useCallback((nextIndex: number, nextClip: VideoClip, nextUrl: string | null) => {
@@ -671,7 +731,7 @@ export default function VideoEditor() {
       // End of timeline
       setIsPlaying(false)
     }
-  }, [currentClipIndex, sortedClips, getClipStreamUrl, setIsPlaying, transitions, webglSupported])
+  }, [currentClipIndex, sortedClips, getClipStreamUrl, setIsPlaying, transitions, webglSupported, switchToNextClipDirect, performCSSTransition])
 
   // Handle WebGL transition progress - crossfade audio between clips
   const handleWebGLTransitionProgress = useCallback((progress: number) => {
@@ -779,6 +839,7 @@ export default function VideoEditor() {
         isTransitioningRef.current = false
         setActiveTransitionEffect(null)
         setWebglTransitionConfig(null)
+        setNextClipUrl(null)
       }
 
       if (sortedClips.length > 0) {
@@ -815,6 +876,7 @@ export default function VideoEditor() {
       isTransitioningRef.current = false
       setActiveTransitionEffect(null)
       setWebglTransitionConfig(null)
+      setNextClipUrl(null)
     }
 
     if (sortedClips.length > 0) {
@@ -850,25 +912,25 @@ export default function VideoEditor() {
     const maxTime = (clip.duration || 0) - clip.end_trim
     const video = videoRef.current
 
-    // Use both interval and timeupdate for reliability
+    // Use requestAnimationFrame for battery-friendly, smooth bound checking
+    let rafId: number
+
     const checkBounds = () => {
       // Don't trigger if already transitioning
-      if (isTransitioningRef.current) {
-        return
+      if (!isTransitioningRef.current) {
+        const currentVideoTime = video.currentTime
+        // Trigger slightly before the end to ensure smooth transition
+        if (currentVideoTime >= maxTime - 0.15 && seekCompletedRef.current) {
+          handleClipEnded()
+        }
       }
 
-      // Allow trigger even if seeking (the seek will complete and bounds will be rechecked)
-      const currentVideoTime = video.currentTime
-      // Trigger slightly before the end to ensure smooth transition
-      if (currentVideoTime >= maxTime - 0.15 && seekCompletedRef.current) {
-        handleClipEnded()
-      }
+      rafId = requestAnimationFrame(checkBounds)
     }
 
-    // Check more frequently (every 30ms) for smoother transitions
-    const interval = setInterval(checkBounds, 30)
+    rafId = requestAnimationFrame(checkBounds)
 
-    return () => clearInterval(interval)
+    return () => cancelAnimationFrame(rafId)
   }, [sortedClips, currentClipIndex, handleClipEnded, isPlaying])
 
   // Safety timeout to reset stuck transitions
@@ -1014,7 +1076,11 @@ export default function VideoEditor() {
 
   // Intro effect - show fade-in when starting from beginning
   useEffect(() => {
-    if (introEffect && isPlaying && currentTime < 0.5 && currentClipIndex === 0) {
+    if (!introEffect || !isPlaying || currentClipIndex !== 0) return
+    // Only relevant when near the start of the video
+    if (currentTime >= introEffect.duration + 0.5) return
+
+    if (currentTime < 0.5) {
       setShowIntroEffect(true)
       const timer = setTimeout(() => {
         setShowIntroEffect(false)
@@ -1025,13 +1091,19 @@ export default function VideoEditor() {
 
   // Outro effect - show fade-out when approaching end
   useEffect(() => {
-    if (outroEffect && isPlaying && sortedClips.length > 0) {
-      const timeToEnd = totalClipsDuration - currentTime
-      if (timeToEnd <= outroEffect.duration && timeToEnd > 0 && currentClipIndex === sortedClips.length - 1) {
-        setShowOutroEffect(true)
-      } else {
-        setShowOutroEffect(false)
-      }
+    if (!outroEffect || !isPlaying || sortedClips.length === 0) return
+    // Only relevant when near the end of the video
+    if (currentClipIndex !== sortedClips.length - 1) {
+      setShowOutroEffect(false)
+      return
+    }
+    const timeToEnd = totalClipsDuration - currentTime
+    if (timeToEnd > outroEffect.duration + 0.5) return
+
+    if (timeToEnd <= outroEffect.duration && timeToEnd > 0) {
+      setShowOutroEffect(true)
+    } else {
+      setShowOutroEffect(false)
     }
   }, [outroEffect, isPlaying, currentTime, totalClipsDuration, currentClipIndex, sortedClips.length])
 
@@ -1308,12 +1380,12 @@ export default function VideoEditor() {
 
   // Get current subtitle for overlay display
   const currentSubtitle = subtitles.find(
-    (s) => currentTime >= s.start_time && currentTime <= s.end_time
+    (s) => currentTime >= s.start_time && currentTime < s.end_time
   )
 
   // Get current text overlay for display
   const currentOverlay = textOverlays.find(
-    (o) => currentTime >= o.start_time && currentTime <= o.end_time
+    (o) => currentTime >= o.start_time && currentTime < o.end_time
   )
 
   return (
@@ -1345,6 +1417,40 @@ export default function VideoEditor() {
               {isAnalyzing ? 'Analyzing...' : 'Analyze'}
             </button>
           )}
+
+          {/* Phase 4: Manual mode intelligence controls */}
+          {projectMode === 'manual' && (
+            <>
+              {/* Quick-transcribe button */}
+              <button
+                className="analyze-btn"
+                onClick={handleQuickTranscribe}
+                disabled={(!videoUrl && sortedClips.length === 0) || isAnalyzing || isQuickTranscribing}
+                title="Analyze video to get transcription, beats, and scene data"
+              >
+                <Sparkles size={18} />
+                {isAnalyzing || isQuickTranscribing ? 'Analyzing...' : 'Quick Analyze'}
+              </button>
+
+              {/* Beat markers toggle (only when analysis has beats) */}
+              {analysisBeats.length > 0 && (
+                <>
+                  <button
+                    className={`icon-btn ${showBeatMarkers ? 'active' : ''}`}
+                    onClick={() => {
+                      setShowBeatMarkers(!showBeatMarkers)
+                      if (!showBeatMarkers) setSnapToBeats(true)
+                      else setSnapToBeats(false)
+                    }}
+                    title={`Beat markers: ${showBeatMarkers ? 'ON' : 'OFF'} (${analysisBeats.length} beats, ${Math.round(analysis?.audio_advanced?.tempo || 0)} BPM)`}
+                  >
+                    <Disc3 size={18} />
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
           {/* Only show these in non-automatic modes */}
           {projectMode !== 'automatic' && (
             <>
@@ -1932,6 +2038,15 @@ export default function VideoEditor() {
                   <Scissors size={18} />
                   Transitions
                 </button>
+                {analysis && (
+                  <button
+                    className={activeTab === 'insights' ? 'active' : ''}
+                    onClick={() => setActiveTab('insights')}
+                  >
+                    <Wand2 size={18} />
+                    Insights
+                  </button>
+                )}
               </div>
 
               <div className="tab-content">
@@ -1982,6 +2097,166 @@ export default function VideoEditor() {
                     onRemoveOutroEffect={() => setOutroEffect(null)}
                   />
                 )}
+                {activeTab === 'insights' && analysis && (
+                  <div className="insights-panel" style={{ padding: '12px', fontSize: '0.9em' }}>
+                    <h3 style={{ marginBottom: 12 }}>Analysis Intelligence</h3>
+
+                    {/* Genre Detection */}
+                    {analysis.pre_classification && (
+                      <div style={{ marginBottom: 14, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                        <strong>Detected Genre:</strong>{' '}
+                        <span style={{ color: '#4caf50', textTransform: 'capitalize' }}>
+                          {analysis.pre_classification.video_type?.replace(/_/g, ' ') || 'Unknown'}
+                        </span>
+                        {analysis.pre_classification.speech_ratio !== undefined && (
+                          <span style={{ marginLeft: 12, color: '#999' }}>
+                            Speech: {Math.round((analysis.pre_classification.speech_ratio || 0) * 100)}%
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Narrative Arc */}
+                    {analysis.narrative_arc?.phases && analysis.narrative_arc.phases.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <h4 style={{ marginBottom: 6 }}>Narrative Arc</h4>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {analysis.narrative_arc.phases.map((phase, i) => (
+                            <div key={i} style={{
+                              padding: '4px 8px', borderRadius: 4, fontSize: '0.8em',
+                              background: `rgba(76, 175, 80, ${0.2 + phase.intensity * 0.6})`,
+                              color: '#fff', textTransform: 'capitalize'
+                            }}>
+                              {phase.phase} ({phase.start_time.toFixed(0)}s-{phase.end_time.toFixed(0)}s)
+                            </div>
+                          ))}
+                        </div>
+                        {analysis.narrative_arc.climax_timestamp && (
+                          <p style={{ marginTop: 4, color: '#ff9800', fontSize: '0.85em' }}>
+                            Climax at {analysis.narrative_arc.climax_timestamp.toFixed(1)}s
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Emotion Distribution */}
+                    {analysis.emotion_distribution && Object.keys(analysis.emotion_distribution).length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <h4 style={{ marginBottom: 6 }}>Emotion Distribution</h4>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {Object.entries(analysis.emotion_distribution)
+                            .sort(([, a], [, b]) => (b as number) - (a as number))
+                            .slice(0, 5)
+                            .map(([emotion, score]) => (
+                              <span key={emotion} style={{
+                                padding: '3px 8px', borderRadius: 12, fontSize: '0.8em',
+                                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                              }}>
+                                {emotion}: {Math.round((score as number) * 100)}%
+                              </span>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Color Grading */}
+                    {analysis.color_grading?.overall_lut && (
+                      <div style={{ marginBottom: 14, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                        <strong>Suggested LUT:</strong>{' '}
+                        <span style={{ color: '#2196f3' }}>{analysis.color_grading.overall_lut}</span>
+                        {analysis.color_grading.consistency_score !== undefined && (
+                          <span style={{ marginLeft: 12, color: '#999' }}>
+                            Consistency: {Math.round(analysis.color_grading.consistency_score * 100)}%
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Pacing Adjustments */}
+                    {analysis.pacing_adjustments && analysis.pacing_adjustments.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <h4 style={{ marginBottom: 6 }}>Pacing Suggestions ({analysis.pacing_adjustments.length})</h4>
+                        {analysis.pacing_adjustments.slice(0, 5).map((adj, i) => (
+                          <div key={i} style={{
+                            padding: '4px 8px', marginBottom: 4, borderRadius: 4,
+                            background: adj.severity === 'high' ? 'rgba(244,67,54,0.1)' :
+                              adj.severity === 'medium' ? 'rgba(255,152,0,0.1)' : 'rgba(255,255,255,0.03)',
+                            fontSize: '0.85em', borderLeft: `3px solid ${
+                              adj.severity === 'high' ? '#f44336' : adj.severity === 'medium' ? '#ff9800' : '#666'
+                            }`
+                          }}>
+                            <strong>{adj.type}</strong> at {adj.timestamp.toFixed(1)}s: {adj.suggestion}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* B-Roll Points */}
+                    {analysis.broll_points && analysis.broll_points.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <h4 style={{ marginBottom: 6 }}>B-Roll Insertion Points ({analysis.broll_points.length})</h4>
+                        {analysis.broll_points.slice(0, 5).map((br, i) => (
+                          <div key={i} style={{
+                            padding: '4px 8px', marginBottom: 4, borderRadius: 4,
+                            background: 'rgba(33,150,243,0.08)', fontSize: '0.85em',
+                            borderLeft: '3px solid #2196f3'
+                          }}>
+                            <strong>{br.timestamp.toFixed(1)}s</strong> ({br.duration.toFixed(1)}s): {br.reason}
+                            {br.prompt && <div style={{ color: '#999', marginTop: 2 }}>Prompt: {br.prompt}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Genre Rules Summary */}
+                    {analysis.genre_rules && (
+                      <div style={{ marginBottom: 14, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
+                        <h4 style={{ marginBottom: 4 }}>Genre Editing Rules</h4>
+                        <div style={{ fontSize: '0.85em', color: '#bbb' }}>
+                          {analysis.genre_rules.transition_rules?.preferred_types && (
+                            <div>Transitions: {analysis.genre_rules.transition_rules.preferred_types.join(', ')}</div>
+                          )}
+                          {analysis.genre_rules.pacing_rules?.target_pace && (
+                            <div>Pacing: {analysis.genre_rules.pacing_rules.target_pace}</div>
+                          )}
+                          {analysis.genre_rules.caption_rules?.style && (
+                            <div>Captions: {analysis.genre_rules.caption_rules.style}</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Visual Impacts */}
+                    {analysis.visual_impacts && analysis.visual_impacts.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <h4 style={{ marginBottom: 6 }}>Visual Impact Points ({analysis.visual_impacts.length})</h4>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {analysis.visual_impacts.slice(0, 10).map((vi, i) => (
+                            <span key={i} style={{
+                              padding: '2px 6px', borderRadius: 4, fontSize: '0.75em',
+                              background: vi.intensity > 0.7 ? 'rgba(244,67,54,0.2)' : 'rgba(255,255,255,0.05)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                            }}>
+                              {vi.timestamp.toFixed(1)}s ({vi.type})
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Audio Mix Info */}
+                    {analysis.audio_mix_map?.mix_notes && analysis.audio_mix_map.mix_notes.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <h4 style={{ marginBottom: 6 }}>Audio Mix Notes</h4>
+                        {analysis.audio_mix_map.mix_notes.map((note, i) => (
+                          <div key={i} style={{ fontSize: '0.85em', color: '#bbb', padding: '2px 0' }}>
+                            {note}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -2009,6 +2284,13 @@ export default function VideoEditor() {
             }}
             bgmTracks={bgmTracks}
             onBGMChange={setBgmTracks}
+            // Phase 4: Manual mode intelligence props
+            showBeatMarkers={showBeatMarkers}
+            snapToBeats={snapToBeats}
+            beats={analysisBeats}
+            beatSyncPoints={analysisBeatSyncPoints}
+            speechRegions={speechRegions}
+            scenes={analysisScenes}
           />
         </div>
       )}

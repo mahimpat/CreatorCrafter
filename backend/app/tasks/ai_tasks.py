@@ -329,12 +329,16 @@ def run_auto_generate(
 ):
     """
     Automatically generate all secondary elements from analysis results.
-    Creates subtitles, generates SFX, and applies transitions.
+    Uses ALL available analysis data for intelligent content creation:
 
-    Now template-aware with:
-    - Content-aware transition selection based on scene descriptions
-    - Variable SFX duration based on scene context
-    - Template-specific transition types and intro/outro effects
+    - Genre-aware editing rules for transitions, SFX, and captions
+    - Pre-computed suggestedTransitions with continuity scoring
+    - Layered SFX from sfx_layers with visual_impacts snapping
+    - Speaker-differentiated subtitles with word-level timing
+    - Audio ducking from audio_mix_map for volume control
+    - Auto text overlays from suggested_text_overlays
+    - Narrative arc and pacing intelligence
+    - Color grading data passed through for rendering pipeline
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -342,6 +346,7 @@ def run_auto_generate(
     from app.models.subtitle import Subtitle
     from app.models.sfx_track import SFXTrack
     from app.models.transition import Transition, TransitionType
+    from app.models.text_overlay import TextOverlay
 
     # Default template settings
     settings = template_settings or {}
@@ -354,10 +359,41 @@ def run_auto_generate(
     energy_level = settings.get('energy_level', 0.5)
     caption_style = settings.get('caption_style', 'standard')
 
+    # ================================================================
+    # Extract ALL analysis data (22 fields)
+    # ================================================================
+    scenes = analysis_results.get('scenes', [])
+    transcription = analysis_results.get('transcription', [])
+    suggested_sfx = analysis_results.get('suggestedSFX', [])
+    suggested_transitions = analysis_results.get('suggestedTransitions', [])
+    genre_rules = analysis_results.get('genre_rules', {})
+    sfx_layers = analysis_results.get('sfx_layers', [])
+    visual_impacts = analysis_results.get('visual_impacts', [])
+    audio_mix_map = analysis_results.get('audio_mix_map', {})
+    color_grading = analysis_results.get('color_grading', {})
+    narrative_arc = analysis_results.get('narrative_arc', {})
+    pacing_adjustments = analysis_results.get('pacing_adjustments', [])
+    suggested_text_overlays = analysis_results.get('suggested_text_overlays', [])
+    broll_points = analysis_results.get('broll_points', [])
+    pre_classification = analysis_results.get('pre_classification', {})
+    audio_content = analysis_results.get('audio_content', {})
+    emotion_distribution = analysis_results.get('emotion_distribution', {})
+    visual_rhythm = analysis_results.get('visual_rhythm', {})
+
+    # Genre-specific rules (override template pacing if genre provides better guidance)
+    caption_rules = genre_rules.get('caption_rules', {})
+    transition_rules = genre_rules.get('transition_rules', {})
+    sfx_rules = genre_rules.get('sfx_rules', {})
+    pacing_rules = genre_rules.get('pacing_rules', {})
+
+    # Audio ducking data
+    ducking_points = audio_mix_map.get('ducking_points', [])
+
     result = {
         "subtitles_created": 0,
         "sfx_generated": 0,
         "transitions_created": 0,
+        "text_overlays_created": 0,
         "errors": [],
         # Template-enhanced results
         "template_applied": template_id,
@@ -365,148 +401,207 @@ def run_auto_generate(
         "intro_duration": intro_duration if intro_effect != 'none' else None,
         "outro_effect": outro_effect if outro_effect != 'none' else None,
         "outro_duration": outro_duration if outro_effect != 'none' else None,
+        # Enriched metadata for rendering pipeline
+        "color_grading": color_grading,
+        "audio_mix_map": audio_mix_map,
+        "narrative_arc": narrative_arc,
+        "pacing_adjustments": pacing_adjustments,
+        "broll_points": broll_points,
+        "genre_rules": genre_rules,
     }
 
-    # Helper: Select content-aware transition based on scene descriptions
-    def select_content_aware_transition(scene_before: dict, scene_after: dict, template_types: list) -> tuple:
-        """
-        Select transition type based on scene content analysis.
-        Returns (TransitionType, duration)
-        """
-        desc_before = (scene_before.get('description', '') + ' ' + scene_before.get('action_description', '')).lower()
-        desc_after = (scene_after.get('description', '') + ' ' + scene_after.get('action_description', '')).lower()
+    # ================================================================
+    # HELPER: Speaker color for differentiation
+    # ================================================================
+    SPEAKER_COLORS = [
+        "#FFFFFF", "#00BFFF", "#FFD700", "#FF6B6B",
+        "#7CFC00", "#FF69B4", "#00CED1", "#FFA500",
+    ]
 
-        # Action keywords for fast/dynamic transitions
-        action_keywords = ['running', 'jumping', 'fast', 'action', 'fighting', 'explosion', 'crash', 'quick', 'sudden']
-        # Calm keywords for smooth transitions
-        calm_keywords = ['peaceful', 'calm', 'slow', 'quiet', 'serene', 'gentle', 'relax']
-        # Location change keywords
-        location_keywords = ['outside', 'inside', 'room', 'building', 'street', 'outdoor', 'indoor', 'location']
-        # Emotional keywords
-        emotional_keywords = ['sad', 'happy', 'emotion', 'cry', 'laugh', 'dramatic', 'intense']
+    def get_speaker_style(speaker_id, energy_lvl, base_style):
+        """Apply speaker-specific color and energy-based emphasis."""
+        style = dict(base_style)
+        if speaker_id is not None:
+            color_idx = speaker_id % len(SPEAKER_COLORS)
+            style['color'] = SPEAKER_COLORS[color_idx]
+            style['speakerId'] = speaker_id
+        if energy_lvl:
+            if energy_lvl == 'high':
+                style['fontWeight'] = 'bold'
+                base_size = style.get('fontSize', 24)
+                if isinstance(base_size, str):
+                    base_size = int(base_size.replace('px', ''))
+                style['fontSize'] = base_size + 4
+            elif energy_lvl == 'low':
+                style['fontStyle'] = 'italic'
+                style['opacity'] = 0.85
+        return style
 
-        # Determine scene characteristics
-        is_action = any(kw in desc_before or kw in desc_after for kw in action_keywords)
-        is_calm = any(kw in desc_before or kw in desc_after for kw in calm_keywords)
-        is_location_change = any(kw in desc_before for kw in location_keywords) and any(kw in desc_after for kw in location_keywords)
-        is_emotional = any(kw in desc_before or kw in desc_after for kw in emotional_keywords)
+    # ================================================================
+    # HELPER: Get SFX volume from audio_mix_map ducking data
+    # ================================================================
+    def get_sfx_volume_at(timestamp):
+        """Get recommended SFX volume from audio_mix_map ducking data."""
+        if not ducking_points:
+            return 0.6
+        closest = None
+        closest_dist = float('inf')
+        for dp in ducking_points:
+            dist = abs(dp.get('timestamp', 0) - timestamp)
+            if dist < closest_dist:
+                closest_dist = dist
+                closest = dp
+        if closest:
+            if closest.get('is_speech', False):
+                return 0.3  # Duck SFX during speech
+            return closest.get('sfx_volume', 0.6)
+        return 0.6
 
-        # Map to transition types with duration
-        if is_action:
-            # Fast action → quick dynamic transitions
-            options = [
-                (TransitionType.GLITCH, 0.3),
-                (TransitionType.FLASH, 0.25),
-                (TransitionType.ZOOM_IN, 0.3),
-                (TransitionType.CUT, 0.0),
-            ]
-        elif is_location_change:
-            # Location change → wipes/slides
-            options = [
-                (TransitionType.WIPE_LEFT, 0.5),
-                (TransitionType.WIPE_RIGHT, 0.5),
-                (TransitionType.SLIDE_LEFT, 0.4),
-                (TransitionType.SLIDE_RIGHT, 0.4),
-            ]
-        elif is_emotional:
-            # Emotional → slow dissolves/fades
-            options = [
-                (TransitionType.DISSOLVE, 0.8),
-                (TransitionType.FADE, 1.0),
-                (TransitionType.BLUR, 0.6),
-            ]
-        elif is_calm:
-            # Calm scenes → smooth transitions
-            options = [
-                (TransitionType.DISSOLVE, 0.6),
-                (TransitionType.FADE, 0.7),
-                (TransitionType.CROSS_ZOOM, 0.5),
-            ]
-        else:
-            # Default based on pacing
-            if pacing_style in ['fast', 'very_fast']:
-                options = [
-                    (TransitionType.CUT, 0.0),
-                    (TransitionType.ZOOM_IN, 0.3),
-                    (TransitionType.FLASH, 0.25),
-                ]
-            elif pacing_style == 'slow':
-                options = [
-                    (TransitionType.DISSOLVE, 0.8),
-                    (TransitionType.FADE, 1.0),
-                ]
-            else:  # moderate
-                options = [
-                    (TransitionType.DISSOLVE, 0.5),
-                    (TransitionType.FADE, 0.5),
-                    (TransitionType.WIPE_LEFT, 0.4),
-                ]
+    # ================================================================
+    # HELPER: Snap timestamp to nearest visual impact
+    # ================================================================
+    def snap_to_visual_impact(timestamp, max_snap=0.5):
+        """Snap an SFX timestamp to the nearest visual impact for tighter sync."""
+        if not visual_impacts:
+            return timestamp
+        closest_dist = float('inf')
+        closest_time = timestamp
+        for vi in visual_impacts:
+            vi_time = vi.get('timestamp', 0)
+            dist = abs(vi_time - timestamp)
+            if dist < closest_dist and dist <= max_snap:
+                closest_dist = dist
+                closest_time = vi_time
+        return closest_time
 
-        # If template specifies transition types, prefer those
-        if template_types:
-            type_mapping = {
-                'cut': TransitionType.CUT,
-                'fade': TransitionType.FADE,
-                'dissolve': TransitionType.DISSOLVE,
-                'wipe_left': TransitionType.WIPE_LEFT,
-                'wipe_right': TransitionType.WIPE_RIGHT,
-                'slide_left': TransitionType.SLIDE_LEFT,
-                'slide_right': TransitionType.SLIDE_RIGHT,
-                'zoom_in': TransitionType.ZOOM_IN,
-                'zoom_out': TransitionType.ZOOM_OUT,
-                'glitch': TransitionType.GLITCH,
-                'flash': TransitionType.FLASH,
-                'blur': TransitionType.BLUR,
-                'spin': TransitionType.SPIN,
-                'color_fade': TransitionType.COLOR_FADE,
-            }
-            for t_name in template_types:
-                if t_name.lower() in type_mapping:
-                    # Find matching option or create new one
-                    matched = type_mapping[t_name.lower()]
-                    for opt in options:
-                        if opt[0] == matched:
-                            return opt
-                    # Use first template type with default duration
-                    return (matched, 0.4)
-
-        # Return first option
-        return options[0] if options else (TransitionType.DISSOLVE, 0.5)
-
-    # Helper: Calculate SFX duration based on scene context
-    def calculate_sfx_duration(suggestion: dict, transcription: list) -> float:
-        """
-        Calculate optimal SFX duration based on:
-        - Scene context
-        - Avoid overlapping with speech
-        - Template pacing
-        """
+    # ================================================================
+    # HELPER: Calculate SFX duration with genre and mix awareness
+    # ================================================================
+    def calculate_sfx_duration(suggestion, transcription_data):
+        """Calculate SFX duration using genre rules, audio mix map, and speech avoidance."""
         timestamp = suggestion.get('timestamp', 0)
-        base_duration = 3.0
 
-        # Adjust based on pacing
-        if pacing_style in ['fast', 'very_fast']:
+        # Genre-based duration bounds
+        genre_max = sfx_rules.get('max_duration', 5.0)
+        genre_min = sfx_rules.get('min_duration', 0.5)
+
+        # Start with pacing-based default
+        if pacing_style in ['fast', 'very_fast'] or pacing_rules.get('target_pace') == 'fast':
             base_duration = 2.0
-        elif pacing_style == 'slow':
+        elif pacing_style == 'slow' or pacing_rules.get('target_pace') == 'slow':
             base_duration = 4.0
+        else:
+            base_duration = 3.0
 
-        # Check for speech overlap - reduce duration if speech nearby
-        for seg in transcription:
+        # Avoid speech overlap
+        for seg in transcription_data:
             seg_start = seg.get('start', 0)
             seg_end = seg.get('end', 0)
-
-            # If SFX would overlap with speech
             if seg_start <= timestamp + base_duration and seg_end >= timestamp:
-                # Reduce to fit before speech or use shorter duration
                 available = seg_start - timestamp
                 if available > 0.5:
                     base_duration = min(base_duration, available)
                 else:
-                    base_duration = min(base_duration, 1.5)  # Short ambient
+                    base_duration = min(base_duration, 1.5)
                 break
 
-        # Clamp to valid range (ElevenLabs: 0.5-22 seconds)
+        # Clamp to genre rules then ElevenLabs range
+        base_duration = max(genre_min, min(base_duration, genre_max))
         return max(0.5, min(base_duration, 10.0))
+
+    # ================================================================
+    # HELPER: Fallback transition selection (when no pre-computed transition)
+    # ================================================================
+    def select_fallback_transition(scene_before, scene_after, template_types):
+        """Select transition from scene descriptions when suggestedTransitions is empty."""
+        desc = (
+            scene_before.get('description', '') + ' ' +
+            scene_after.get('description', '')
+        ).lower()
+
+        # Use genre rules if available
+        preferred = transition_rules.get('preferred_types', [])
+        max_dur = transition_rules.get('max_duration', 0.8)
+
+        if preferred:
+            type_mapping = {t.value: t for t in TransitionType}
+            for pref in preferred:
+                if pref in type_mapping:
+                    return (type_mapping[pref], min(0.5, max_dur))
+
+        # Content-based fallback
+        action_kw = ['running', 'jumping', 'fast', 'action', 'fighting', 'explosion']
+        calm_kw = ['peaceful', 'calm', 'slow', 'quiet', 'serene', 'gentle']
+        emotional_kw = ['sad', 'happy', 'emotion', 'cry', 'laugh', 'dramatic', 'intense']
+
+        if any(kw in desc for kw in action_kw):
+            return (TransitionType.GLITCH, 0.3)
+        elif any(kw in desc for kw in emotional_kw):
+            return (TransitionType.DISSOLVE, 0.8)
+        elif any(kw in desc for kw in calm_kw):
+            return (TransitionType.DISSOLVE, 0.6)
+
+        # Template type preference
+        if template_types:
+            for t_name in template_types:
+                try:
+                    tt = TransitionType(t_name.lower())
+                    return (tt, 0.4)
+                except ValueError:
+                    continue
+
+        # Pacing-based default
+        if pacing_style in ['fast', 'very_fast']:
+            return (TransitionType.CUT, 0.0)
+        elif pacing_style == 'slow':
+            return (TransitionType.FADE, 0.8)
+        return (TransitionType.DISSOLVE, 0.5)
+
+    # ================================================================
+    # HELPER: Build word-level subtitle segments from transcription
+    # ================================================================
+    def build_word_level_subtitles(segment):
+        """Split a transcription segment into word-level subtitle chunks."""
+        words = segment.get('words', [])
+        if not words:
+            return [segment]  # No word-level data, use segment as-is
+
+        max_words = caption_rules.get('max_words_per_line', 8)
+
+        chunks = []
+        current_words = []
+        current_start = None
+
+        for w in words:
+            word_text = w.get('word', '').strip()
+            if not word_text:
+                continue
+            if current_start is None:
+                current_start = w.get('start', segment.get('start', 0))
+            current_words.append(word_text)
+
+            if len(current_words) >= max_words:
+                chunks.append({
+                    'text': ' '.join(current_words),
+                    'start': current_start,
+                    'end': w.get('end', segment.get('end', 0)),
+                    'speaker_id': segment.get('speaker_id'),
+                    'energy_level': segment.get('energy_level'),
+                })
+                current_words = []
+                current_start = None
+
+        # Remaining words
+        if current_words:
+            chunks.append({
+                'text': ' '.join(current_words),
+                'start': current_start,
+                'end': words[-1].get('end', segment.get('end', 0)),
+                'speaker_id': segment.get('speaker_id'),
+                'energy_level': segment.get('energy_level'),
+            })
+
+        return chunks if chunks else [segment]
 
     try:
         # Send start notification
@@ -518,86 +613,149 @@ def run_auto_generate(
         db = SessionLocal()
 
         try:
-            total_steps = 0
-            if include_subtitles:
-                total_steps += 1
-            if include_sfx:
-                total_steps += 1
-            if include_transitions:
-                total_steps += 1
-
             current_step = 0
             base_progress = 0
 
-            # Get scenes for content-aware decisions
-            scenes = analysis_results.get('scenes', [])
-            transcription = analysis_results.get('transcription', [])
-
-            # Step 1: Create subtitles from transcription with template styling
+            # ============================================================
+            # STEP 1: Create subtitles with speaker differentiation
+            #         + word-level timing + genre caption rules
+            # ============================================================
             if include_subtitles:
                 if transcription:
                     loop.run_until_complete(send_progress(
                         user_id, "auto_generate", task_id, project_id,
-                        "subtitles", 10, f"Creating {len(transcription)} subtitles with {caption_style} style..."
+                        "subtitles", 5, f"Creating subtitles with {caption_style} style (word-level timing)..."
                     ))
 
-                    # Get template-aware subtitle style
+                    # Build base subtitle style from template + genre rules
                     subtitle_style = Subtitle.get_default_style()
                     if caption_style == 'bold':
-                        subtitle_style['fontSize'] = '32px'
+                        subtitle_style['fontSize'] = 32
                         subtitle_style['fontFamily'] = 'Impact, sans-serif'
                     elif caption_style == 'minimal':
-                        subtitle_style['fontSize'] = '18px'
+                        subtitle_style['fontSize'] = 18
                         subtitle_style['backgroundColor'] = 'transparent'
                     elif caption_style == 'animated':
-                        subtitle_style['fontSize'] = '24px'
+                        subtitle_style['fontSize'] = 24
                         subtitle_style['animation'] = 'pop'
                     elif caption_style == 'karaoke':
-                        subtitle_style['fontSize'] = '28px'
+                        subtitle_style['fontSize'] = 28
                         subtitle_style['highlightColor'] = '#FFD700'
 
+                    # Genre caption rules can override style
+                    genre_caption_style = caption_rules.get('style')
+                    if genre_caption_style == 'minimal':
+                        subtitle_style['backgroundColor'] = 'transparent'
+                        base_fs = subtitle_style.get('fontSize', 24)
+                        if isinstance(base_fs, str):
+                            base_fs = int(base_fs.replace('px', ''))
+                        subtitle_style['fontSize'] = min(base_fs, 20)
+                    elif genre_caption_style == 'bold':
+                        subtitle_style['fontWeight'] = 'bold'
+                    elif genre_caption_style == 'cinematic':
+                        subtitle_style['fontFamily'] = 'Georgia, serif'
+                        subtitle_style['letterSpacing'] = '2px'
+
+                    subtitle_count = 0
                     for i, segment in enumerate(transcription):
                         try:
-                            subtitle = Subtitle(
-                                project_id=project_id,
-                                text=segment.get('text', '').strip(),
-                                start_time=segment.get('start', 0),
-                                end_time=segment.get('end', 0),
-                                style=subtitle_style
-                            )
-                            db.add(subtitle)
-                            result["subtitles_created"] += 1
+                            # Use word-level timing if available
+                            chunks = build_word_level_subtitles(segment)
+
+                            for chunk in chunks:
+                                text = chunk.get('text', '').strip()
+                                if not text:
+                                    continue
+
+                                # Apply speaker color + energy emphasis
+                                chunk_style = get_speaker_style(
+                                    chunk.get('speaker_id'),
+                                    chunk.get('energy_level'),
+                                    subtitle_style
+                                )
+
+                                subtitle = Subtitle(
+                                    project_id=project_id,
+                                    text=text,
+                                    start_time=chunk.get('start', 0),
+                                    end_time=chunk.get('end', 0),
+                                    style=chunk_style
+                                )
+                                db.add(subtitle)
+                                subtitle_count += 1
 
                             if (i + 1) % 10 == 0:
-                                progress = 10 + int((i / len(transcription)) * 20)
+                                progress = 5 + int((i / len(transcription)) * 20)
                                 loop.run_until_complete(send_progress(
                                     user_id, "auto_generate", task_id, project_id,
-                                    "subtitles", progress, f"Created {i + 1}/{len(transcription)} subtitles..."
+                                    "subtitles", progress,
+                                    f"Created subtitles for {i + 1}/{len(transcription)} segments..."
                                 ))
                         except Exception as e:
-                            result["errors"].append(f"Subtitle error: {str(e)}")
+                            result["errors"].append(f"Subtitle error at segment {i}: {str(e)}")
 
                     db.commit()
+                    result["subtitles_created"] = subtitle_count
                     loop.run_until_complete(send_progress(
                         user_id, "auto_generate", task_id, project_id,
-                        "subtitles", 30, f"Created {result['subtitles_created']} subtitles"
+                        "subtitles", 25, f"Created {subtitle_count} subtitles (word-level)"
                     ))
                 current_step += 1
-                base_progress = 30
+                base_progress = 25
 
-            # Step 2: Generate SFX with variable duration based on context
+            # ============================================================
+            # STEP 2: Generate SFX with layering, impact snapping,
+            #         and mix-aware volume
+            # ============================================================
             if include_sfx:
-                sfx_suggestions = analysis_results.get('suggestedSFX', [])
-                # Filter by confidence and limit count
+                # Prefer sfx_layers (multi-layer per scene), fall back to suggestedSFX
+                sfx_source = []
+
+                if sfx_layers:
+                    for layer_entry in sfx_layers:
+                        timestamp = layer_entry.get('timestamp', 0)
+                        for layer_type in ['foley', 'ambient', 'accent', 'contrast']:
+                            layer = layer_entry.get(layer_type)
+                            if layer and layer.get('prompt'):
+                                sfx_source.append({
+                                    'timestamp': timestamp,
+                                    'prompt': layer['prompt'],
+                                    'confidence': layer.get('confidence', 0.7),
+                                    'layer_type': layer_type,
+                                    'duration_hint': layer.get('duration_hint'),
+                                })
+
+                if not sfx_source:
+                    sfx_source = [dict(s, layer_type='flat') for s in suggested_sfx]
+
+                # Apply genre SFX density rules
+                genre_max_sfx = sfx_rules.get('max_per_minute', 3)
+                video_duration = max(
+                    (s.get('timestamp', 0) for s in scenes), default=60
+                ) if scenes else 60
+                effective_max = max(max_sfx_count, int(genre_max_sfx * video_duration / 60))
+
+                # Filter by confidence
                 filtered_sfx = [
-                    s for s in sfx_suggestions
+                    s for s in sfx_source
                     if s.get('confidence', 0) >= sfx_confidence_threshold
-                ][:max_sfx_count]
+                ]
+
+                # Prioritize: accent > foley > ambient > contrast > flat
+                layer_priority = {'accent': 0, 'foley': 1, 'ambient': 2, 'flat': 3, 'contrast': 4}
+                filtered_sfx.sort(
+                    key=lambda x: (
+                        layer_priority.get(x.get('layer_type', 'flat'), 5),
+                        -x.get('confidence', 0)
+                    )
+                )
+                filtered_sfx = filtered_sfx[:effective_max]
 
                 if filtered_sfx:
                     loop.run_until_complete(send_progress(
                         user_id, "auto_generate", task_id, project_id,
-                        "sfx", base_progress + 5, f"Generating {len(filtered_sfx)} sound effects with smart durations..."
+                        "sfx", base_progress + 3,
+                        f"Generating {len(filtered_sfx)} layered sound effects..."
                     ))
 
                     from app.ai.sfx_generator import generate_sfx
@@ -608,20 +766,31 @@ def run_auto_generate(
                         try:
                             prompt = suggestion.get('prompt', 'ambient sound')
                             timestamp = suggestion.get('timestamp', 0)
+                            layer_type = suggestion.get('layer_type', 'flat')
 
-                            # Calculate smart duration based on context
-                            duration = calculate_sfx_duration(suggestion, transcription)
+                            # Snap accent/foley to visual impacts for tighter sync
+                            if layer_type in ('accent', 'foley'):
+                                timestamp = snap_to_visual_impact(timestamp, max_snap=0.5)
+
+                            # Calculate duration
+                            if suggestion.get('duration_hint'):
+                                duration = max(0.5, min(suggestion['duration_hint'], 10.0))
+                            else:
+                                duration = calculate_sfx_duration(suggestion, transcription)
+
+                            # Layer-specific duration adjustments
+                            if layer_type == 'ambient':
+                                duration = min(duration * 1.5, 10.0)
+                            elif layer_type == 'accent':
+                                duration = min(duration, 2.0)
 
                             # Generate SFX file
-                            output_filename = f"sfx_auto_{uuid.uuid4().hex[:8]}.wav"
+                            output_filename = f"sfx_auto_{layer_type}_{uuid.uuid4().hex[:8]}.wav"
                             output_path = file_service.get_file_path(
                                 user_id, project_id, "sfx", output_filename
                             )
-
-                            # Ensure directory exists
                             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-                            # Generate with calculated duration
                             generate_sfx(
                                 prompt=prompt,
                                 duration=duration,
@@ -629,83 +798,89 @@ def run_auto_generate(
                                 progress_callback=None
                             )
 
-                            # Adjust volume based on energy level
-                            sfx_volume = 0.5 + (energy_level * 0.3)  # 0.5 to 0.8
+                            # Volume: audio_mix_map ducking × layer weight × energy
+                            base_vol = get_sfx_volume_at(timestamp)
+                            layer_vol_mult = {
+                                'foley': 1.0, 'accent': 0.9, 'ambient': 0.5,
+                                'contrast': 0.4, 'flat': 0.7,
+                            }
+                            sfx_volume = (
+                                base_vol *
+                                layer_vol_mult.get(layer_type, 0.7) *
+                                (0.5 + energy_level * 0.5)
+                            )
+                            sfx_volume = max(0.1, min(sfx_volume, 1.0))
 
-                            # Create SFX track record
                             sfx_track = SFXTrack(
                                 project_id=project_id,
                                 filename=output_filename,
                                 start_time=timestamp,
                                 duration=duration,
                                 volume=sfx_volume,
-                                prompt=prompt
+                                prompt=f"[{layer_type}] {prompt}"
                             )
                             db.add(sfx_track)
                             result["sfx_generated"] += 1
 
-                            progress = base_progress + 5 + int(((i + 1) / len(filtered_sfx)) * 30)
+                            progress = base_progress + 3 + int(((i + 1) / len(filtered_sfx)) * 30)
                             loop.run_until_complete(send_progress(
                                 user_id, "auto_generate", task_id, project_id,
-                                "sfx", progress, f"Generated {i + 1}/{len(filtered_sfx)} sound effects ({duration:.1f}s)"
+                                "sfx", progress,
+                                f"Generated {i + 1}/{len(filtered_sfx)} SFX [{layer_type}] ({duration:.1f}s)"
                             ))
 
                         except Exception as e:
-                            result["errors"].append(f"SFX generation error: {str(e)}")
+                            result["errors"].append(f"SFX error [{layer_type}]: {str(e)}")
 
                     db.commit()
 
                 current_step += 1
-                base_progress = 70
+                base_progress = 65
 
-            # Step 3: Create content-aware transitions between clips
+            # ============================================================
+            # STEP 3: Create transitions using pre-computed
+            #         suggestedTransitions with continuity scoring
+            # ============================================================
             if include_transitions and len(clip_ids) > 1:
                 loop.run_until_complete(send_progress(
                     user_id, "auto_generate", task_id, project_id,
-                    "transitions", base_progress + 5, "Creating smart transitions based on content analysis..."
+                    "transitions", base_progress + 2,
+                    "Creating AI-scored transitions with continuity analysis..."
                 ))
 
-                # Get existing transitions to avoid duplicates
+                # Avoid duplicates
                 existing = db.query(Transition).filter(
                     Transition.project_id == project_id
                 ).all()
                 existing_pairs = {(t.from_clip_id, t.to_clip_id) for t in existing}
 
-                # Get clip durations for finding scenes
                 from app.models.video_clip import VideoClip
-                clips = db.query(VideoClip).filter(
+                clips_db = db.query(VideoClip).filter(
                     VideoClip.id.in_(clip_ids)
                 ).all()
-                clip_map = {c.id: c for c in clips}
+                clip_map = {c.id: c for c in clips_db}
 
-                # Build timeline position for each clip
+                # Build timeline positions
                 timeline_positions = []
                 current_pos = 0
                 for cid in clip_ids:
                     clip = clip_map.get(cid)
                     if clip:
-                        effective_duration = (clip.duration or 0) - clip.start_trim - clip.end_trim
+                        eff_dur = (clip.duration or 0) - clip.start_trim - clip.end_trim
                         timeline_positions.append({
                             'clip_id': cid,
                             'start': current_pos,
-                            'end': current_pos + effective_duration
+                            'end': current_pos + eff_dur
                         })
-                        current_pos += effective_duration
+                        current_pos += eff_dur
 
-                # Find scenes near transition points
-                def find_scene_near_time(target_time: float, margin: float = 2.0) -> dict:
-                    """Find the closest scene to a given time."""
-                    closest = None
-                    closest_dist = float('inf')
-                    for scene in scenes:
-                        dist = abs(scene.get('timestamp', 0) - target_time)
-                        if dist < closest_dist and dist <= margin:
-                            closest_dist = dist
-                            closest = scene
-                    return closest or {'description': '', 'action_description': ''}
+                # Index suggested transitions by rounded timestamp for lookup
+                transition_by_time = {}
+                for st in suggested_transitions:
+                    t = st.get('timestamp', 0)
+                    transition_by_time[round(t, 1)] = st
 
                 transitions_to_create = []
-
                 for i in range(len(clip_ids) - 1):
                     from_clip = clip_ids[i]
                     to_clip = clip_ids[i + 1]
@@ -713,34 +888,75 @@ def run_auto_generate(
                     if (from_clip, to_clip) in existing_pairs:
                         continue
 
-                    # Find transition point (end of from_clip)
                     trans_point = timeline_positions[i]['end'] if i < len(timeline_positions) else 0
 
-                    # Get scenes before and after transition
-                    scene_before = find_scene_near_time(trans_point - 1)
-                    scene_after = find_scene_near_time(trans_point + 1)
+                    # Look up pre-computed transition (try nearby timestamps)
+                    pre_computed = None
+                    for offset in [0.0, 0.1, -0.1, 0.2, -0.2, 0.5, -0.5, 1.0, -1.0]:
+                        key = round(trans_point + offset, 1)
+                        if key in transition_by_time:
+                            pre_computed = transition_by_time[key]
+                            break
 
-                    # Select content-aware transition
-                    transition_type, duration = select_content_aware_transition(
-                        scene_before, scene_after, template_transition_types
-                    )
+                    if pre_computed:
+                        # Use the pre-computed, continuity-scored transition
+                        trans_type_str = pre_computed.get('type', 'dissolve')
+                        trans_duration = pre_computed.get('duration', 0.5)
+                        confidence = pre_computed.get('confidence', 0.7)
+                        continuity = pre_computed.get('continuity_score')
+
+                        try:
+                            trans_type = TransitionType(trans_type_str)
+                        except ValueError:
+                            trans_type = TransitionType.DISSOLVE
+
+                        # Apply genre max_duration constraint
+                        max_dur = transition_rules.get('max_duration', 1.0)
+                        trans_duration = min(trans_duration, max_dur)
+                    else:
+                        # Fallback: derive from scene descriptions
+                        def _find_scene_near(target_time, margin=2.0):
+                            closest = None
+                            closest_dist = float('inf')
+                            for sc in scenes:
+                                dist = abs(sc.get('timestamp', 0) - target_time)
+                                if dist < closest_dist and dist <= margin:
+                                    closest_dist = dist
+                                    closest = sc
+                            return closest or {'description': ''}
+
+                        scene_before = _find_scene_near(trans_point - 1)
+                        scene_after = _find_scene_near(trans_point + 1)
+                        trans_type, trans_duration = select_fallback_transition(
+                            scene_before, scene_after, template_transition_types
+                        )
+                        confidence = 0.5
+                        continuity = None
 
                     transitions_to_create.append({
                         'from_clip_id': from_clip,
                         'to_clip_id': to_clip,
-                        'type': transition_type,
-                        'duration': duration
+                        'type': trans_type,
+                        'duration': trans_duration,
+                        'confidence': confidence,
+                        'continuity_score': continuity,
                     })
 
                 for trans_data in transitions_to_create:
                     try:
+                        params = {}
+                        if trans_data.get('continuity_score') is not None:
+                            params['continuity_score'] = trans_data['continuity_score']
+
                         transition = Transition(
                             project_id=project_id,
-                            type=trans_data['type'],
+                            type=trans_data['type'].value if hasattr(trans_data['type'], 'value') else trans_data['type'],
                             from_clip_id=trans_data['from_clip_id'],
                             to_clip_id=trans_data['to_clip_id'],
                             duration=trans_data['duration'],
-                            ai_suggested=1
+                            ai_suggested=1,
+                            confidence=trans_data.get('confidence'),
+                            parameters=params if params else None,
                         )
                         db.add(transition)
                         result["transitions_created"] += 1
@@ -750,13 +966,118 @@ def run_auto_generate(
                 db.commit()
                 loop.run_until_complete(send_progress(
                     user_id, "auto_generate", task_id, project_id,
-                    "transitions", 95, f"Created {result['transitions_created']} smart transitions"
+                    "transitions", base_progress + 15,
+                    f"Created {result['transitions_created']} AI-scored transitions"
                 ))
+
+            current_step += 1
+            base_progress = 82
+
+            # ============================================================
+            # STEP 4: Auto-create text overlays from analysis suggestions
+            # ============================================================
+            if suggested_text_overlays:
+                loop.run_until_complete(send_progress(
+                    user_id, "auto_generate", task_id, project_id,
+                    "text_overlays", base_progress + 2,
+                    f"Creating {len(suggested_text_overlays)} text overlays..."
+                ))
+
+                for overlay_suggestion in suggested_text_overlays:
+                    try:
+                        text = overlay_suggestion.get('text', '')
+                        if not text:
+                            continue
+
+                        overlay_type = overlay_suggestion.get('type', 'title')
+                        start = overlay_suggestion.get(
+                            'start_time',
+                            overlay_suggestion.get('timestamp', 0)
+                        )
+                        end = overlay_suggestion.get('end_time', start + 3.0)
+
+                        # Style based on overlay type
+                        style = TextOverlay.get_default_style()
+                        if overlay_type == 'intro_title':
+                            style['fontSize'] = 48
+                            style['fontFamily'] = 'Impact, sans-serif'
+                            style['position'] = {'x': 50, 'y': 40}
+                            style['animation'] = 'fade'
+                        elif overlay_type == 'lower_third':
+                            style['fontSize'] = 22
+                            style['backgroundColor'] = 'rgba(0,0,0,0.6)'
+                            style['position'] = {'x': 10, 'y': 80}
+                            style['animation'] = 'slide'
+                        elif overlay_type == 'section_title':
+                            style['fontSize'] = 36
+                            style['position'] = {'x': 50, 'y': 50}
+                            style['animation'] = 'zoom'
+                        elif overlay_type == 'callout':
+                            style['fontSize'] = 28
+                            style['color'] = '#FFD700'
+                            style['fontWeight'] = 'bold'
+                            style['position'] = {'x': 50, 'y': 30}
+                            style['animation'] = 'pop'
+                        elif overlay_type == 'outro_title':
+                            style['fontSize'] = 40
+                            style['fontFamily'] = 'Georgia, serif'
+                            style['position'] = {'x': 50, 'y': 45}
+                            style['animation'] = 'fade'
+
+                        overlay = TextOverlay(
+                            project_id=project_id,
+                            text=text,
+                            start_time=start,
+                            end_time=end,
+                            style=style
+                        )
+                        db.add(overlay)
+                        result["text_overlays_created"] += 1
+                    except Exception as e:
+                        result["errors"].append(f"Text overlay error: {str(e)}")
+
+                db.commit()
+                loop.run_until_complete(send_progress(
+                    user_id, "auto_generate", task_id, project_id,
+                    "text_overlays", base_progress + 8,
+                    f"Created {result['text_overlays_created']} text overlays"
+                ))
+
+            base_progress = 92
+
+            # ============================================================
+            # STEP 5: Store enriched metadata for rendering pipeline + UI
+            # ============================================================
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if project and project.analysis_results:
+                updated_results = dict(project.analysis_results)
+                updated_results['auto_generate_metadata'] = {
+                    'genre_detected': pre_classification.get('video_type', 'unknown'),
+                    'subtitles_word_level': any(
+                        s.get('words') for s in transcription
+                    ),
+                    'sfx_layering_used': bool(sfx_layers),
+                    'transitions_ai_scored': bool(suggested_transitions),
+                    'text_overlays_auto': result['text_overlays_created'],
+                    'color_grading_available': bool(color_grading),
+                    'audio_ducking_available': bool(audio_mix_map),
+                    'narrative_arc_available': bool(narrative_arc),
+                    'pacing_adjustments_count': len(pacing_adjustments),
+                    'broll_suggestions_count': len(broll_points),
+                }
+                project.analysis_results = updated_results
+                project.updated_at = datetime.utcnow()
+                db.commit()
+
+            loop.run_until_complete(send_progress(
+                user_id, "auto_generate", task_id, project_id,
+                "complete", 98, "Auto-generation complete"
+            ))
 
         finally:
             db.close()
 
-        # Send completion with template info
+        # Send completion with enriched result
         manager = get_connection_manager()
         loop.run_until_complete(manager.send_task_complete(
             user_id, "auto_generate", task_id, project_id, result
@@ -872,9 +1193,14 @@ def run_video_export(
     bgm_path: str = None,
     bgm_volume: float = 0.3,
     sfx_infos: list = None,
+    subtitle_infos: list = None,
+    overlay_infos: list = None,
+    color_grade_info=None,
+    ducking_infos: list = None,
 ):
     """
     Run video export (stitch + mix) in background with WebSocket progress.
+    Now supports subtitle burn-in, text overlays, color grading, and audio ducking.
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -888,13 +1214,20 @@ def run_video_export(
         from app.services.video_stitcher import VideoStitcher
 
         sfx_count = len(sfx_infos) if sfx_infos else 0
+        sub_count = len(subtitle_infos) if subtitle_infos else 0
+        ovl_count = len(overlay_infos) if overlay_infos else 0
         bgm_label = " + BGM" if bgm_path else ""
         sfx_label = f" + {sfx_count} SFX" if sfx_count else ""
+        sub_label = f" + {sub_count} subtitles" if sub_count else ""
+        ovl_label = f" + {ovl_count} overlays" if ovl_count else ""
+        cg_label = " + color grading" if color_grade_info else ""
+        duck_label = " + audio ducking" if ducking_infos else ""
 
         loop.run_until_complete(send_progress(
             user_id, "video_render", task_id, project_id,
             "rendering", 30,
-            f"Rendering {len(clip_infos)} clips{bgm_label}{sfx_label}..."
+            f"Rendering {len(clip_infos)} clips{bgm_label}{sfx_label}"
+            f"{sub_label}{ovl_label}{cg_label}{duck_label}..."
         ))
 
         stitcher = VideoStitcher(output_dir)
@@ -904,7 +1237,11 @@ def run_video_export(
             output_filename,
             background_audio=bgm_path,
             audio_volume=bgm_volume,
-            sfx_tracks=sfx_infos
+            sfx_tracks=sfx_infos,
+            subtitles=subtitle_infos,
+            text_overlays=overlay_infos,
+            color_grade=color_grade_info,
+            ducking_points=ducking_infos,
         )
 
         if not success:
@@ -926,7 +1263,10 @@ def run_video_export(
             {
                 "url": export_url,
                 "filename": output_filename,
-                "message": f"Exported {len(clip_infos)} clips{bgm_label}{sfx_label}"
+                "message": (
+                    f"Exported {len(clip_infos)} clips{bgm_label}{sfx_label}"
+                    f"{sub_label}{ovl_label}{cg_label}{duck_label}"
+                )
             }
         ))
 

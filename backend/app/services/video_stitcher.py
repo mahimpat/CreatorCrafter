@@ -5,13 +5,18 @@ This service handles:
 1. Stitching multiple video clips together
 2. Applying transitions between clips using FFmpeg's xfade filter
 3. Mixing background audio and SFX
-4. Rendering final output video
+4. Subtitle burn-in via drawtext filter
+5. Text overlay rendering
+6. Audio ducking (dynamic BGM volume from audio_mix_map)
+7. Color grading via eq filter
+8. Rendering final output video
 """
 import os
+import re
 import subprocess
 import tempfile
 from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -43,6 +48,41 @@ class SFXTrackInfo:
     start_time: float  # seconds from start of timeline
     duration: float  # seconds
     volume: float = 1.0
+
+
+@dataclass
+class SubtitleInfo:
+    """Information about a subtitle to burn into the video."""
+    text: str
+    start_time: float
+    end_time: float
+    style: Optional[Dict] = None
+
+
+@dataclass
+class TextOverlayInfo:
+    """Information about a text overlay to render on the video."""
+    text: str
+    start_time: float
+    end_time: float
+    style: Optional[Dict] = None
+
+
+@dataclass
+class ColorGradeInfo:
+    """Color grading parameters for the video."""
+    brightness: float = 0.0      # -1.0 to 1.0
+    contrast: float = 1.0        # 0.0 to 2.0
+    saturation: float = 1.0      # 0.0 to 3.0
+    gamma: float = 1.0           # 0.1 to 10.0
+
+
+@dataclass
+class AudioDuckPoint:
+    """A single point in the audio ducking curve."""
+    timestamp: float
+    bgm_volume: float  # 0.0 to 1.0
+    is_speech: bool = False
 
 
 # ===== TRANSITION MAPPINGS =====
@@ -204,8 +244,30 @@ XFADE_TRANSITIONS = {
 }
 
 
+def _escape_drawtext(text: str) -> str:
+    """Escape text for FFmpeg drawtext filter.
+
+    FFmpeg drawtext requires specific escaping:
+    - Single quotes, colons, backslashes, and semicolons need escaping
+    - Newlines become explicit \\n
+    """
+    # Escape backslashes first
+    text = text.replace('\\', '\\\\\\\\')
+    # Escape single quotes
+    text = text.replace("'", "\\'")
+    # Escape colons (special in drawtext)
+    text = text.replace(':', '\\:')
+    # Escape semicolons (filter separator)
+    text = text.replace(';', '\\;')
+    # Escape percent signs
+    text = text.replace('%', '%%')
+    # Newlines
+    text = text.replace('\n', '\\n')
+    return text
+
+
 class VideoStitcher:
-    """Service for stitching video clips with transitions."""
+    """Service for stitching video clips with transitions, subtitles, overlays, and color grading."""
 
     def __init__(self, output_dir: str):
         self.output_dir = output_dir
@@ -222,18 +284,27 @@ class VideoStitcher:
         output_filename: str,
         background_audio: Optional[str] = None,
         audio_volume: float = 0.3,
-        sfx_tracks: Optional[List[SFXTrackInfo]] = None
+        sfx_tracks: Optional[List[SFXTrackInfo]] = None,
+        subtitles: Optional[List[SubtitleInfo]] = None,
+        text_overlays: Optional[List[TextOverlayInfo]] = None,
+        color_grade: Optional[ColorGradeInfo] = None,
+        ducking_points: Optional[List[AudioDuckPoint]] = None,
     ) -> Tuple[bool, str]:
         """
-        Stitch multiple clips together with transitions.
+        Stitch multiple clips together with transitions, audio, subtitles,
+        text overlays, color grading, and audio ducking.
 
         Args:
             clips: List of clip information
             transitions: List of transitions (should be len(clips) - 1)
             output_filename: Name of output file
             background_audio: Optional background music path
-            audio_volume: Volume for background audio (0-1)
+            audio_volume: Base volume for background audio (0-1)
             sfx_tracks: Optional list of SFX tracks to mix in
+            subtitles: Optional list of subtitles to burn into video
+            text_overlays: Optional list of text overlays to render
+            color_grade: Optional color grading parameters
+            ducking_points: Optional audio ducking curve for BGM
 
         Returns:
             Tuple of (success, output_path or error_message)
@@ -241,8 +312,12 @@ class VideoStitcher:
         if len(clips) < 1:
             return False, "No clips provided"
 
-        if len(clips) == 1 and not sfx_tracks and not background_audio:
-            # Single clip with no audio mixing needed
+        has_extras = (
+            sfx_tracks or background_audio or subtitles or
+            text_overlays or color_grade
+        )
+
+        if len(clips) == 1 and not has_extras:
             return self._render_single_clip(clips[0], output_filename)
 
         if len(clips) > 1 and len(transitions) != len(clips) - 1:
@@ -251,14 +326,13 @@ class VideoStitcher:
         output_path = os.path.join(self.output_dir, output_filename)
 
         try:
-            # Build the FFmpeg command
             cmd = self._build_stitch_command(
                 clips, transitions, output_path,
-                background_audio, audio_volume, sfx_tracks
+                background_audio, audio_volume, sfx_tracks,
+                subtitles, text_overlays, color_grade, ducking_points
             )
             print(f"FFmpeg command: {' '.join(cmd)}")
 
-            # Execute FFmpeg
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -304,6 +378,260 @@ class VideoStitcher:
         except Exception as e:
             return False, str(e)
 
+    # =================================================================
+    # Subtitle burn-in filter builder
+    # =================================================================
+    def _build_subtitle_filters(
+        self, subtitles: List[SubtitleInfo], input_label: str
+    ) -> Tuple[List[str], str]:
+        """Build drawtext filter chain for subtitles.
+
+        Returns (filter_parts, final_video_label).
+        """
+        if not subtitles:
+            return [], input_label
+
+        filters = []
+        current_label = input_label
+
+        for i, sub in enumerate(subtitles):
+            text = _escape_drawtext(sub.text)
+            style = sub.style or {}
+
+            font_size = style.get('fontSize', 24)
+            if isinstance(font_size, str):
+                font_size = int(font_size.replace('px', ''))
+            font_family = style.get('fontFamily', 'Arial').split(',')[0].strip()
+            font_color = style.get('color', 'white')
+            bg_color = style.get('backgroundColor', 'black@0.7')
+            position = style.get('position', 'bottom')
+            font_weight = style.get('fontWeight', '')
+
+            # Position: bottom center by default
+            if position == 'top':
+                x_expr = "(w-text_w)/2"
+                y_expr = "40"
+            else:
+                x_expr = "(w-text_w)/2"
+                y_expr = "h-80"
+
+            # Convert hex color to FFmpeg format
+            if font_color.startswith('#'):
+                font_color = font_color  # FFmpeg accepts #RRGGBB
+
+            # Background box
+            box_enabled = 1
+            box_color = "black@0.7"
+            if bg_color == 'transparent' or bg_color == 'none':
+                box_enabled = 0
+            elif bg_color.startswith('rgba'):
+                box_color = "black@0.7"  # Approximate
+
+            out_label = f"vsub{i}"
+            enable = f"between(t\\,{sub.start_time:.3f}\\,{sub.end_time:.3f})"
+
+            drawtext = (
+                f"[{current_label}]drawtext="
+                f"text='{text}':"
+                f"fontsize={font_size}:"
+                f"fontcolor={font_color}:"
+                f"fontfile=:"
+                f"font='{font_family}':"
+                f"x={x_expr}:y={y_expr}:"
+                f"box={box_enabled}:boxcolor={box_color}:boxborderw=8:"
+                f"enable='{enable}'"
+            )
+
+            # Bold text via borderw (simulates bold)
+            if font_weight == 'bold':
+                drawtext += ":borderw=1:bordercolor=white"
+
+            drawtext += f"[{out_label}]"
+            filters.append(drawtext)
+            current_label = out_label
+
+        return filters, current_label
+
+    # =================================================================
+    # Text overlay filter builder
+    # =================================================================
+    def _build_overlay_filters(
+        self, overlays: List[TextOverlayInfo], input_label: str
+    ) -> Tuple[List[str], str]:
+        """Build drawtext filter chain for text overlays.
+
+        Returns (filter_parts, final_video_label).
+        """
+        if not overlays:
+            return [], input_label
+
+        filters = []
+        current_label = input_label
+
+        for i, overlay in enumerate(overlays):
+            text = _escape_drawtext(overlay.text)
+            style = overlay.style or {}
+
+            font_size = style.get('fontSize', 32)
+            if isinstance(font_size, str):
+                font_size = int(font_size.replace('px', ''))
+            font_family = style.get('fontFamily', 'Arial').split(',')[0].strip()
+            font_color = style.get('color', 'white')
+            font_weight = style.get('fontWeight', '')
+            animation = style.get('animation', 'none')
+
+            # Position from style (percentage-based)
+            pos = style.get('position', {'x': 50, 'y': 50})
+            if isinstance(pos, dict):
+                x_pct = pos.get('x', 50)
+                y_pct = pos.get('y', 50)
+                x_expr = f"(w*{x_pct}/100)-(text_w/2)"
+                y_expr = f"(h*{y_pct}/100)-(text_h/2)"
+            else:
+                x_expr = "(w-text_w)/2"
+                y_expr = "(h-text_h)/2"
+
+            if font_color.startswith('#'):
+                font_color = font_color
+
+            # Background
+            bg_color = style.get('backgroundColor', 'transparent')
+            box_enabled = 0
+            box_color = "black@0.5"
+            if bg_color and bg_color != 'transparent' and bg_color != 'none':
+                box_enabled = 1
+
+            out_label = f"vovl{i}"
+            enable = f"between(t\\,{overlay.start_time:.3f}\\,{overlay.end_time:.3f})"
+
+            # Animation: fade-in via alpha
+            alpha_expr = "1"
+            fade_dur = 0.5
+            if animation == 'fade':
+                t_start = overlay.start_time
+                t_end = overlay.end_time
+                alpha_expr = (
+                    f"if(lt(t\\,{t_start + fade_dur:.3f})\\,"
+                    f"(t-{t_start:.3f})/{fade_dur:.3f}\\,"
+                    f"if(gt(t\\,{t_end - fade_dur:.3f})\\,"
+                    f"({t_end:.3f}-t)/{fade_dur:.3f}\\,1))"
+                )
+
+            drawtext = (
+                f"[{current_label}]drawtext="
+                f"text='{text}':"
+                f"fontsize={font_size}:"
+                f"fontcolor_expr={font_color}@'%{{eif\\:{alpha_expr}\\:d}}':"
+                f"font='{font_family}':"
+                f"x={x_expr}:y={y_expr}:"
+                f"box={box_enabled}:boxcolor={box_color}:boxborderw=10:"
+                f"enable='{enable}'"
+            )
+
+            if font_weight == 'bold':
+                drawtext += ":borderw=1:bordercolor=white"
+
+            drawtext += f"[{out_label}]"
+            filters.append(drawtext)
+            current_label = out_label
+
+        return filters, current_label
+
+    # =================================================================
+    # Color grading filter builder
+    # =================================================================
+    def _build_color_grade_filter(
+        self, grade: ColorGradeInfo, input_label: str
+    ) -> Tuple[List[str], str]:
+        """Build eq filter for color grading.
+
+        Returns (filter_parts, final_video_label).
+        """
+        if not grade:
+            return [], input_label
+
+        # Only add filter if values differ from default
+        is_default = (
+            abs(grade.brightness) < 0.01 and
+            abs(grade.contrast - 1.0) < 0.01 and
+            abs(grade.saturation - 1.0) < 0.01 and
+            abs(grade.gamma - 1.0) < 0.01
+        )
+        if is_default:
+            return [], input_label
+
+        out_label = "vcg"
+        eq_filter = (
+            f"[{input_label}]eq="
+            f"brightness={grade.brightness:.3f}:"
+            f"contrast={grade.contrast:.3f}:"
+            f"saturation={grade.saturation:.3f}:"
+            f"gamma={grade.gamma:.3f}"
+            f"[{out_label}]"
+        )
+        return [eq_filter], out_label
+
+    # =================================================================
+    # Audio ducking filter builder
+    # =================================================================
+    def _build_audio_ducking_filter(
+        self, ducking_points: List[AudioDuckPoint],
+        bgm_input_label: str,
+        base_volume: float
+    ) -> Tuple[List[str], str]:
+        """Build volume automation filter for BGM ducking during speech.
+
+        Generates an FFmpeg volume expression that interpolates between
+        ducking points for smooth BGM volume changes.
+
+        Returns (filter_parts, final_audio_label).
+        """
+        if not ducking_points or len(ducking_points) < 2:
+            return [], bgm_input_label
+
+        # Sort by timestamp
+        points = sorted(ducking_points, key=lambda p: p.timestamp)
+
+        # Build a nested if() expression for volume automation
+        # Each segment linearly interpolates between points
+        # FFmpeg volume filter with eval=frame
+        vol_expr_parts = []
+        for i in range(len(points) - 1):
+            t0 = points[i].timestamp
+            v0 = points[i].bgm_volume * base_volume
+            t1 = points[i + 1].timestamp
+            v1 = points[i + 1].bgm_volume * base_volume
+
+            # Linear interpolation: v0 + (v1-v0) * (t-t0)/(t1-t0)
+            slope = (v1 - v0) / max(t1 - t0, 0.001)
+            segment = f"if(between(t\\,{t0:.2f}\\,{t1:.2f})\\,{v0:.3f}+{slope:.6f}*(t-{t0:.2f})\\,"
+            vol_expr_parts.append(segment)
+
+        # Default fallback: last point's volume
+        last_vol = points[-1].bgm_volume * base_volume
+        vol_expr = "".join(vol_expr_parts) + f"{last_vol:.3f}" + ")" * len(vol_expr_parts)
+
+        # Cap expression length — FFmpeg has limits
+        # If too many points, simplify to step function
+        if len(vol_expr) > 4000:
+            # Simplify: sample every 2 seconds
+            simplified = []
+            for i in range(0, len(points) - 1, max(1, len(points) // 50)):
+                t = points[i].timestamp
+                v = points[i].bgm_volume * base_volume
+                simplified.append(f"if(lt(t\\,{t:.1f})\\,{v:.2f}\\,")
+            last_v = points[-1].bgm_volume * base_volume
+            vol_expr = "".join(simplified) + f"{last_v:.2f}" + ")" * len(simplified)
+
+        out_label = "bgm_ducked"
+        duck_filter = (
+            f"[{bgm_input_label}]volume='{vol_expr}':eval=frame[{out_label}]"
+        )
+        return [duck_filter], out_label
+
+    # =================================================================
+    # Main FFmpeg command builder
+    # =================================================================
     def _build_stitch_command(
         self,
         clips: List[ClipInfo],
@@ -311,9 +639,13 @@ class VideoStitcher:
         output_path: str,
         background_audio: Optional[str],
         audio_volume: float,
-        sfx_tracks: Optional[List[SFXTrackInfo]] = None
+        sfx_tracks: Optional[List[SFXTrackInfo]] = None,
+        subtitles: Optional[List[SubtitleInfo]] = None,
+        text_overlays: Optional[List[TextOverlayInfo]] = None,
+        color_grade: Optional[ColorGradeInfo] = None,
+        ducking_points: Optional[List[AudioDuckPoint]] = None,
     ) -> List[str]:
-        """Build the FFmpeg command for stitching clips with transitions, BGM, and SFX."""
+        """Build the FFmpeg command for stitching clips with all enhancements."""
 
         cmd = ['ffmpeg', '-y']
 
@@ -397,20 +729,65 @@ class VideoStitcher:
                 prev_video = output_video
                 prev_audio = output_audio
 
-        # Combine filter parts
-        all_filters = filter_parts + audio_filter_parts
+        # ====== VIDEO POST-PROCESSING CHAIN ======
+        # Applied after xfade: color grading -> subtitles -> text overlays
+        final_video = "vout"
+        video_post_filters = []
+
+        # 1. Color grading (eq filter)
+        if color_grade:
+            cg_filters, final_video = self._build_color_grade_filter(
+                color_grade, final_video
+            )
+            video_post_filters.extend(cg_filters)
+
+        # 2. Subtitle burn-in (drawtext chain)
+        if subtitles:
+            sub_filters, final_video = self._build_subtitle_filters(
+                subtitles, final_video
+            )
+            video_post_filters.extend(sub_filters)
+
+        # 3. Text overlays (drawtext chain)
+        if text_overlays:
+            ovl_filters, final_video = self._build_overlay_filters(
+                text_overlays, final_video
+            )
+            video_post_filters.extend(ovl_filters)
+
+        # Combine all filter parts
+        all_filters = filter_parts + audio_filter_parts + video_post_filters
         final_audio = "aout"
 
-        # Add background audio mix if provided
+        # ====== AUDIO POST-PROCESSING CHAIN ======
+        # BGM with optional ducking, then SFX mixing
+
+        # Add background audio mix with optional ducking
         if background_audio:
             bgm_index = len(clips)
-            all_filters.append(
-                f"[{final_audio}][{bgm_index}:a]amix=inputs=2:duration=first:"
-                f"weights=1 {audio_volume}[abgm]"
-            )
+            bgm_label = f"{bgm_index}:a"
+
+            if ducking_points:
+                # Apply volume automation for speech ducking
+                duck_filters, ducked_label = self._build_audio_ducking_filter(
+                    ducking_points, bgm_label, audio_volume
+                )
+                all_filters.extend(duck_filters)
+
+                # Mix ducked BGM with main audio
+                all_filters.append(
+                    f"[{final_audio}][{ducked_label}]amix=inputs=2:"
+                    f"duration=first:normalize=0[abgm]"
+                )
+            else:
+                # Static volume mix (original behavior)
+                all_filters.append(
+                    f"[{final_audio}][{bgm_index}:a]amix=inputs=2:duration=first:"
+                    f"weights=1 {audio_volume}[abgm]"
+                )
             final_audio = "abgm"
 
-        # Add SFX mixing if provided
+        # Add SFX mixing
         if sfx_tracks:
             sfx_start_idx = len(clips) + (1 if background_audio else 0)
 
@@ -437,7 +814,7 @@ class VideoStitcher:
         filter_complex = ";".join(all_filters)
 
         cmd.extend(['-filter_complex', filter_complex])
-        cmd.extend(['-map', '[vout]', '-map', f'[{final_audio}]'])
+        cmd.extend(['-map', f'[{final_video}]', '-map', f'[{final_audio}]'])
 
         # Output settings
         cmd.extend([

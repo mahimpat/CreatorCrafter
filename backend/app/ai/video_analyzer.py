@@ -41,17 +41,42 @@ def get_whisper_model():
 
 
 def get_vlm_model():
-    """Lazy load vision-language model for image captioning and understanding."""
+    """Lazy load vision-language model for image captioning and understanding.
+
+    Tries BLIP-2 first (richer multi-sentence captions with actions and context),
+    falls back to BLIP v1 if BLIP-2 fails to load (e.g., insufficient VRAM).
+    Tags the model with _is_blip2 attribute for downstream branching.
+    """
     global _vlm_model, _vlm_processor
     if _vlm_model is None:
         import torch
-        from transformers import BlipProcessor, BlipForConditionalGeneration
         from app.config import settings
 
-        _vlm_processor = BlipProcessor.from_pretrained(settings.BLIP_MODEL)
-        _vlm_model = BlipForConditionalGeneration.from_pretrained(settings.BLIP_MODEL)
-        if torch.cuda.is_available():
-            _vlm_model = _vlm_model.to("cuda")
+        # Try BLIP-2 first
+        try:
+            from transformers import Blip2Processor, Blip2ForConditionalGeneration
+            print(f"Loading BLIP-2 model: {settings.BLIP_MODEL}", file=sys.stderr)
+            _vlm_processor = Blip2Processor.from_pretrained(settings.BLIP_MODEL)
+            if torch.cuda.is_available():
+                _vlm_model = Blip2ForConditionalGeneration.from_pretrained(
+                    settings.BLIP_MODEL, torch_dtype=torch.float16
+                ).to("cuda")
+            else:
+                _vlm_model = Blip2ForConditionalGeneration.from_pretrained(
+                    settings.BLIP_MODEL, torch_dtype=torch.float32
+                )
+            _vlm_model._is_blip2 = True
+            print("BLIP-2 loaded successfully", file=sys.stderr)
+        except Exception as e:
+            print(f"BLIP-2 failed to load: {e}, falling back to BLIP v1", file=sys.stderr)
+            from transformers import BlipProcessor, BlipForConditionalGeneration
+            fallback = settings.BLIP_FALLBACK_MODEL
+            _vlm_processor = BlipProcessor.from_pretrained(fallback)
+            _vlm_model = BlipForConditionalGeneration.from_pretrained(fallback)
+            if torch.cuda.is_available():
+                _vlm_model = _vlm_model.to("cuda")
+            _vlm_model._is_blip2 = False
+            print(f"Loaded BLIP v1 fallback: {fallback}", file=sys.stderr)
     return _vlm_model, _vlm_processor
 
 
@@ -990,6 +1015,170 @@ def _empty_audio_content() -> Dict[str, Any]:
 
 
 # =============================================================================
+# QUICK AUDIO PRE-CLASSIFICATION (runs before heavy analysis)
+# =============================================================================
+
+def quick_classify_audio(
+    audio_path: str,
+    transcription: List[Dict]
+) -> Dict[str, Any]:
+    """
+    Lightweight audio pre-classification using first 30s of audio.
+    Runs in ~2s to determine video type before committing to heavy analysis.
+
+    Uses librosa on a short segment to compute: RMS energy, spectral flatness,
+    harmonic-percussive ratio, and speech ratio from transcription.
+
+    Args:
+        audio_path: Path to audio file
+        transcription: Transcription segments from Whisper
+
+    Returns:
+        Dict with video_type, speech_ratio, harmonic_ratio, and raw features
+    """
+    try:
+        import librosa
+
+        # Load only first 30 seconds for speed
+        y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=30.0)
+        duration = librosa.get_duration(y=y, sr=sr)
+
+        if duration < 0.5:
+            return {'video_type': 'unknown', 'speech_ratio': 0.0, 'harmonic_ratio': 0.0}
+
+        # RMS energy
+        rms = librosa.feature.rms(y=y)[0]
+        avg_rms = float(np.mean(rms))
+
+        # Spectral flatness (noise-like vs tonal)
+        flatness = librosa.feature.spectral_flatness(y=y)[0]
+        avg_flatness = float(np.mean(flatness))
+
+        # Harmonic-percussive separation
+        y_harmonic, y_percussive = librosa.effects.hpss(y)
+        harmonic_energy = float(np.mean(librosa.feature.rms(y=y_harmonic)[0]))
+        percussive_energy = float(np.mean(librosa.feature.rms(y=y_percussive)[0]))
+        harmonic_ratio = harmonic_energy / (avg_rms + 1e-8)
+        percussive_ratio = percussive_energy / (avg_rms + 1e-8)
+
+        # Speech ratio from transcription
+        speech_duration = 0.0
+        if transcription:
+            for seg in transcription:
+                seg_start = seg.get('start', 0)
+                seg_end = seg.get('end', seg_start)
+                # Only count segments in the first 30s
+                if seg_start < 30.0:
+                    speech_duration += min(seg_end, 30.0) - seg_start
+        speech_ratio = speech_duration / max(duration, 1.0)
+
+        # Classify video type
+        if speech_ratio > 0.6 and harmonic_ratio < 0.5:
+            video_type = 'podcast_interview'
+        elif speech_ratio > 0.35 and harmonic_ratio > 0.3:
+            video_type = 'vlog_tutorial'
+        elif harmonic_ratio > 0.6 and speech_ratio < 0.15:
+            video_type = 'music_video'
+        elif percussive_ratio > 0.4 and avg_rms > 0.1:
+            video_type = 'action_dynamic'
+        elif avg_rms < 0.02:
+            video_type = 'silent_minimal'
+        elif avg_flatness < 0.2 and speech_ratio < 0.2:
+            video_type = 'documentary_nature'
+        else:
+            video_type = 'mixed_content'
+
+        return {
+            'video_type': video_type,
+            'speech_ratio': round(speech_ratio, 3),
+            'harmonic_ratio': round(harmonic_ratio, 3),
+            'percussive_ratio': round(percussive_ratio, 3),
+            'avg_rms': round(avg_rms, 4),
+            'avg_flatness': round(avg_flatness, 4),
+            'sample_duration': round(duration, 1)
+        }
+
+    except Exception as e:
+        print(f"Quick audio classification failed: {e}", file=sys.stderr)
+        return {'video_type': 'unknown', 'speech_ratio': 0.0, 'harmonic_ratio': 0.0}
+
+
+def get_analysis_strategy(video_type: str) -> Dict[str, Any]:
+    """
+    Return analysis parameters adapted to the detected video type.
+
+    Controls whether BLIP scene analysis runs, frame sampling intervals,
+    and priorities for different analysis stages.
+
+    Args:
+        video_type: Video type from quick_classify_audio()
+
+    Returns:
+        Dict with skip_blip, frame_sample_interval, min_sample_interval,
+        max_sample_interval, focus_beat_sync, transcription_priority
+    """
+    strategies = {
+        'music_video': {
+            'skip_blip': True,       # Minimal useful visual captions
+            'frame_sample_interval': 5.0,
+            'min_sample_interval': 3.0,
+            'max_sample_interval': 8.0,
+            'focus_beat_sync': True,
+            'transcription_priority': 'low',
+        },
+        'podcast_interview': {
+            'skip_blip': True,       # Minimal visual change
+            'frame_sample_interval': 8.0,
+            'min_sample_interval': 5.0,
+            'max_sample_interval': 15.0,
+            'focus_beat_sync': False,
+            'transcription_priority': 'high',
+        },
+        'vlog_tutorial': {
+            'skip_blip': False,
+            'frame_sample_interval': 3.0,
+            'min_sample_interval': 1.5,
+            'max_sample_interval': 5.0,
+            'focus_beat_sync': False,
+            'transcription_priority': 'high',
+        },
+        'action_dynamic': {
+            'skip_blip': False,
+            'frame_sample_interval': 2.0,
+            'min_sample_interval': 1.0,
+            'max_sample_interval': 3.0,
+            'focus_beat_sync': True,
+            'transcription_priority': 'medium',
+        },
+        'documentary_nature': {
+            'skip_blip': False,
+            'frame_sample_interval': 4.0,
+            'min_sample_interval': 2.0,
+            'max_sample_interval': 6.0,
+            'focus_beat_sync': False,
+            'transcription_priority': 'medium',
+        },
+        'silent_minimal': {
+            'skip_blip': False,
+            'frame_sample_interval': 3.0,
+            'min_sample_interval': 1.5,
+            'max_sample_interval': 5.0,
+            'focus_beat_sync': False,
+            'transcription_priority': 'low',
+        },
+    }
+
+    return strategies.get(video_type, {
+        'skip_blip': False,
+        'frame_sample_interval': 3.0,
+        'min_sample_interval': 1.5,
+        'max_sample_interval': 5.0,
+        'focus_beat_sync': False,
+        'transcription_priority': 'medium',
+    })
+
+
+# =============================================================================
 # PROFESSIONAL SCENE DETECTION WITH PYSCENEDETECT
 # =============================================================================
 
@@ -1200,30 +1389,160 @@ EMOTION_KEYWORDS = {
 }
 
 
-def detect_emotion_from_description(description: str) -> Dict[str, Any]:
+def compute_audio_emotion_at_time(
+    timestamp: float,
+    audio_advanced: Dict,
+    audio_content: Dict
+) -> Dict[str, float]:
     """
-    Detect emotional tone from scene description.
-    Quick Win #4: Emotion keyword detection for mood-aware editing.
+    Compute emotion scores from audio features at a specific timestamp.
+
+    Looks up audio characteristics (energy, tempo, spectral properties) and
+    maps them to emotion scores for fusion with visual emotion detection.
+
+    Args:
+        timestamp: Time in seconds to evaluate
+        audio_advanced: Advanced audio analysis (tempo, beats, spectral)
+        audio_content: Audio content analysis (segments with energy, brightness, etc.)
+
+    Returns:
+        Dict mapping emotion name to score (0.0-1.0)
+    """
+    scores = {
+        'exciting': 0.0,
+        'calm': 0.0,
+        'happy': 0.0,
+        'dramatic': 0.0,
+        'sad': 0.0,
+    }
+
+    tempo = audio_advanced.get('tempo', 120)
+    spectral = audio_advanced.get('spectral', {})
+    avg_centroid = spectral.get('avg_centroid', 2000)
+    avg_rms = spectral.get('avg_rms', 0.05)
+
+    # Find the audio segment at this timestamp
+    segments = audio_content.get('segments', [])
+    seg = None
+    for s in segments:
+        if s.get('start', 0) <= timestamp <= s.get('end', 0):
+            seg = s
+            break
+
+    if seg is None:
+        # No segment found, return neutral scores
+        return scores
+
+    energy = seg.get('energy', 'medium')
+    harmonic_ratio = seg.get('harmonic_ratio', 0.5)
+    percussive_ratio = seg.get('percussive_ratio', 0.3)
+    brightness = seg.get('brightness', 'neutral')
+
+    energy_val = {'low': 0.2, 'medium': 0.5, 'high': 0.9}.get(energy, 0.5)
+
+    # exciting: high energy + fast tempo + percussive
+    exciting_score = 0.0
+    if energy_val > 0.6:
+        exciting_score += 0.3
+    if tempo > 130:
+        exciting_score += 0.3
+    if percussive_ratio > 0.35:
+        exciting_score += 0.4
+    scores['exciting'] = min(exciting_score, 1.0)
+
+    # calm: low energy + slow tempo + harmonic
+    calm_score = 0.0
+    if energy_val < 0.4:
+        calm_score += 0.3
+    if tempo < 100:
+        calm_score += 0.3
+    if harmonic_ratio > 0.5:
+        calm_score += 0.4
+    scores['calm'] = min(calm_score, 1.0)
+
+    # happy: bright spectral + medium energy + moderate-fast tempo
+    happy_score = 0.0
+    if brightness == 'bright' or avg_centroid > 3000:
+        happy_score += 0.4
+    if 0.3 <= energy_val <= 0.7:
+        happy_score += 0.2
+    if tempo > 100:
+        happy_score += 0.4
+    scores['happy'] = min(happy_score, 1.0)
+
+    # dramatic: dark spectral + high energy + mixed harmonic/percussive
+    dramatic_score = 0.0
+    if brightness == 'dark' or avg_centroid < 1500:
+        dramatic_score += 0.3
+    if energy_val > 0.6:
+        dramatic_score += 0.4
+    if harmonic_ratio > 0.3 and percussive_ratio > 0.2:
+        dramatic_score += 0.3
+    scores['dramatic'] = min(dramatic_score, 1.0)
+
+    # sad: low energy + dark spectral + slow tempo
+    sad_score = 0.0
+    if energy_val < 0.4:
+        sad_score += 0.3
+    if brightness == 'dark' or avg_centroid < 2000:
+        sad_score += 0.3
+    if tempo < 90:
+        sad_score += 0.4
+    scores['sad'] = min(sad_score, 1.0)
+
+    return scores
+
+
+def detect_emotion_from_description(
+    description: str,
+    audio_emotion_scores: Optional[Dict[str, float]] = None,
+    visual_weight: float = 0.6,
+    audio_weight: float = 0.4
+) -> Dict[str, Any]:
+    """
+    Detect emotional tone from scene description with optional audio fusion.
+
+    When audio_emotion_scores is provided, fuses visual keyword scores with
+    audio-derived emotion scores using configurable weights. This produces
+    richer emotion detection than either modality alone.
 
     Args:
         description: Scene description text
+        audio_emotion_scores: Optional dict of emotion->score from compute_audio_emotion_at_time()
+        visual_weight: Weight for visual emotion (default 0.6)
+        audio_weight: Weight for audio emotion (default 0.4)
 
     Returns:
         Dict with detected emotion, confidence, and editing suggestions
     """
     desc_lower = description.lower()
 
-    emotion_scores = {}
-
+    # Visual keyword scoring
+    visual_scores = {}
     for emotion, data in EMOTION_KEYWORDS.items():
-        # Count matching keywords
         matches = sum(1 for kw in data['keywords'] if kw in desc_lower)
         if matches > 0:
-            # Score based on number of matches and keyword specificity
-            emotion_scores[emotion] = matches
+            visual_scores[emotion] = matches
 
-    if not emotion_scores:
-        # Default to neutral
+    # Normalize visual scores to 0-1 range
+    if visual_scores:
+        max_visual = max(visual_scores.values())
+        visual_normalized = {e: s / max_visual for e, s in visual_scores.items()}
+    else:
+        visual_normalized = {}
+
+    # Fuse with audio scores if available
+    if audio_emotion_scores:
+        all_emotions = set(list(visual_normalized.keys()) + list(audio_emotion_scores.keys()))
+        fused_scores = {}
+        for emotion in all_emotions:
+            v_score = visual_normalized.get(emotion, 0.0)
+            a_score = audio_emotion_scores.get(emotion, 0.0)
+            fused_scores[emotion] = v_score * visual_weight + a_score * audio_weight
+    else:
+        fused_scores = visual_normalized
+
+    if not fused_scores:
         return {
             'emotion': 'neutral',
             'confidence': 0.3,
@@ -1231,22 +1550,51 @@ def detect_emotion_from_description(description: str) -> Dict[str, Any]:
             'sfx_mood': 'ambient, neutral'
         }
 
-    # Get dominant emotion
-    dominant_emotion = max(emotion_scores, key=emotion_scores.get)
-    max_score = emotion_scores[dominant_emotion]
+    # Get dominant emotion from fused scores
+    dominant_emotion = max(fused_scores, key=fused_scores.get)
+    max_fused = fused_scores[dominant_emotion]
 
-    # Calculate confidence based on number of matches
-    confidence = min(0.5 + (max_score * 0.15), 0.95)
+    # Confidence: based on fused score strength
+    if audio_emotion_scores:
+        confidence = min(0.5 + max_fused * 0.45, 0.95)
+    else:
+        # Original keyword-only confidence
+        raw_matches = visual_scores.get(dominant_emotion, 0)
+        confidence = min(0.5 + (raw_matches * 0.15), 0.95)
 
-    emotion_data = EMOTION_KEYWORDS[dominant_emotion]
-
-    return {
-        'emotion': dominant_emotion,
-        'confidence': confidence,
-        'suggested_transitions': emotion_data['transitions'],
-        'sfx_mood': emotion_data['sfx_mood'],
-        'all_emotions': emotion_scores
-    }
+    # Map to EMOTION_KEYWORDS data if available, otherwise use defaults
+    if dominant_emotion in EMOTION_KEYWORDS:
+        emotion_data = EMOTION_KEYWORDS[dominant_emotion]
+        return {
+            'emotion': dominant_emotion,
+            'confidence': confidence,
+            'suggested_transitions': emotion_data['transitions'],
+            'sfx_mood': emotion_data['sfx_mood'],
+            'all_emotions': {e: round(s, 3) for e, s in fused_scores.items()}
+        }
+    else:
+        # Audio-only emotion without EMOTION_KEYWORDS entry
+        default_transitions = {
+            'exciting': ['glitch', 'flash', 'zoom_in'],
+            'calm': ['dissolve', 'fade', 'cross_zoom'],
+            'happy': ['zoom_in', 'flash', 'spin'],
+            'dramatic': ['zoom_in', 'flash', 'wipe_left'],
+            'sad': ['dissolve', 'fade', 'blur'],
+        }
+        default_moods = {
+            'exciting': 'intense, dynamic',
+            'calm': 'ambient, peaceful',
+            'happy': 'upbeat, cheerful',
+            'dramatic': 'dramatic, impactful',
+            'sad': 'melancholic, soft',
+        }
+        return {
+            'emotion': dominant_emotion,
+            'confidence': confidence,
+            'suggested_transitions': default_transitions.get(dominant_emotion, ['dissolve', 'fade']),
+            'sfx_mood': default_moods.get(dominant_emotion, 'ambient, neutral'),
+            'all_emotions': {e: round(s, 3) for e, s in fused_scores.items()}
+        }
 
 
 # =============================================================================
@@ -1376,6 +1724,2547 @@ def get_adaptive_sample_points(
         print(f"Error in adaptive sampling: {e}", file=sys.stderr)
         # Fallback to uniform sampling
         return list(np.arange(0, duration if 'duration' in dir() else 60, base_interval))
+
+
+# =============================================================================
+# SHOT TYPE CLASSIFICATION (Professional Video Grammar)
+# =============================================================================
+
+def classify_shot_type(frame) -> Dict[str, Any]:
+    """
+    Classify the shot type of a video frame using face detection and composition.
+
+    Professional editors think in shot types — each has different editing rules:
+    - close_up: intimate framing, hold longer, dissolve out
+    - medium_shot: standard framing, versatile transitions
+    - wide_shot: establishing/location, hold longer, slow transitions
+    - extreme_close_up: detail shot, dramatic emphasis
+    - talking_head: consistent speaker framing, no competing SFX
+    - group_shot: multiple subjects, social context
+    - b_roll: no faces, supplementary footage, can cut fast
+    - text_graphic: text/slide content, hold for readability
+
+    Args:
+        frame: Video frame (BGR format from OpenCV)
+
+    Returns:
+        Dict with shot_type, face_count, face_area_ratio, composition details
+    """
+    import cv2
+
+    h, w = frame.shape[:2]
+    frame_area = h * w
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Face detection using Haar cascade (fast, no GPU needed)
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+    )
+    faces = face_cascade.detectMultiScale(
+        gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
+    )
+
+    face_count = len(faces)
+    total_face_area = 0
+    largest_face_ratio = 0.0
+    face_positions = []  # normalized (cx, cy) positions
+
+    for (x, y, fw, fh) in faces:
+        area = fw * fh
+        total_face_area += area
+        ratio = area / frame_area
+        if ratio > largest_face_ratio:
+            largest_face_ratio = ratio
+        cx = (x + fw / 2) / w
+        cy = (y + fh / 2) / h
+        face_positions.append({'x': round(cx, 2), 'y': round(cy, 2)})
+
+    face_area_ratio = total_face_area / frame_area
+
+    # Edge density analysis (helps detect text/graphic slides)
+    edges = cv2.Canny(gray, 50, 150)
+    edge_density = np.mean(edges > 0)
+
+    # Composition analysis: thirds grid
+    # Where is the visual weight? center-heavy vs distributed
+    h_third = h // 3
+    w_third = w // 3
+    center_region = gray[h_third:2*h_third, w_third:2*w_third]
+    outer_region_mean = (np.mean(gray) * frame_area - np.mean(center_region) * (h_third * w_third)) / max(frame_area - h_third * w_third, 1)
+    center_weight = np.mean(center_region) / max(outer_region_mean, 1)
+
+    # Classify shot type
+    if face_count == 0:
+        # No faces detected
+        if edge_density > 0.15:
+            shot_type = 'text_graphic'
+        else:
+            shot_type = 'b_roll'
+    elif face_count == 1:
+        if largest_face_ratio > 0.15:
+            shot_type = 'extreme_close_up'
+        elif largest_face_ratio > 0.04:
+            shot_type = 'close_up'
+        elif largest_face_ratio > 0.01:
+            shot_type = 'medium_shot'
+        else:
+            shot_type = 'wide_shot'
+
+        # Check for talking head pattern: single centered face
+        if face_positions and abs(face_positions[0]['x'] - 0.5) < 0.2:
+            if largest_face_ratio > 0.02:
+                shot_type = 'talking_head'
+    elif face_count >= 2:
+        if face_area_ratio > 0.08:
+            shot_type = 'group_shot'
+        elif face_area_ratio > 0.02:
+            shot_type = 'medium_shot'
+        else:
+            shot_type = 'wide_shot'
+    else:
+        shot_type = 'b_roll'
+
+    return {
+        'shot_type': shot_type,
+        'face_count': face_count,
+        'face_area_ratio': round(face_area_ratio, 4),
+        'largest_face_ratio': round(largest_face_ratio, 4),
+        'face_positions': face_positions,
+        'edge_density': round(edge_density, 3),
+        'center_weight': round(center_weight, 2),
+    }
+
+
+# =============================================================================
+# COLOR / LIGHTING MOOD ANALYSIS
+# =============================================================================
+
+def analyze_frame_color_mood(frame) -> Dict[str, Any]:
+    """
+    Analyze color and lighting properties of a frame for mood inference.
+
+    Color is responsible for ~70% of emotional perception in video.
+    Professional editors use color temperature, saturation, and contrast
+    to inform every editing decision.
+
+    Args:
+        frame: Video frame (BGR format from OpenCV)
+
+    Returns:
+        Dict with color_temperature, brightness_key, saturation_level,
+        contrast, dominant_colors, and derived color_mood
+    """
+    import cv2
+
+    # Convert to different color spaces
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+
+    h, s, v = cv2.split(hsv)
+    l_chan, a_chan, b_chan = cv2.split(lab)
+
+    # --- Brightness / Key ---
+    mean_brightness = float(np.mean(v))
+    brightness_key = 'mid_key'
+    if mean_brightness > 170:
+        brightness_key = 'high_key'
+    elif mean_brightness < 85:
+        brightness_key = 'low_key'
+
+    # --- Contrast ---
+    contrast = float(np.std(v.astype(float)))
+
+    # --- Saturation ---
+    mean_saturation = float(np.mean(s))
+    saturation_level = 'normal'
+    if mean_saturation > 140:
+        saturation_level = 'vivid'
+    elif mean_saturation < 50:
+        saturation_level = 'desaturated'
+    elif mean_saturation < 90:
+        saturation_level = 'muted'
+
+    # --- Color Temperature (from LAB b-channel: negative=blue/cool, positive=yellow/warm) ---
+    mean_b = float(np.mean(b_chan.astype(float)))
+    # LAB b-channel: 0-127 is cool (blue-ish), 128+ is warm (yellow-ish)
+    warmth_score = (mean_b - 128.0) / 128.0  # -1.0 (very cool) to +1.0 (very warm)
+    color_temperature = 'neutral'
+    if warmth_score > 0.08:
+        color_temperature = 'warm'
+    elif warmth_score < -0.08:
+        color_temperature = 'cool'
+
+    # --- Dominant Colors via K-Means (k=3) ---
+    pixels = frame.reshape(-1, 3).astype(np.float32)
+    # Subsample for speed (every 8th pixel)
+    pixels = pixels[::8]
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+    try:
+        _, labels, centers = cv2.kmeans(
+            pixels, 3, None, criteria, 3, cv2.KMEANS_PP_CENTERS
+        )
+        # Convert BGR centers to hex colors and compute percentages
+        dominant_colors = []
+        total_labels = len(labels)
+        for i, center in enumerate(centers):
+            count = int(np.sum(labels == i))
+            b_val, g_val, r_val = int(center[0]), int(center[1]), int(center[2])
+            hex_color = f"#{r_val:02x}{g_val:02x}{b_val:02x}"
+            dominant_colors.append({
+                'color': hex_color,
+                'percentage': round(count / total_labels, 2)
+            })
+        dominant_colors.sort(key=lambda x: x['percentage'], reverse=True)
+    except Exception:
+        dominant_colors = []
+
+    # --- Derive Color Mood ---
+    # Combine color properties into an overall mood label
+    if brightness_key == 'low_key' and saturation_level in ('desaturated', 'muted'):
+        color_mood = 'dark_moody'
+    elif brightness_key == 'low_key' and color_temperature == 'cool':
+        color_mood = 'cold_dramatic'
+    elif brightness_key == 'high_key' and saturation_level == 'vivid':
+        color_mood = 'bright_energetic'
+    elif brightness_key == 'high_key' and color_temperature == 'warm':
+        color_mood = 'warm_cheerful'
+    elif color_temperature == 'warm' and saturation_level in ('normal', 'vivid'):
+        color_mood = 'warm_intimate'
+    elif color_temperature == 'cool' and saturation_level in ('normal', 'muted'):
+        color_mood = 'cool_professional'
+    elif saturation_level == 'desaturated':
+        color_mood = 'muted_vintage'
+    else:
+        color_mood = 'neutral'
+
+    return {
+        'color_temperature': color_temperature,
+        'warmth_score': round(warmth_score, 3),
+        'brightness_key': brightness_key,
+        'mean_brightness': round(mean_brightness, 1),
+        'saturation_level': saturation_level,
+        'mean_saturation': round(mean_saturation, 1),
+        'contrast': round(contrast, 1),
+        'dominant_colors': dominant_colors,
+        'color_mood': color_mood,
+    }
+
+
+def _color_mood_to_emotion_scores(color_mood_data: Dict) -> Dict[str, float]:
+    """
+    Convert color/lighting analysis into emotion modifier scores.
+
+    Used as a third modality alongside visual keywords and audio
+    in the emotion detection fusion.
+
+    Args:
+        color_mood_data: Output from analyze_frame_color_mood()
+
+    Returns:
+        Dict mapping emotion name to score (0.0-1.0)
+    """
+    scores = {
+        'exciting': 0.0,
+        'calm': 0.0,
+        'happy': 0.0,
+        'dramatic': 0.0,
+        'sad': 0.0,
+        'mysterious': 0.0,
+        'romantic': 0.0,
+    }
+
+    color_mood = color_mood_data.get('color_mood', 'neutral')
+    brightness = color_mood_data.get('brightness_key', 'mid_key')
+    temp = color_mood_data.get('color_temperature', 'neutral')
+    sat = color_mood_data.get('saturation_level', 'normal')
+    contrast = color_mood_data.get('contrast', 50)
+
+    # Direct mood mappings
+    mood_map = {
+        'dark_moody': {'dramatic': 0.7, 'sad': 0.4, 'mysterious': 0.6},
+        'cold_dramatic': {'dramatic': 0.8, 'mysterious': 0.5, 'sad': 0.3},
+        'bright_energetic': {'exciting': 0.7, 'happy': 0.8},
+        'warm_cheerful': {'happy': 0.8, 'romantic': 0.3, 'calm': 0.2},
+        'warm_intimate': {'romantic': 0.7, 'calm': 0.5, 'happy': 0.3},
+        'cool_professional': {'calm': 0.4},
+        'muted_vintage': {'sad': 0.4, 'calm': 0.3, 'mysterious': 0.2},
+        'neutral': {},
+    }
+
+    for emotion, score in mood_map.get(color_mood, {}).items():
+        scores[emotion] = max(scores[emotion], score)
+
+    # High contrast boosts dramatic/exciting
+    if contrast > 70:
+        scores['dramatic'] = max(scores['dramatic'], 0.4)
+        scores['exciting'] = max(scores['exciting'], 0.3)
+
+    # Very low brightness boosts mysterious/dramatic
+    if brightness == 'low_key':
+        scores['mysterious'] = max(scores['mysterious'], 0.5)
+        scores['dramatic'] = max(scores['dramatic'], 0.3)
+
+    # Vivid saturation boosts energy
+    if sat == 'vivid':
+        scores['exciting'] = max(scores['exciting'], 0.3)
+        scores['happy'] = max(scores['happy'], 0.3)
+
+    return scores
+
+
+# =============================================================================
+# COLOR GRADING / LUT SUGGESTIONS
+# =============================================================================
+
+def suggest_color_grade(scenes: List[Dict]) -> Dict[str, Any]:
+    """
+    Generate per-scene color grading suggestions and overall LUT recommendations.
+
+    Professional editors use color grading for 50%+ of perceived quality.
+    This analyzes color properties across scenes and suggests corrections
+    for consistency and cinematic look.
+
+    Args:
+        scenes: Analyzed scenes with color_mood, color_temperature,
+                brightness_key, saturation_level, dominant_colors
+
+    Returns:
+        Dict with overall_lut, per_scene_grades, consistency_score,
+        and skin_tone_note
+    """
+    if not scenes:
+        return {
+            'overall_lut': 'none',
+            'lut_reason': 'no scenes',
+            'per_scene_grades': [],
+            'consistency_score': 0.0,
+            'global_adjustments': {},
+        }
+
+    # Collect color properties across all scenes
+    temps = [s.get('color_temperature', 'neutral') for s in scenes]
+    brightness_keys = [s.get('brightness_key', 'mid_key') for s in scenes]
+    sat_levels = [s.get('saturation_level', 'normal') for s in scenes]
+    moods = [s.get('color_mood', 'neutral') for s in scenes]
+
+    # --- Consistency Score ---
+    # How uniform is the color palette across scenes?
+    from collections import Counter
+    temp_counts = Counter(temps)
+    brightness_counts = Counter(brightness_keys)
+    sat_counts = Counter(sat_levels)
+    dominant_temp = temp_counts.most_common(1)[0]
+    dominant_brightness = brightness_counts.most_common(1)[0]
+    dominant_sat = sat_counts.most_common(1)[0]
+
+    consistency_score = (
+        (dominant_temp[1] / len(scenes)) * 0.4 +
+        (dominant_brightness[1] / len(scenes)) * 0.3 +
+        (dominant_sat[1] / len(scenes)) * 0.3
+    )
+
+    # --- Overall LUT Recommendation ---
+    mood_counts = Counter(moods)
+    dominant_mood = mood_counts.most_common(1)[0][0]
+
+    lut_recommendations = {
+        'dark_moody': ('cinematic_teal_orange', 'Dark moody scenes benefit from teal-orange color separation'),
+        'cold_dramatic': ('cold_blue_steel', 'Cool dramatic look enhanced with blue steel grading'),
+        'bright_energetic': ('vibrant_pop', 'Bright scenes pop with lifted shadows and vivid saturation'),
+        'warm_cheerful': ('warm_golden', 'Warm golden tones enhance cheerful mood'),
+        'warm_intimate': ('warm_film', 'Film-like warm tones with soft contrast for intimacy'),
+        'cool_professional': ('clean_corporate', 'Clean neutral tones with slight cool shift'),
+        'muted_vintage': ('film_emulation', 'Film emulation LUT with lifted blacks and faded highlights'),
+        'neutral': ('subtle_contrast', 'Subtle contrast boost with natural color balance'),
+    }
+
+    overall_lut, lut_reason = lut_recommendations.get(
+        dominant_mood, ('subtle_contrast', 'General enhancement')
+    )
+
+    # --- Global Adjustments ---
+    global_adj = {}
+
+    # Temperature correction toward consistency
+    if dominant_temp[0] == 'warm' and dominant_temp[1] < len(scenes) * 0.7:
+        global_adj['temperature'] = {'direction': 'warm', 'strength': 15,
+                                     'reason': 'Unify color temperature toward dominant warm tone'}
+    elif dominant_temp[0] == 'cool' and dominant_temp[1] < len(scenes) * 0.7:
+        global_adj['temperature'] = {'direction': 'cool', 'strength': 10,
+                                     'reason': 'Unify color temperature toward dominant cool tone'}
+
+    # Brightness normalization
+    low_key_ratio = brightness_counts.get('low_key', 0) / len(scenes)
+    high_key_ratio = brightness_counts.get('high_key', 0) / len(scenes)
+    if low_key_ratio > 0.5:
+        global_adj['lift'] = {'value': 5, 'reason': 'Lift shadows slightly for visibility in dark scenes'}
+    if high_key_ratio > 0.5:
+        global_adj['gain'] = {'value': -5, 'reason': 'Pull down highlights to prevent blown-out look'}
+
+    # Saturation adjustment
+    desat_ratio = (sat_counts.get('desaturated', 0) + sat_counts.get('muted', 0)) / len(scenes)
+    if desat_ratio > 0.5 and dominant_mood not in ('muted_vintage', 'dark_moody'):
+        global_adj['saturation'] = {'value': 15, 'reason': 'Boost saturation for more visual energy'}
+
+    # --- Per-Scene Grades ---
+    per_scene_grades = []
+    for i, scene in enumerate(scenes):
+        grade = {'timestamp': scene.get('timestamp', 0)}
+        adjustments = []
+
+        scene_temp = scene.get('color_temperature', 'neutral')
+        scene_brightness = scene.get('brightness_key', 'mid_key')
+        scene_sat = scene.get('saturation_level', 'normal')
+
+        # Temperature mismatch with dominant
+        if scene_temp != dominant_temp[0] and dominant_temp[0] != 'neutral':
+            if scene_temp == 'warm' and dominant_temp[0] == 'cool':
+                adjustments.append({'type': 'temperature', 'shift': -20,
+                                    'reason': 'Cool down to match overall palette'})
+            elif scene_temp == 'cool' and dominant_temp[0] == 'warm':
+                adjustments.append({'type': 'temperature', 'shift': 20,
+                                    'reason': 'Warm up to match overall palette'})
+
+        # Brightness outlier correction
+        if scene_brightness == 'low_key' and dominant_brightness[0] != 'low_key':
+            adjustments.append({'type': 'exposure', 'shift': 10,
+                                'reason': 'Brighten to match overall exposure level'})
+        elif scene_brightness == 'high_key' and dominant_brightness[0] != 'high_key':
+            adjustments.append({'type': 'exposure', 'shift': -10,
+                                'reason': 'Darken to match overall exposure level'})
+
+        # Saturation outlier correction
+        if scene_sat == 'desaturated' and dominant_sat[0] in ('normal', 'vivid'):
+            adjustments.append({'type': 'saturation', 'shift': 20,
+                                'reason': 'Boost saturation to match surrounding scenes'})
+        elif scene_sat == 'vivid' and dominant_sat[0] in ('muted', 'desaturated'):
+            adjustments.append({'type': 'saturation', 'shift': -15,
+                                'reason': 'Reduce saturation for visual consistency'})
+
+        grade['adjustments'] = adjustments
+        grade['needs_correction'] = len(adjustments) > 0
+        per_scene_grades.append(grade)
+
+    scenes_needing_correction = sum(1 for g in per_scene_grades if g['needs_correction'])
+
+    return {
+        'overall_lut': overall_lut,
+        'lut_reason': lut_reason,
+        'per_scene_grades': per_scene_grades,
+        'consistency_score': round(consistency_score, 2),
+        'scenes_needing_correction': scenes_needing_correction,
+        'global_adjustments': global_adj,
+        'dominant_palette': {
+            'temperature': dominant_temp[0],
+            'brightness': dominant_brightness[0],
+            'saturation': dominant_sat[0],
+            'mood': dominant_mood,
+        },
+    }
+
+
+# =============================================================================
+# AUDIO DUCKING / MIX LEVEL RECOMMENDATIONS
+# =============================================================================
+
+def compute_audio_mix_map(
+    transcription: List[Dict],
+    audio_advanced: Dict,
+    audio_content: Dict,
+    sfx_suggestions: List[Dict],
+    video_duration: float
+) -> Dict[str, Any]:
+    """
+    Generate per-timestamp volume curves for dialogue, BGM, and SFX layers.
+
+    Professional mixing requires:
+    - BGM ducks under dialogue (typically -12dB to -18dB)
+    - SFX ducks under speech but punches through BGM
+    - Silence moments should have subtle ambient presence
+    - Transitions may need audio cross-fades
+
+    Args:
+        transcription: Segments with start/end times
+        audio_advanced: Librosa analysis (beats, tempo, energy)
+        audio_content: Audio content detection (type, density)
+        sfx_suggestions: SFX placement timestamps
+        video_duration: Total duration
+
+    Returns:
+        Dict with bgm_volume_curve, sfx_volume_curve, dialogue_regions,
+        ducking_points, and mix_notes
+    """
+    # Build speech timeline
+    speech_regions = []
+    for seg in transcription:
+        if seg.get('text', '').strip():
+            speech_regions.append({
+                'start': seg['start'],
+                'end': seg['end'],
+                'energy': seg.get('energy_level', 'normal'),
+            })
+
+    # Merge overlapping speech regions
+    merged_speech = []
+    for region in sorted(speech_regions, key=lambda r: r['start']):
+        if merged_speech and region['start'] <= merged_speech[-1]['end'] + 0.3:
+            merged_speech[-1]['end'] = max(merged_speech[-1]['end'], region['end'])
+        else:
+            merged_speech.append(dict(region))
+
+    # Build SFX timeline
+    sfx_regions = []
+    for sfx in sfx_suggestions:
+        t = sfx.get('timestamp', 0)
+        dur = sfx.get('duration', 2.0)
+        sfx_regions.append({'start': t, 'end': t + dur})
+
+    # Generate BGM volume curve
+    # Sample at 0.5s intervals
+    sample_interval = 0.5
+    bgm_curve = []
+    sfx_curve = []
+    ducking_points = []
+
+    t = 0.0
+    while t <= video_duration:
+        # Check if timestamp is during speech
+        in_speech = any(r['start'] - 0.2 <= t <= r['end'] + 0.2 for r in merged_speech)
+        speech_energy = 'normal'
+        if in_speech:
+            for r in merged_speech:
+                if r['start'] <= t <= r['end']:
+                    speech_energy = r.get('energy', 'normal')
+                    break
+
+        # Check if timestamp is during SFX
+        in_sfx = any(r['start'] <= t <= r['end'] for r in sfx_regions)
+
+        # Check if in high-energy segment
+        high_energy_segs = audio_advanced.get('high_energy_segments', [])
+        in_high_energy = any(s['start'] <= t <= s['end'] for s in high_energy_segs)
+
+        # --- BGM Volume ---
+        bgm_vol = 0.0  # dB relative to base level
+        if in_speech:
+            # Duck BGM under dialogue
+            if speech_energy == 'quiet':
+                bgm_vol = -18.0  # Whisper → duck more
+            elif speech_energy == 'loud':
+                bgm_vol = -10.0  # Loud speech can compete more
+            else:
+                bgm_vol = -14.0  # Normal speech
+            ducking_points.append({
+                'timestamp': round(t, 1),
+                'type': 'speech_duck',
+                'bgm_db': bgm_vol,
+            })
+        elif in_sfx:
+            bgm_vol = -8.0  # Slight duck for SFX
+        elif in_high_energy:
+            bgm_vol = 0.0  # Let BGM breathe in instrumental sections
+        else:
+            bgm_vol = -3.0  # Default presence level
+
+        bgm_curve.append({'timestamp': round(t, 1), 'volume_db': round(bgm_vol, 1)})
+
+        # --- SFX Volume ---
+        sfx_vol = 0.0
+        if in_sfx:
+            if in_speech:
+                sfx_vol = -6.0  # Softer SFX during speech
+            elif in_high_energy:
+                sfx_vol = -3.0  # Moderate during high energy
+            else:
+                sfx_vol = 0.0  # Full volume in quiet sections
+        sfx_curve.append({'timestamp': round(t, 1), 'volume_db': round(sfx_vol, 1)})
+
+        t += sample_interval
+
+    # Generate mix notes
+    mix_notes = []
+    audio_type = audio_content.get('video_audio_type', 'unknown')
+    density = audio_content.get('audio_density', 0.5)
+
+    if audio_type == 'podcast_interview':
+        mix_notes.append({
+            'priority': 'high',
+            'note': 'Dialogue-heavy content: BGM should stay below -14dB throughout. '
+                    'Use minimal SFX to avoid distraction.'
+        })
+    elif audio_type == 'music_video':
+        mix_notes.append({
+            'priority': 'high',
+            'note': 'Music-driven content: BGM is the primary audio layer. '
+                    'SFX should be rhythmic accents only, not ambient.'
+        })
+    elif density > 0.7:
+        mix_notes.append({
+            'priority': 'medium',
+            'note': 'Dense audio mix: Use sidechain compression on BGM '
+                    'triggered by dialogue for cleaner separation.'
+        })
+
+    if len(merged_speech) == 0:
+        mix_notes.append({
+            'priority': 'low',
+            'note': 'No dialogue detected: BGM can run at full volume. '
+                    'SFX should be mixed at -3dB to -6dB below BGM.'
+        })
+
+    # Calculate speech coverage percentage
+    total_speech_time = sum(r['end'] - r['start'] for r in merged_speech)
+    speech_coverage = total_speech_time / max(video_duration, 0.1)
+
+    return {
+        'bgm_volume_curve': bgm_curve,
+        'sfx_volume_curve': sfx_curve,
+        'dialogue_regions': merged_speech,
+        'ducking_points': [d for d in ducking_points
+                          if d == ducking_points[0] or
+                          abs(d['timestamp'] - ducking_points[ducking_points.index(d) - 1]['timestamp']) > 1.0]
+                          if ducking_points else [],
+        'speech_coverage': round(speech_coverage, 2),
+        'mix_notes': mix_notes,
+    }
+
+
+# =============================================================================
+# GENRE-SPECIFIC EDITING RULE ENGINE
+# =============================================================================
+
+def get_genre_editing_rules(video_type: str, tempo: float = 120) -> Dict[str, Any]:
+    """
+    Return comprehensive editing rules adapted to the detected video genre.
+
+    Professional editors apply fundamentally different rules for different content:
+    - Music videos: beat-locked cuts, visual rhythm priority
+    - Podcasts: minimal cuts, dialogue continuity, clean audio
+    - Tutorials: slower pacing, text callouts, step-based structure
+    - Action: fast cuts, impact sync, motion matching
+    - Documentary: slow builds, visual storytelling, ambient audio
+
+    Args:
+        video_type: From quick_classify_audio() (music_video, podcast_interview, etc.)
+        tempo: Detected BPM from librosa
+
+    Returns:
+        Dict with transition rules, sfx rules, pacing rules, caption rules
+    """
+    beat_interval = 60.0 / max(tempo, 60)
+
+    rules = {
+        'music_video': {
+            'transition_rules': {
+                'preferred': ['glitch', 'flash', 'zoom_in', 'zoom_out'],
+                'avoid': ['dissolve', 'fade'],  # Too slow for music
+                'max_duration': 0.25,
+                'beat_lock': True,  # All cuts should land on beats
+                'min_shot_duration': beat_interval,  # At least 1 beat per shot
+                'allow_jump_cuts': True,
+            },
+            'sfx_rules': {
+                'max_density': 3,  # Max SFX per 10 seconds
+                'preferred_types': ['rhythmic_accent', 'impact', 'riser'],
+                'avoid_types': ['ambient', 'dialogue_filler'],
+                'sync_to_beat': True,
+                'volume_relative_to_bgm': -6,  # dB below music
+            },
+            'pacing_rules': {
+                'target_shot_duration': beat_interval * 2,  # 2 beats per shot default
+                'min_shot_duration': beat_interval * 0.5,
+                'max_shot_duration': beat_interval * 8,
+                'allow_speed_ramps': True,
+                'rhythm_priority': 'high',
+            },
+            'caption_rules': {
+                'style': 'lyric',
+                'word_by_word': True,
+                'sync_to_beat': True,
+                'position': 'center',
+                'animation': 'bounce',
+            },
+        },
+        'podcast_interview': {
+            'transition_rules': {
+                'preferred': ['cut', 'dissolve'],
+                'avoid': ['glitch', 'flash', 'zoom_in', 'wipe'],
+                'max_duration': 0.5,
+                'beat_lock': False,
+                'min_shot_duration': 5.0,  # Hold shots during dialogue
+                'allow_jump_cuts': False,
+            },
+            'sfx_rules': {
+                'max_density': 1,  # Minimal SFX
+                'preferred_types': ['subtle_transition', 'room_tone'],
+                'avoid_types': ['impact', 'loud_accent', 'riser'],
+                'sync_to_beat': False,
+                'volume_relative_to_bgm': -3,
+            },
+            'pacing_rules': {
+                'target_shot_duration': 8.0,
+                'min_shot_duration': 3.0,
+                'max_shot_duration': 30.0,
+                'allow_speed_ramps': False,
+                'rhythm_priority': 'low',
+            },
+            'caption_rules': {
+                'style': 'subtitle',
+                'word_by_word': False,
+                'sync_to_beat': False,
+                'position': 'bottom',
+                'animation': 'fade',
+            },
+        },
+        'vlog_tutorial': {
+            'transition_rules': {
+                'preferred': ['cut', 'zoom_in', 'slide'],
+                'avoid': ['glitch', 'flash'],
+                'max_duration': 0.4,
+                'beat_lock': False,
+                'min_shot_duration': 2.0,
+                'allow_jump_cuts': True,  # Common in vlogs
+            },
+            'sfx_rules': {
+                'max_density': 4,
+                'preferred_types': ['whoosh', 'pop', 'notification', 'subtle_accent'],
+                'avoid_types': ['heavy_impact', 'dramatic_riser'],
+                'sync_to_beat': False,
+                'volume_relative_to_bgm': 0,
+            },
+            'pacing_rules': {
+                'target_shot_duration': 4.0,
+                'min_shot_duration': 1.0,
+                'max_shot_duration': 15.0,
+                'allow_speed_ramps': True,
+                'rhythm_priority': 'medium',
+            },
+            'caption_rules': {
+                'style': 'dynamic',
+                'word_by_word': True,
+                'sync_to_beat': False,
+                'position': 'dynamic',  # Move based on content
+                'animation': 'pop',
+            },
+        },
+        'action_dynamic': {
+            'transition_rules': {
+                'preferred': ['glitch', 'flash', 'zoom_in', 'whip_pan'],
+                'avoid': ['dissolve', 'fade'],
+                'max_duration': 0.2,
+                'beat_lock': True,
+                'min_shot_duration': 0.5,
+                'allow_jump_cuts': True,
+            },
+            'sfx_rules': {
+                'max_density': 6,  # Dense SFX OK
+                'preferred_types': ['impact', 'whoosh', 'riser', 'hit'],
+                'avoid_types': ['ambient', 'subtle'],
+                'sync_to_beat': True,
+                'volume_relative_to_bgm': 3,  # SFX louder than BGM
+            },
+            'pacing_rules': {
+                'target_shot_duration': 1.5,
+                'min_shot_duration': 0.3,
+                'max_shot_duration': 5.0,
+                'allow_speed_ramps': True,
+                'rhythm_priority': 'high',
+            },
+            'caption_rules': {
+                'style': 'impact',
+                'word_by_word': True,
+                'sync_to_beat': True,
+                'position': 'dynamic',
+                'animation': 'slam',
+            },
+        },
+        'documentary_nature': {
+            'transition_rules': {
+                'preferred': ['dissolve', 'fade', 'cross_zoom'],
+                'avoid': ['glitch', 'flash', 'whip_pan'],
+                'max_duration': 0.8,
+                'beat_lock': False,
+                'min_shot_duration': 3.0,
+                'allow_jump_cuts': False,
+            },
+            'sfx_rules': {
+                'max_density': 2,
+                'preferred_types': ['ambient', 'nature', 'atmospheric'],
+                'avoid_types': ['impact', 'notification', 'pop'],
+                'sync_to_beat': False,
+                'volume_relative_to_bgm': -3,
+            },
+            'pacing_rules': {
+                'target_shot_duration': 6.0,
+                'min_shot_duration': 2.0,
+                'max_shot_duration': 20.0,
+                'allow_speed_ramps': False,
+                'rhythm_priority': 'low',
+            },
+            'caption_rules': {
+                'style': 'clean',
+                'word_by_word': False,
+                'sync_to_beat': False,
+                'position': 'bottom',
+                'animation': 'fade',
+            },
+        },
+        'silent_minimal': {
+            'transition_rules': {
+                'preferred': ['dissolve', 'fade', 'zoom_in'],
+                'avoid': [],
+                'max_duration': 0.6,
+                'beat_lock': False,
+                'min_shot_duration': 2.0,
+                'allow_jump_cuts': True,
+            },
+            'sfx_rules': {
+                'max_density': 5,  # More freedom without dialogue
+                'preferred_types': ['ambient', 'foley', 'accent', 'atmosphere'],
+                'avoid_types': [],
+                'sync_to_beat': False,
+                'volume_relative_to_bgm': 0,
+            },
+            'pacing_rules': {
+                'target_shot_duration': 3.0,
+                'min_shot_duration': 1.0,
+                'max_shot_duration': 10.0,
+                'allow_speed_ramps': True,
+                'rhythm_priority': 'medium',
+            },
+            'caption_rules': {
+                'style': 'minimal',
+                'word_by_word': False,
+                'sync_to_beat': False,
+                'position': 'bottom',
+                'animation': 'fade',
+            },
+        },
+    }
+
+    result = rules.get(video_type, rules['vlog_tutorial'])
+    result['genre'] = video_type
+    return result
+
+
+# =============================================================================
+# SHOT SCALE PROGRESSION & CONTINUITY RULES
+# =============================================================================
+
+def score_transition_continuity(
+    scene_before: Optional[Dict],
+    scene_after: Optional[Dict],
+    transition_type: str,
+    genre_rules: Optional[Dict] = None
+) -> Dict[str, Any]:
+    """
+    Score a transition based on professional continuity editing rules.
+
+    Professional editors follow shot scale progression, motion continuity,
+    and color continuity. This function grades transitions and suggests
+    improvements.
+
+    Rules evaluated:
+    1. Shot scale progression (wide→medium→close = good, same→same = bad)
+    2. Motion direction continuity (subject moving left should continue left)
+    3. Color temperature continuity (warm→cool jump = jarring without reason)
+    4. Brightness continuity (dramatic jump = jarring unless intentional)
+    5. Genre appropriateness (transition type vs genre preferences)
+
+    Args:
+        scene_before: Scene dict before the cut
+        scene_after: Scene dict after the cut
+        transition_type: Currently suggested transition
+        genre_rules: Optional genre editing rules
+
+    Returns:
+        Dict with continuity_score, issues, suggested_override, reason
+    """
+    score = 1.0
+    issues = []
+    suggested_override = None
+    override_reason = None
+
+    if not scene_before or not scene_after:
+        return {
+            'continuity_score': 0.5,
+            'issues': [],
+            'suggested_override': None,
+            'override_reason': None,
+        }
+
+    # --- 1. Shot Scale Progression ---
+    scale_order = {
+        'extreme_close_up': 0, 'close_up': 1, 'medium_shot': 2,
+        'talking_head': 2, 'group_shot': 3, 'wide_shot': 4,
+        'b_roll': 3, 'text_graphic': 3,
+    }
+    shot_a = scene_before.get('shot_type', 'b_roll')
+    shot_b = scene_after.get('shot_type', 'b_roll')
+    scale_a = scale_order.get(shot_a, 3)
+    scale_b = scale_order.get(shot_b, 3)
+    scale_delta = abs(scale_a - scale_b)
+
+    if scale_delta == 0 and shot_a == shot_b and shot_a not in ('b_roll', 'text_graphic'):
+        # Same shot scale → potential jump cut
+        score -= 0.25
+        issues.append({
+            'type': 'same_scale',
+            'severity': 'medium',
+            'message': f'Same shot scale ({shot_a}→{shot_b}): '
+                       f'consider varying shot size for visual interest'
+        })
+        # Jump cuts can be masked with a dissolve or zoom
+        if transition_type in ('cut',):
+            suggested_override = 'zoom_in'
+            override_reason = 'Mask same-scale cut with zoom transition'
+
+    elif scale_delta >= 3:
+        # Extreme jump in scale (e.g., extreme_close_up → wide_shot)
+        score -= 0.15
+        issues.append({
+            'type': 'extreme_scale_jump',
+            'severity': 'low',
+            'message': f'Large scale jump ({shot_a}→{shot_b}): '
+                       f'consider an intermediate shot or dissolve'
+        })
+        if transition_type == 'cut':
+            suggested_override = 'dissolve'
+            override_reason = 'Soften extreme scale change with dissolve'
+
+    elif 1 <= scale_delta <= 2:
+        # Good progression — reward
+        score += 0.1
+
+    # --- 2. Motion Direction Continuity ---
+    dir_a = scene_before.get('dominant_direction', 'static')
+    dir_b = scene_after.get('dominant_direction', 'static')
+
+    opposite_pairs = {('left', 'right'), ('right', 'left'), ('up', 'down'), ('down', 'up')}
+    if (dir_a, dir_b) in opposite_pairs and dir_a != 'static':
+        score -= 0.2
+        issues.append({
+            'type': 'motion_reversal',
+            'severity': 'medium',
+            'message': f'Motion direction reversal ({dir_a}→{dir_b}): '
+                       f'may disorient viewer'
+        })
+
+    # --- 3. Color Temperature Continuity ---
+    temp_a = scene_before.get('color_temperature', 'neutral')
+    temp_b = scene_after.get('color_temperature', 'neutral')
+
+    if temp_a != temp_b and temp_a != 'neutral' and temp_b != 'neutral':
+        score -= 0.15
+        issues.append({
+            'type': 'color_temp_jump',
+            'severity': 'low',
+            'message': f'Color temperature shift ({temp_a}→{temp_b}): '
+                       f'consider color grading for smoother transition'
+        })
+        # Dissolve helps mask color jumps
+        if transition_type == 'cut' and not (genre_rules or {}).get(
+            'transition_rules', {}
+        ).get('allow_jump_cuts', True):
+            suggested_override = 'dissolve'
+            override_reason = 'Mask color temperature jump with dissolve'
+
+    # --- 4. Brightness Continuity ---
+    bright_a = scene_before.get('brightness_key', 'mid_key')
+    bright_b = scene_after.get('brightness_key', 'mid_key')
+
+    brightness_jump = (
+        (bright_a == 'low_key' and bright_b == 'high_key') or
+        (bright_a == 'high_key' and bright_b == 'low_key')
+    )
+    if brightness_jump:
+        score -= 0.15
+        issues.append({
+            'type': 'brightness_jump',
+            'severity': 'medium',
+            'message': f'Brightness jump ({bright_a}→{bright_b}): '
+                       f'may be jarring; consider fade or flash transition'
+        })
+        if transition_type == 'cut':
+            if bright_a == 'low_key':
+                suggested_override = 'flash'
+                override_reason = 'Flash transition bridges dark→bright jump'
+            else:
+                suggested_override = 'fade'
+                override_reason = 'Fade bridges bright→dark shift'
+
+    # --- 5. Genre Appropriateness ---
+    if genre_rules:
+        tr_rules = genre_rules.get('transition_rules', {})
+        preferred = tr_rules.get('preferred', [])
+        avoid = tr_rules.get('avoid', [])
+
+        if transition_type in avoid:
+            score -= 0.2
+            issues.append({
+                'type': 'genre_mismatch',
+                'severity': 'medium',
+                'message': f'Transition "{transition_type}" is not recommended '
+                           f'for {genre_rules.get("genre", "this")} genre'
+            })
+            if preferred:
+                suggested_override = preferred[0]
+                override_reason = f'Better match for {genre_rules.get("genre")} genre'
+
+        elif transition_type in preferred:
+            score += 0.1
+
+    score = max(0.0, min(1.0, score))
+
+    return {
+        'continuity_score': round(score, 2),
+        'issues': issues,
+        'suggested_override': suggested_override,
+        'override_reason': override_reason,
+    }
+
+
+# =============================================================================
+# SCENE-PAIR VISUAL COMPARISON (for transition intelligence)
+# =============================================================================
+
+def compare_scene_pair_visuals(
+    frame_a,
+    frame_b,
+    shot_type_a: Optional[Dict] = None,
+    shot_type_b: Optional[Dict] = None,
+    color_a: Optional[Dict] = None,
+    color_b: Optional[Dict] = None
+) -> Dict[str, Any]:
+    """
+    Compare visual properties between two frames at a cut point.
+
+    Professional editors select transitions based on the RELATIONSHIP between
+    two shots, not the emotion of one shot alone. This function provides the
+    visual delta that drives intelligent transition selection.
+
+    Args:
+        frame_a: Last frame before the cut (BGR)
+        frame_b: First frame after the cut (BGR)
+        shot_type_a: Pre-computed shot type for frame A (optional, computed if None)
+        shot_type_b: Pre-computed shot type for frame B (optional, computed if None)
+        color_a: Pre-computed color mood for frame A (optional, computed if None)
+        color_b: Pre-computed color mood for frame B (optional, computed if None)
+
+    Returns:
+        Dict with visual deltas and transition recommendation
+    """
+    import cv2
+
+    # Compute shot types if not provided
+    if shot_type_a is None:
+        shot_type_a = classify_shot_type(frame_a)
+    if shot_type_b is None:
+        shot_type_b = classify_shot_type(frame_b)
+
+    # Compute color moods if not provided
+    if color_a is None:
+        color_a = analyze_frame_color_mood(frame_a)
+    if color_b is None:
+        color_b = analyze_frame_color_mood(frame_b)
+
+    # --- Color temperature delta ---
+    warmth_delta = abs(color_a.get('warmth_score', 0) - color_b.get('warmth_score', 0))
+
+    # --- Brightness delta ---
+    brightness_delta = abs(color_a.get('mean_brightness', 128) - color_b.get('mean_brightness', 128))
+
+    # --- Saturation delta ---
+    sat_delta = abs(color_a.get('mean_saturation', 100) - color_b.get('mean_saturation', 100))
+
+    # --- Shot type change ---
+    type_a = shot_type_a.get('shot_type', 'b_roll')
+    type_b = shot_type_b.get('shot_type', 'b_roll')
+    shot_type_changed = type_a != type_b
+
+    # Scale classification for zoom transitions
+    scale_order = {
+        'extreme_close_up': 0, 'close_up': 1, 'talking_head': 1.5,
+        'medium_shot': 2, 'group_shot': 2.5, 'wide_shot': 3,
+        'b_roll': 2, 'text_graphic': 2
+    }
+    scale_a = scale_order.get(type_a, 2)
+    scale_b = scale_order.get(type_b, 2)
+    scale_delta = scale_b - scale_a  # positive = zooming out, negative = zooming in
+
+    # --- Dominant motion via simple optical flow on small frames ---
+    gray_a = cv2.cvtColor(cv2.resize(frame_a, (160, 90)), cv2.COLOR_BGR2GRAY)
+    gray_b = cv2.cvtColor(cv2.resize(frame_b, (160, 90)), cv2.COLOR_BGR2GRAY)
+
+    flow = cv2.calcOpticalFlowFarneback(
+        gray_a, gray_b, None,
+        pyr_scale=0.5, levels=3, winsize=15,
+        iterations=3, poly_n=5, poly_sigma=1.2, flags=0
+    )
+    flow_mag = np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)
+    mean_flow = float(np.mean(flow_mag))
+
+    # Dominant direction
+    mean_dx = float(np.mean(flow[..., 0]))
+    mean_dy = float(np.mean(flow[..., 1]))
+
+    if abs(mean_dx) > abs(mean_dy) and abs(mean_dx) > 0.5:
+        motion_direction = 'right' if mean_dx > 0 else 'left'
+    elif abs(mean_dy) > 0.5:
+        motion_direction = 'down' if mean_dy > 0 else 'up'
+    else:
+        motion_direction = 'none'
+
+    # --- Transition recommendation based on visual relationship ---
+    recommended_transition = 'cut'  # default
+    transition_reason = 'standard cut'
+    transition_duration = 0.3
+
+    # Large color mismatch → dissolve to soften
+    color_mismatch = warmth_delta > 0.15 or brightness_delta > 60 or sat_delta > 50
+    if color_mismatch:
+        recommended_transition = 'dissolve'
+        transition_reason = 'color/brightness mismatch between shots'
+        transition_duration = 0.6
+
+    # Scale change → zoom transition
+    if abs(scale_delta) >= 1.5:
+        if scale_delta < 0:
+            recommended_transition = 'zoom_in'
+            transition_reason = f'scale change: {type_a} → {type_b} (tighter framing)'
+        else:
+            recommended_transition = 'zoom_out' if not color_mismatch else 'dissolve'
+            transition_reason = f'scale change: {type_a} → {type_b} (wider framing)'
+        transition_duration = 0.5
+
+    # Same shot type (talking_head→talking_head) → jump cut with flash
+    if type_a == type_b and type_a in ('talking_head', 'close_up'):
+        if mean_flow < 2.0:  # not much motion = jump cut
+            recommended_transition = 'flash'
+            transition_reason = f'same framing ({type_a} → {type_b}), jump cut style'
+            transition_duration = 0.15
+
+    # Motion carry-through → wipe in motion direction
+    if mean_flow > 3.0 and motion_direction != 'none':
+        wipe_map = {'left': 'wipe_left', 'right': 'wipe_right',
+                    'up': 'wipe_up', 'down': 'wipe_down'}
+        recommended_transition = wipe_map.get(motion_direction, 'wipe_left')
+        transition_reason = f'motion carry-through ({motion_direction})'
+        transition_duration = 0.3
+
+    # B-roll transitions should be subtle
+    if type_a == 'b_roll' or type_b == 'b_roll':
+        if recommended_transition == 'cut':
+            recommended_transition = 'fade'
+            transition_reason = 'b-roll transition'
+            transition_duration = 0.4
+
+    # Text/graphic slides need hold time
+    if type_a == 'text_graphic' or type_b == 'text_graphic':
+        recommended_transition = 'fade'
+        transition_reason = 'text/graphic slide transition'
+        transition_duration = 0.5
+
+    return {
+        'color_warmth_delta': round(warmth_delta, 3),
+        'brightness_delta': round(brightness_delta, 1),
+        'saturation_delta': round(sat_delta, 1),
+        'color_mismatch': color_mismatch,
+        'shot_type_a': type_a,
+        'shot_type_b': type_b,
+        'shot_type_changed': shot_type_changed,
+        'scale_delta': round(scale_delta, 1),
+        'mean_flow': round(mean_flow, 2),
+        'motion_direction': motion_direction,
+        'recommended_transition': recommended_transition,
+        'transition_reason': transition_reason,
+        'transition_duration': round(transition_duration, 2),
+    }
+
+
+# =============================================================================
+# OPTICAL FLOW / MOTION UNDERSTANDING
+# =============================================================================
+
+def analyze_motion_between_frames(prev_frame, curr_frame) -> Dict[str, Any]:
+    """
+    Compute optical flow between two frames to understand motion.
+
+    Goes beyond simple frame differencing — extracts motion direction,
+    magnitude, and whether it's camera motion vs subject motion.
+
+    Args:
+        prev_frame: Previous frame (BGR from OpenCV)
+        curr_frame: Current frame (BGR from OpenCV)
+
+    Returns:
+        Dict with motion_magnitude, dominant_direction, motion_type, flow stats
+    """
+    import cv2
+
+    # Resize for speed
+    small_prev = cv2.resize(cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY), (160, 90))
+    small_curr = cv2.resize(cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY), (160, 90))
+
+    flow = cv2.calcOpticalFlowFarneback(
+        small_prev, small_curr, None,
+        pyr_scale=0.5, levels=3, winsize=15,
+        iterations=3, poly_n=5, poly_sigma=1.2, flags=0
+    )
+
+    mag = np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)
+    mean_mag = float(np.mean(mag))
+    max_mag = float(np.max(mag))
+
+    mean_dx = float(np.mean(flow[..., 0]))
+    mean_dy = float(np.mean(flow[..., 1]))
+
+    # Dominant direction
+    if abs(mean_dx) > abs(mean_dy) and abs(mean_dx) > 0.3:
+        dominant_direction = 'right' if mean_dx > 0 else 'left'
+    elif abs(mean_dy) > 0.3:
+        dominant_direction = 'down' if mean_dy > 0 else 'up'
+    else:
+        dominant_direction = 'static'
+
+    # Distinguish camera motion vs subject motion:
+    # Camera motion → uniform flow across the frame
+    # Subject motion → localized flow
+    flow_std = float(np.std(mag))
+    flow_uniformity = 1.0 - min(flow_std / (mean_mag + 1e-6), 1.0)
+
+    if mean_mag < 0.5:
+        motion_type = 'static'
+    elif flow_uniformity > 0.6:
+        motion_type = 'camera_motion'
+    elif max_mag > mean_mag * 4:
+        motion_type = 'subject_motion'
+    else:
+        motion_type = 'mixed_motion'
+
+    # Classify camera motion subtype
+    camera_subtype = 'none'
+    if motion_type == 'camera_motion':
+        if abs(mean_dx) > abs(mean_dy) * 2:
+            camera_subtype = 'pan_right' if mean_dx > 0 else 'pan_left'
+        elif abs(mean_dy) > abs(mean_dx) * 2:
+            camera_subtype = 'tilt_down' if mean_dy > 0 else 'tilt_up'
+        else:
+            # Check for zoom (radial flow from center)
+            h, w = flow.shape[:2]
+            cy, cx = h // 2, w // 2
+            center_mag = float(np.mean(mag[cy-5:cy+5, cx-5:cx+5]))
+            edge_mag = float(np.mean(mag[:10, :]) + np.mean(mag[-10:, :])) / 2
+            if edge_mag > center_mag * 1.5:
+                camera_subtype = 'zoom_in'
+            elif center_mag > edge_mag * 1.5:
+                camera_subtype = 'zoom_out'
+
+    return {
+        'motion_magnitude': round(mean_mag, 2),
+        'max_magnitude': round(max_mag, 2),
+        'dominant_direction': dominant_direction,
+        'motion_type': motion_type,
+        'camera_subtype': camera_subtype,
+        'flow_uniformity': round(flow_uniformity, 2),
+        'mean_dx': round(mean_dx, 2),
+        'mean_dy': round(mean_dy, 2),
+    }
+
+
+def compute_motion_context(
+    video_path: str,
+    sample_points: List[float],
+    progress_callback: Optional[Callable] = None
+) -> List[Dict]:
+    """
+    Build per-scene motion context using optical flow between consecutive samples.
+
+    Args:
+        video_path: Path to video file
+        sample_points: Timestamps to analyze (from adaptive sampling)
+        progress_callback: Optional callback
+
+    Returns:
+        List of motion dicts, one per sample point (first is empty)
+    """
+    import cv2
+
+    motion_data = [{}]  # First frame has no previous frame
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+
+    prev_frame = None
+    for i, timestamp in enumerate(sample_points):
+        frame_idx = int(timestamp * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+
+        if not ret:
+            if i > 0:
+                motion_data.append({})
+            continue
+
+        if prev_frame is not None:
+            motion = analyze_motion_between_frames(prev_frame, frame)
+            motion_data.append(motion)
+        prev_frame = frame
+
+    cap.release()
+
+    # Pad if needed
+    while len(motion_data) < len(sample_points):
+        motion_data.append({})
+
+    return motion_data
+
+
+# =============================================================================
+# NARRATIVE ARC / INTENSITY CURVE DETECTION
+# =============================================================================
+
+def detect_narrative_arc(
+    scenes: List[Dict],
+    audio_advanced: Dict,
+    scene_detection: Dict
+) -> Dict[str, Any]:
+    """
+    Detect the narrative arc and intensity curve of the video.
+
+    Combines audio energy, motion, emotion intensity, and cut frequency
+    into a single intensity score over time. Finds climax point, narrative
+    beats, and classifies the overall arc shape.
+
+    Args:
+        scenes: Analyzed scenes with emotion, motion data
+        audio_advanced: Librosa analysis (beats, energy segments)
+        scene_detection: PySceneDetect results (cuts, pacing)
+
+    Returns:
+        Dict with arc_type, climax_timestamp, intensity_curve, narrative_beats
+    """
+    if not scenes:
+        return {
+            'arc_type': 'flat',
+            'climax_timestamp': 0,
+            'intensity_curve': [],
+            'narrative_beats': [],
+        }
+
+    # Map emotion to intensity weight
+    emotion_intensity = {
+        'exciting': 0.9, 'dramatic': 0.85, 'happy': 0.6, 'funny': 0.55,
+        'mysterious': 0.5, 'romantic': 0.4, 'calm': 0.2, 'sad': 0.3, 'neutral': 0.35,
+    }
+
+    # Build cut frequency map (cuts per time window)
+    cuts = scene_detection.get('cuts', [])
+    video_duration = scenes[-1]['timestamp'] + 3.0 if scenes else 10.0
+
+    # Build intensity curve
+    intensity_points = []
+    for scene in scenes:
+        t = scene.get('timestamp', 0)
+
+        # Emotion component (0-1)
+        emo = scene.get('emotion', 'neutral')
+        emo_score = emotion_intensity.get(emo, 0.35)
+
+        # Motion component (0-1): from motion_context if available
+        motion_mag = scene.get('motion_magnitude', 0)
+        motion_score = min(motion_mag / 5.0, 1.0) if motion_mag else 0.3
+
+        # Color intensity: high contrast + vivid saturation = more intense
+        sat = scene.get('saturation_level', 'normal')
+        sat_score = {'vivid': 0.8, 'normal': 0.5, 'muted': 0.3, 'desaturated': 0.15}.get(sat, 0.5)
+
+        # Cut frequency near this timestamp
+        nearby_cuts = sum(1 for c in cuts if abs(c['timestamp'] - t) < 3.0)
+        cut_score = min(nearby_cuts / 3.0, 1.0)
+
+        # Audio energy near this timestamp
+        high_energy_segs = audio_advanced.get('high_energy_segments', [])
+        in_high_energy = any(
+            s['start'] <= t <= s['end'] for s in high_energy_segs
+        )
+        energy_score = 0.8 if in_high_energy else 0.3
+
+        # Weighted combination
+        intensity = (
+            emo_score * 0.25 +
+            motion_score * 0.2 +
+            sat_score * 0.1 +
+            cut_score * 0.2 +
+            energy_score * 0.25
+        )
+
+        intensity_points.append({
+            'timestamp': round(t, 2),
+            'intensity': round(intensity, 3),
+            'components': {
+                'emotion': round(emo_score, 2),
+                'motion': round(motion_score, 2),
+                'cuts': round(cut_score, 2),
+                'energy': round(energy_score, 2),
+            }
+        })
+
+    if not intensity_points:
+        return {
+            'arc_type': 'flat',
+            'climax_timestamp': 0,
+            'intensity_curve': [],
+            'narrative_beats': [],
+        }
+
+    # Smooth the intensity curve (rolling average of 3)
+    intensities = [p['intensity'] for p in intensity_points]
+    smoothed = []
+    for i in range(len(intensities)):
+        start = max(0, i - 1)
+        end = min(len(intensities), i + 2)
+        smoothed.append(np.mean(intensities[start:end]))
+
+    for i, val in enumerate(smoothed):
+        intensity_points[i]['intensity_smoothed'] = round(val, 3)
+
+    # Find climax (peak of smoothed curve)
+    peak_idx = int(np.argmax(smoothed))
+    climax_timestamp = intensity_points[peak_idx]['timestamp']
+    climax_position = climax_timestamp / video_duration  # 0-1 normalized position
+
+    # Find narrative beats (local maxima above mean + 0.5*std)
+    mean_intensity = np.mean(smoothed)
+    std_intensity = np.std(smoothed)
+    beat_threshold = mean_intensity + 0.3 * std_intensity
+
+    narrative_beats = []
+    for i in range(1, len(smoothed) - 1):
+        if smoothed[i] > beat_threshold and smoothed[i] >= smoothed[i-1] and smoothed[i] >= smoothed[i+1]:
+            narrative_beats.append({
+                'timestamp': intensity_points[i]['timestamp'],
+                'intensity': round(smoothed[i], 3),
+                'type': 'climax' if i == peak_idx else 'beat',
+            })
+
+    # Classify arc shape
+    n = len(smoothed)
+    if n < 3:
+        arc_type = 'flat'
+    else:
+        first_third = np.mean(smoothed[:n//3])
+        middle_third = np.mean(smoothed[n//3:2*n//3])
+        last_third = np.mean(smoothed[2*n//3:])
+
+        if std_intensity < 0.05:
+            arc_type = 'flat'
+        elif 0.3 < climax_position < 0.7 and middle_third > first_third and middle_third > last_third:
+            arc_type = 'peak_middle'  # Classic dramatic arc
+        elif climax_position > 0.65:
+            arc_type = 'ascending'  # Builds to climax at end
+        elif climax_position < 0.35:
+            arc_type = 'descending'  # Starts strong, winds down
+        elif first_third > middle_third < last_third:
+            arc_type = 'valley'  # Dip in the middle
+        elif std_intensity > 0.15:
+            arc_type = 'oscillating'  # Multiple peaks and valleys
+        else:
+            arc_type = 'gradual'  # Slow build or decline
+
+    return {
+        'arc_type': arc_type,
+        'climax_timestamp': round(climax_timestamp, 2),
+        'climax_position': round(climax_position, 2),
+        'mean_intensity': round(mean_intensity, 3),
+        'intensity_curve': intensity_points,
+        'narrative_beats': narrative_beats,
+    }
+
+
+# =============================================================================
+# FRAME-ACCURATE SFX IMPACT TIMING
+# =============================================================================
+
+def detect_visual_impacts(
+    video_path: str,
+    scene_timestamps: List[float],
+    fps: float = 30.0
+) -> List[Dict]:
+    """
+    Detect precise impact frames around scene timestamps.
+
+    Analyzes 1-second windows at full frame rate around each timestamp to
+    find the exact frame where visual impacts occur (sudden brightness
+    change, motion deceleration). Returns frame-accurate timestamps.
+
+    Args:
+        video_path: Path to video file
+        scene_timestamps: Timestamps to check for impacts
+        fps: Video frame rate
+
+    Returns:
+        List of impact dicts with frame-accurate timestamps
+    """
+    import cv2
+
+    impacts = []
+    cap = cv2.VideoCapture(video_path)
+    actual_fps = cap.get(cv2.CAP_PROP_FPS) or fps
+    frame_duration = 1.0 / actual_fps
+
+    for target_ts in scene_timestamps:
+        # Analyze 1-second window centered on target
+        start_frame = max(0, int((target_ts - 0.5) * actual_fps))
+        end_frame = int((target_ts + 0.5) * actual_fps)
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        prev_gray = None
+        prev_brightness = None
+        frame_deltas = []
+
+        for frame_idx in range(start_frame, end_frame + 1):
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            gray = cv2.cvtColor(cv2.resize(frame, (160, 90)), cv2.COLOR_BGR2GRAY)
+            brightness = float(np.mean(gray))
+
+            if prev_gray is not None:
+                # Luminance delta (flash/impact detection)
+                lum_delta = abs(brightness - prev_brightness)
+
+                # Motion magnitude delta (sudden stop = impact)
+                frame_diff = float(np.mean(np.abs(gray.astype(float) - prev_gray.astype(float))))
+
+                frame_deltas.append({
+                    'frame_idx': frame_idx,
+                    'timestamp': round(frame_idx / actual_fps, 4),
+                    'lum_delta': lum_delta,
+                    'motion_delta': frame_diff,
+                    'combined': lum_delta * 0.4 + frame_diff * 0.6,
+                })
+
+            prev_gray = gray
+            prev_brightness = brightness
+
+        if not frame_deltas:
+            continue
+
+        # Find the impact frame (maximum combined delta)
+        combined_scores = [d['combined'] for d in frame_deltas]
+        mean_combined = np.mean(combined_scores)
+        std_combined = np.std(combined_scores)
+        threshold = mean_combined + 1.5 * std_combined
+
+        # Find peaks above threshold
+        for d in frame_deltas:
+            if d['combined'] > threshold:
+                impacts.append({
+                    'timestamp': d['timestamp'],
+                    'original_target': round(target_ts, 4),
+                    'offset': round(d['timestamp'] - target_ts, 4),
+                    'strength': round(d['combined'] / (max(combined_scores) + 1e-6), 2),
+                    'type': 'flash' if d['lum_delta'] > d['motion_delta'] else 'motion_impact',
+                })
+                break  # Take first (strongest) impact per window
+
+    cap.release()
+    return impacts
+
+
+# =============================================================================
+# VISUAL RHYTHM ALIGNMENT
+# =============================================================================
+
+def analyze_visual_rhythm(
+    cuts: List[Dict],
+    beats: List[Dict],
+    tempo: float
+) -> Dict[str, Any]:
+    """
+    Analyze the relationship between visual editing rhythm and music rhythm.
+
+    Professional editors align (or deliberately misalign) cuts with beats.
+    This analysis reveals whether the video's cut pattern matches the music
+    and identifies opportunities for improvement.
+
+    Args:
+        cuts: List of detected cuts with timestamps
+        beats: List of detected beats from librosa
+        tempo: Detected BPM
+
+    Returns:
+        Dict with visual_tempo_curve, beat_alignment_score, patterns
+    """
+    if not cuts or not beats:
+        return {
+            'beat_alignment_score': 0.0,
+            'visual_tempo_bpm': 0,
+            'pattern': 'no_data',
+            'cut_on_beat_ratio': 0.0,
+            'recommended_adjustments': [],
+        }
+
+    cut_times = sorted([c['timestamp'] for c in cuts if c.get('type') not in ('start', 'end')])
+    beat_times = [b['timestamp'] for b in beats]
+
+    if len(cut_times) < 2:
+        return {
+            'beat_alignment_score': 0.0,
+            'visual_tempo_bpm': 0,
+            'pattern': 'too_few_cuts',
+            'cut_on_beat_ratio': 0.0,
+            'recommended_adjustments': [],
+        }
+
+    # Shot durations
+    shot_durations = [cut_times[i+1] - cut_times[i] for i in range(len(cut_times)-1)]
+    mean_shot_duration = float(np.mean(shot_durations))
+    std_shot_duration = float(np.std(shot_durations))
+
+    # Visual tempo (cuts per minute)
+    total_time = cut_times[-1] - cut_times[0]
+    visual_tempo_bpm = (len(cut_times) - 1) / max(total_time / 60.0, 0.01)
+
+    # Beat alignment: for each cut, find distance to nearest beat
+    alignment_distances = []
+    cuts_on_beat = 0
+    beat_snap_threshold = 0.15  # 150ms
+
+    for ct in cut_times:
+        if beat_times:
+            min_dist = min(abs(ct - bt) for bt in beat_times)
+            alignment_distances.append(min_dist)
+            if min_dist <= beat_snap_threshold:
+                cuts_on_beat += 1
+
+    cut_on_beat_ratio = cuts_on_beat / max(len(cut_times), 1)
+    mean_alignment_dist = float(np.mean(alignment_distances)) if alignment_distances else 1.0
+
+    # Beat alignment score (0-1, 1 = perfectly aligned)
+    beat_alignment_score = max(0, 1.0 - mean_alignment_dist * 5)
+
+    # Detect pacing pattern
+    if std_shot_duration < 0.3:
+        pattern = 'steady'
+    elif len(shot_durations) >= 4:
+        # Check for acceleration (shot durations getting shorter)
+        first_half = np.mean(shot_durations[:len(shot_durations)//2])
+        second_half = np.mean(shot_durations[len(shot_durations)//2:])
+        if second_half < first_half * 0.7:
+            pattern = 'accelerating'
+        elif first_half < second_half * 0.7:
+            pattern = 'decelerating'
+        elif std_shot_duration > mean_shot_duration * 0.5:
+            pattern = 'irregular'
+        else:
+            pattern = 'steady'
+    else:
+        pattern = 'too_short'
+
+    # Recommended adjustments
+    adjustments = []
+    if cut_on_beat_ratio < 0.3 and tempo > 0:
+        adjustments.append({
+            'type': 'beat_sync',
+            'message': f'Only {cut_on_beat_ratio:.0%} of cuts are on beat. '
+                       f'Consider snapping more cuts to the {tempo:.0f} BPM rhythm.',
+        })
+    if visual_tempo_bpm > tempo * 1.5:
+        adjustments.append({
+            'type': 'too_fast',
+            'message': f'Visual tempo ({visual_tempo_bpm:.0f} CPM) much faster than '
+                       f'audio tempo ({tempo:.0f} BPM). Consider longer holds.',
+        })
+    if visual_tempo_bpm < tempo * 0.3 and tempo > 60:
+        adjustments.append({
+            'type': 'too_slow',
+            'message': f'Visual tempo ({visual_tempo_bpm:.0f} CPM) much slower than '
+                       f'audio tempo ({tempo:.0f} BPM). Consider adding more cuts on beat.',
+        })
+
+    return {
+        'beat_alignment_score': round(beat_alignment_score, 2),
+        'visual_tempo_bpm': round(visual_tempo_bpm, 1),
+        'mean_shot_duration': round(mean_shot_duration, 2),
+        'pattern': pattern,
+        'cut_on_beat_ratio': round(cut_on_beat_ratio, 2),
+        'recommended_adjustments': adjustments,
+    }
+
+
+# =============================================================================
+# SPEAKER-AWARE CAPTION STYLING
+# =============================================================================
+
+def enhance_transcription_with_speech_analysis(
+    transcription: List[Dict],
+    audio_path: str
+) -> List[Dict]:
+    """
+    Enhance transcription segments with speech energy, speaker change detection,
+    and speech rate for intelligent caption styling.
+
+    Args:
+        transcription: List of transcription segments from Whisper
+        audio_path: Path to audio file
+
+    Returns:
+        Same transcription list with added fields: energy_level, speaker_id,
+        speech_rate, style_hint
+    """
+    if not transcription:
+        return transcription
+
+    try:
+        import librosa
+
+        y, sr = librosa.load(audio_path, sr=22050, mono=True)
+
+        # Compute RMS energy per segment
+        prev_mfcc_mean = None
+        speaker_id = 0
+        speaker_change_threshold = 25.0
+
+        for i, seg in enumerate(transcription):
+            start = seg.get('start', 0)
+            end = seg.get('end', start + 1)
+
+            # Extract audio slice
+            start_sample = int(start * sr)
+            end_sample = int(end * sr)
+            segment_audio = y[start_sample:end_sample]
+
+            if len(segment_audio) < sr * 0.1:
+                seg['energy_level'] = 'normal'
+                seg['speaker_id'] = speaker_id
+                seg['speech_rate'] = 0
+                seg['style_hint'] = 'normal'
+                continue
+
+            # Energy level
+            rms = float(np.sqrt(np.mean(segment_audio**2)))
+            # Calibrate against overall audio
+            overall_rms = float(np.sqrt(np.mean(y**2)))
+
+            if rms > overall_rms * 2.0:
+                energy_level = 'loud'
+            elif rms < overall_rms * 0.4:
+                energy_level = 'quiet'
+            else:
+                energy_level = 'normal'
+
+            seg['energy_level'] = energy_level
+
+            # Speech rate (words per second)
+            text = seg.get('text', '')
+            word_count = len(text.split())
+            duration = end - start
+            speech_rate = word_count / max(duration, 0.1)
+            seg['speech_rate'] = round(speech_rate, 1)
+
+            # Speaker change detection via MFCC comparison
+            mfccs = librosa.feature.mfcc(y=segment_audio, sr=sr, n_mfcc=13)
+            mfcc_mean = np.mean(mfccs, axis=1)
+
+            if prev_mfcc_mean is not None:
+                distance = float(np.linalg.norm(mfcc_mean - prev_mfcc_mean))
+                if distance > speaker_change_threshold:
+                    speaker_id += 1
+
+            prev_mfcc_mean = mfcc_mean
+            seg['speaker_id'] = speaker_id
+
+            # Style hint for caption rendering
+            if energy_level == 'loud':
+                style_hint = 'emphasis'  # Larger, bolder
+            elif energy_level == 'quiet':
+                style_hint = 'whisper'  # Smaller, italic
+            elif speech_rate > 4.0:
+                style_hint = 'fast'  # Might need word-by-word
+            elif speech_rate < 1.5:
+                style_hint = 'slow'  # Longer hold
+            else:
+                style_hint = 'normal'
+
+            seg['style_hint'] = style_hint
+
+    except Exception as e:
+        print(f"Error enhancing transcription: {e}", file=sys.stderr)
+        # Fallback: add defaults
+        for seg in transcription:
+            seg.setdefault('energy_level', 'normal')
+            seg.setdefault('speaker_id', 0)
+            seg.setdefault('speech_rate', 0)
+            seg.setdefault('style_hint', 'normal')
+
+    return transcription
+
+
+# =============================================================================
+# CREATIVE SFX LAYERING
+# =============================================================================
+
+def creative_sfx_layer(
+    scene: Dict,
+    genre_rules: Optional[Dict] = None,
+    prev_scene: Optional[Dict] = None,
+    next_scene: Optional[Dict] = None
+) -> List[Dict]:
+    """
+    Generate creative, multi-layered SFX suggestions using compositional
+    prompt building from all available scene context.
+
+    Unlike static lookup tables, this function:
+    - Composes prompts dynamically from visual description + action + motion +
+      color mood + shot type + emotion + temporal context (prev/next scene)
+    - Uses the existing infer_sounds_from_description pipeline (LLM → semantic → keyword)
+      for the Foley layer instead of reinventing keyword matching
+    - Builds ambient textures by combining color mood, brightness, and visual environment
+    - Creates accent sounds that respond to motion dynamics, emotion transitions,
+      and shot type changes (not static emotion→sound maps)
+    - Applies contrast/complement psychology: sometimes the most effective sound
+      is the *opposite* of what you see (quiet tension in a visually chaotic scene)
+
+    Professional sound design layers:
+    1. Foley layer: realistic incidental sounds derived from visual content
+    2. Ambient layer: environmental texture composed from color + light + setting
+    3. Accent layer: stylistic emphasis from motion dynamics + emotion arc
+    4. Contrast layer: (optional) psychoacoustic contrast for emotional depth
+
+    Args:
+        scene: Scene dict with all analysis data
+        genre_rules: Optional genre-specific SFX rules
+        prev_scene: Previous scene for transition context
+        next_scene: Next scene for anticipation context
+
+    Returns:
+        List of SFX layer dicts with layer_type, prompt, priority, volume_db, duration
+    """
+    layers = []
+    description = scene.get('description', '').lower()
+    action = scene.get('action_description', '').lower()
+    sound_desc = scene.get('sound_description', '').lower()
+    shot_type = scene.get('shot_type', 'b_roll')
+    emotion = scene.get('emotion', 'neutral')
+    emotion_conf = scene.get('emotion_confidence', 0.5)
+    motion_type = scene.get('motion_type', 'static')
+    motion_mag = scene.get('motion_magnitude', 0)
+    camera_sub = scene.get('camera_subtype', 'none')
+    color_mood = scene.get('color_mood', 'neutral')
+    brightness = scene.get('brightness_key', 'mid_key')
+    saturation = scene.get('saturation_level', 'normal')
+    color_temp = scene.get('color_temperature', 'neutral')
+    face_count = scene.get('face_count', 0)
+    dominant_dir = scene.get('dominant_direction', 'static')
+
+    # =====================================================================
+    # FOLEY LAYER — Use the existing smart inference pipeline
+    # =====================================================================
+    # Build a rich context string from all visual info, then let
+    # infer_sounds_from_description (LLM → semantic → keyword) handle it.
+    foley_context_parts = []
+    if description and description not in ('', 'a'):
+        foley_context_parts.append(description)
+    if action and action != description:
+        foley_context_parts.append(f'action: {action}')
+    if sound_desc and len(set(sound_desc.split())) > 2:
+        foley_context_parts.append(f'expected sounds: {sound_desc}')
+
+    foley_context = '. '.join(foley_context_parts)
+
+    if foley_context and len(foley_context) > 10:
+        foley_prompt = infer_sounds_from_description(foley_context)
+
+        # Determine priority from shot type (close-up foley matters more)
+        foley_priority = 'medium'
+        foley_vol = -10
+        if shot_type in ('close_up', 'extreme_close_up'):
+            foley_priority = 'high'
+            foley_vol = -6   # Close-up foley is prominent
+        elif shot_type in ('wide_shot', 'b_roll'):
+            foley_priority = 'low'
+            foley_vol = -14  # Wide shots have less foley detail
+        elif face_count > 0:
+            foley_priority = 'medium'
+            foley_vol = -10
+
+        # Estimate foley duration from motion
+        foley_dur = 3.0
+        if motion_mag > 2.0:
+            foley_dur = 2.0  # Fast motion = shorter, punchier foley
+        elif motion_type == 'static':
+            foley_dur = 4.0  # Static scene = sustained ambient foley
+
+        if foley_prompt:
+            layers.append({
+                'layer_type': 'foley',
+                'prompt': foley_prompt,
+                'priority': foley_priority,
+                'volume_db': foley_vol,
+                'duration': foley_dur,
+                'source': 'inferred_from_visual',
+            })
+
+    # =====================================================================
+    # AMBIENT LAYER — Composed from color + brightness + setting + emotion
+    # =====================================================================
+    # Instead of a flat mood→string map, compose the ambient texture
+    # from multiple properties to create unique, scene-specific ambience.
+    ambient_parts = []
+
+    # Tonal foundation from color mood
+    tonal_foundations = {
+        'dark_moody': 'deep low-frequency drone',
+        'cold_dramatic': 'sparse icy metallic resonance',
+        'bright_energetic': 'airy bright shimmer',
+        'warm_cheerful': 'warm golden hum',
+        'warm_intimate': 'soft analog warmth',
+        'cool_professional': 'clean digital hum',
+        'muted_vintage': 'gentle tape hiss with warm crackle',
+        'neutral': 'neutral room tone',
+    }
+    foundation = tonal_foundations.get(color_mood, 'subtle ambient presence')
+    ambient_parts.append(foundation)
+
+    # Spatial quality from brightness
+    if brightness == 'low_key':
+        ambient_parts.append('in a dark enclosed space with close reverb')
+    elif brightness == 'high_key':
+        ambient_parts.append('in an open well-lit space with airy echo')
+    else:
+        ambient_parts.append('in a moderately lit space')
+
+    # Environmental texture from the visual description
+    env_modifiers = []
+    outdoor_words = ('sky', 'tree', 'grass', 'field', 'mountain', 'beach',
+                     'ocean', 'river', 'forest', 'outdoor', 'sun', 'cloud',
+                     'road', 'street', 'building', 'city', 'park')
+    indoor_words = ('room', 'office', 'desk', 'wall', 'ceiling', 'floor',
+                    'furniture', 'table', 'chair', 'window', 'door', 'indoor',
+                    'kitchen', 'bathroom', 'bedroom', 'studio')
+    nature_words = ('water', 'bird', 'wind', 'rain', 'snow', 'leaf',
+                    'animal', 'insect', 'wave', 'thunder')
+
+    if any(w in description for w in outdoor_words):
+        if any(w in description for w in nature_words):
+            env_modifiers.append('layered with natural environmental sounds')
+        else:
+            env_modifiers.append('with urban outdoor texture')
+    elif any(w in description for w in indoor_words):
+        env_modifiers.append('with subtle interior room presence')
+
+    if env_modifiers:
+        ambient_parts.extend(env_modifiers)
+
+    # Emotional texture overlay
+    if emotion in ('dramatic', 'mysterious') and emotion_conf > 0.5:
+        ambient_parts.append('with building tension undertone')
+    elif emotion == 'sad' and emotion_conf > 0.5:
+        ambient_parts.append('with melancholic descending overtones')
+    elif emotion == 'exciting' and emotion_conf > 0.5:
+        ambient_parts.append('with pulsing energetic undercurrent')
+
+    # Saturation affects richness
+    if saturation == 'vivid':
+        ambient_parts.append('rich and full-bodied')
+    elif saturation == 'desaturated':
+        ambient_parts.append('thin and sparse')
+
+    ambient_prompt = ', '.join(ambient_parts)
+
+    # Ambient volume: quieter for dialogue-heavy, louder for visual-only
+    ambient_vol = -18
+    if face_count == 0:
+        ambient_vol = -14  # No people → ambient is more prominent
+    if motion_type == 'static':
+        ambient_vol = -16  # Static scene → ambient fills the space
+
+    layers.append({
+        'layer_type': 'ambient',
+        'prompt': ambient_prompt,
+        'priority': 'low',
+        'volume_db': ambient_vol,
+        'duration': 5.0,
+        'source': 'composed_from_scene',
+    })
+
+    # =====================================================================
+    # ACCENT LAYER — From motion dynamics + emotion transitions + shot changes
+    # =====================================================================
+    accent_prompt = None
+    accent_priority = 'medium'
+    accent_vol = -6
+    accent_dur = 1.5
+
+    # --- Motion-based accents (physics-driven, not static maps) ---
+    if motion_type == 'camera_motion' and motion_mag > 0.5:
+        # Build prompt from actual motion parameters
+        speed_word = 'fast' if motion_mag > 3.0 else 'smooth' if motion_mag > 1.0 else 'slow gentle'
+        direction = dominant_dir
+
+        if camera_sub in ('pan_left', 'pan_right'):
+            accent_prompt = (f'{speed_word} cinematic horizontal whoosh sweeping '
+                           f'{direction}, air displacement with frequency shift, '
+                           f'{"aggressive" if motion_mag > 3 else "subtle"} doppler effect')
+        elif camera_sub in ('tilt_up', 'tilt_down'):
+            vertical = 'ascending' if camera_sub == 'tilt_up' else 'descending'
+            accent_prompt = (f'{speed_word} {vertical} sweep with pitch '
+                           f'{"rising" if vertical == "ascending" else "falling"}, '
+                           f'vertical air movement, cinematic tilt')
+        elif camera_sub == 'zoom_in':
+            accent_prompt = (f'{speed_word} focus-pull riser building from wide to intimate, '
+                           f'narrowing spatial compression, increasing proximity intensity')
+            accent_priority = 'high'
+        elif camera_sub == 'zoom_out':
+            accent_prompt = (f'{speed_word} expansive reveal, opening space outward, '
+                           f'widening reverb tail, spatial decompression whoosh')
+            accent_priority = 'high'
+        else:
+            accent_prompt = (f'{speed_word} camera movement whoosh, '
+                           f'cinematic air displacement, {direction} sweep')
+
+        # Scale duration to motion magnitude
+        accent_dur = max(0.5, min(3.0, motion_mag * 0.5))
+
+    elif motion_type == 'subject_motion' and motion_mag > 1.0:
+        speed_word = 'rapid' if motion_mag > 4.0 else 'quick' if motion_mag > 2.0 else 'moderate'
+        accent_prompt = (f'{speed_word} movement whoosh at {direction} trajectory, '
+                        f'object displacement with air turbulence, '
+                        f'{"sharp attack" if motion_mag > 3 else "smooth onset"}')
+        accent_dur = max(0.5, min(2.0, motion_mag * 0.4))
+        if motion_mag > 3.0:
+            accent_priority = 'high'
+
+    # --- Emotion transition accents (respond to change, not static state) ---
+    if not accent_prompt and prev_scene:
+        prev_emotion = prev_scene.get('emotion', 'neutral')
+        # Emotion *changed* → sting/transition sound
+        if prev_emotion != emotion and emotion != 'neutral' and prev_emotion != 'neutral':
+            transition_desc = f'{prev_emotion} to {emotion}'
+            if emotion in ('dramatic', 'exciting') and prev_emotion in ('calm', 'neutral', 'sad'):
+                accent_prompt = (f'dramatic tension sting, sudden shift from calm to intense, '
+                               f'low frequency swell building into sharp impact, '
+                               f'cinematic mood transition')
+                accent_priority = 'high'
+                accent_dur = 1.0
+            elif emotion in ('calm', 'sad') and prev_emotion in ('exciting', 'dramatic', 'happy'):
+                accent_prompt = (f'soft descending release, tension dissolving into quiet, '
+                               f'gentle atmospheric fade with warm reverb tail, '
+                               f'emotional decompression')
+                accent_dur = 2.0
+            elif emotion == 'happy' and prev_emotion in ('sad', 'dramatic', 'neutral'):
+                accent_prompt = (f'uplifting reveal sting, bright ascending tone, '
+                               f'positive mood shift with sparkling high-frequency detail')
+                accent_dur = 1.2
+
+    # --- Shot type change accents (visual grammar transitions) ---
+    if not accent_prompt and prev_scene:
+        prev_shot = prev_scene.get('shot_type', 'b_roll')
+        if prev_shot != shot_type:
+            # Wide→Close = intimacy increase → subtle focus sound
+            if prev_shot == 'wide_shot' and shot_type in ('close_up', 'extreme_close_up'):
+                accent_prompt = ('subtle focus pull sound, narrowing perspective, '
+                               'proximity increase with soft high-frequency detail')
+                accent_vol = -10
+            # Close→Wide = reveal → expansion sound
+            elif prev_shot in ('close_up', 'extreme_close_up') and shot_type == 'wide_shot':
+                accent_prompt = ('spatial expansion reveal, opening perspective outward, '
+                               'widening reverb with airy decompression')
+                accent_priority = 'high'
+            # Any→B-roll = cutaway → subtle transition
+            elif shot_type == 'b_roll' and prev_shot in ('talking_head', 'close_up'):
+                accent_prompt = ('gentle scene change transition, soft atmospheric shift, '
+                               'subtle environmental crossfade')
+                accent_vol = -12
+
+    if accent_prompt:
+        layers.append({
+            'layer_type': 'accent',
+            'prompt': accent_prompt,
+            'priority': accent_priority,
+            'volume_db': accent_vol,
+            'duration': accent_dur,
+            'source': 'dynamic_from_context',
+        })
+
+    # =====================================================================
+    # CONTRAST LAYER — Psychoacoustic contrast for emotional depth
+    # =====================================================================
+    # Sometimes the most effective sound is the *opposite* of the visual.
+    # A quiet moment in a chaotic scene, or a low rumble under a bright scene.
+    contrast_prompt = None
+    contrast_priority = 'low'
+    contrast_vol = -20  # Always subtle
+
+    # High intensity visual + quiet audio contrast = unease/tension
+    if emotion in ('exciting', 'dramatic') and motion_mag > 2.0:
+        if emotion_conf > 0.6:
+            contrast_prompt = ('barely audible low-frequency rumble beneath the surface, '
+                             'subsonic tension that you feel more than hear, '
+                             'creating unease through contrast with visual chaos')
+            contrast_vol = -22
+
+    # Very calm/static visual + subtle dissonance = anticipation
+    elif (emotion in ('calm', 'neutral') and motion_type == 'static' and
+          next_scene and next_scene.get('emotion') in ('exciting', 'dramatic')):
+        contrast_prompt = ('barely perceptible high-frequency tension building, '
+                         'subtle anticipatory unease, something about to happen, '
+                         'quiet before the storm micro-textures')
+        contrast_priority = 'medium'
+        contrast_vol = -24
+
+    # Bright cheerful visual + subtle melancholy undertone = emotional depth
+    elif (color_mood in ('bright_energetic', 'warm_cheerful') and
+          emotion in ('happy',) and emotion_conf > 0.7):
+        contrast_prompt = ('barely-there warm nostalgic undertone, '
+                         'bittersweet memory quality, subtle analog warmth '
+                         'adding emotional depth beneath the brightness')
+        contrast_vol = -26
+
+    if contrast_prompt:
+        layers.append({
+            'layer_type': 'contrast',
+            'prompt': contrast_prompt,
+            'priority': contrast_priority,
+            'volume_db': contrast_vol,
+            'duration': 4.0,
+            'source': 'psychoacoustic_contrast',
+        })
+
+    # =====================================================================
+    # GENRE FILTERING — Apply genre rules as final pass
+    # =====================================================================
+    if genre_rules:
+        sfx_rules = genre_rules.get('sfx_rules', {})
+        avoid_types = sfx_rules.get('avoid_types', [])
+        max_density = sfx_rules.get('max_density', 5)
+
+        # Filter layers that conflict with genre preferences
+        if 'ambient' in avoid_types:
+            layers = [l for l in layers if l['layer_type'] != 'ambient']
+        if 'subtle' in avoid_types or 'dialogue_filler' in avoid_types:
+            layers = [l for l in layers if l['layer_type'] not in ('foley', 'contrast')]
+        if 'impact' in avoid_types or 'loud_accent' in avoid_types:
+            layers = [l for l in layers if not (l['layer_type'] == 'accent' and l['volume_db'] > -8)]
+
+        # Limit layer count based on genre density
+        if len(layers) > max_density:
+            # Keep highest priority layers
+            priority_order = {'high': 0, 'medium': 1, 'low': 2}
+            layers.sort(key=lambda l: priority_order.get(l.get('priority', 'low'), 2))
+            layers = layers[:max_density]
+
+        # Adjust volumes per genre
+        vol_offset = sfx_rules.get('volume_relative_to_bgm', 0)
+        for layer in layers:
+            layer['volume_db'] = round(layer['volume_db'] + vol_offset, 1)
+
+    return layers
+
+
+# =============================================================================
+# B-ROLL INSERTION POINT DETECTION
+# =============================================================================
+
+def detect_broll_insertion_points(
+    scenes: List[Dict],
+    transcription: List[Dict],
+    scene_detection: Dict
+) -> List[Dict]:
+    """
+    Detect opportunities for B-roll cutaway insertion.
+
+    Professional videos use B-roll for ~30% of screen time. This finds moments
+    where the main footage is visually static (talking head, same shot held too
+    long) and recommends B-roll cutaways.
+
+    Criteria for B-roll insertion:
+    1. Long talking head segments (>5s without visual change)
+    2. Verbal references to objects/locations (show what's being talked about)
+    3. Transitions between topics (visual break for topic shift)
+    4. Repeated shot types (viewer fatigue)
+
+    Args:
+        scenes: Analyzed scenes with shot_type, description, timestamp
+        transcription: Enhanced transcription with words, speaker_id
+        scene_detection: PySceneDetect results (cuts, pacing)
+
+    Returns:
+        List of B-roll insertion point dicts with timestamp, duration, reason, prompt
+    """
+    insertions = []
+    cuts = scene_detection.get('cuts', [])
+    cut_times = sorted([c['timestamp'] for c in cuts])
+
+    if not scenes:
+        return insertions
+
+    # --- 1. Long talking head / single-shot segments ---
+    for i, scene in enumerate(scenes):
+        if scene.get('shot_type') not in ('talking_head', 'close_up', 'medium_shot'):
+            continue
+
+        # Find how long this shot type persists
+        start_t = scene['timestamp']
+        end_t = start_t
+
+        for j in range(i + 1, len(scenes)):
+            next_scene = scenes[j]
+            # Check if there's a cut between them
+            has_cut = any(start_t < ct < next_scene['timestamp'] for ct in cut_times)
+            if has_cut:
+                break
+            if next_scene.get('shot_type') == scene.get('shot_type'):
+                end_t = next_scene['timestamp']
+            else:
+                break
+
+        held_duration = end_t - start_t
+        if held_duration > 6.0:
+            # Suggest B-roll at the midpoint
+            mid = start_t + held_duration * 0.4
+            insertions.append({
+                'timestamp': round(mid, 2),
+                'duration': min(3.0, held_duration * 0.3),
+                'reason': f'Talking head held for {held_duration:.1f}s — cutaway adds visual interest',
+                'type': 'visual_relief',
+                'prompt': f'B-roll related to: {scene.get("description", "the topic being discussed")[:80]}',
+                'priority': 'high' if held_duration > 10 else 'medium',
+            })
+
+    # --- 2. Topic/speaker changes ---
+    prev_speaker = None
+    for seg in transcription:
+        speaker = seg.get('speaker_id', 0)
+        if prev_speaker is not None and speaker != prev_speaker:
+            # Speaker change → potential B-roll bridge
+            insertions.append({
+                'timestamp': round(seg['start'] - 0.5, 2),
+                'duration': 1.5,
+                'reason': f'Speaker change (speaker {prev_speaker}→{speaker}) — B-roll transition',
+                'type': 'speaker_change',
+                'prompt': 'Contextual cutaway or reaction shot',
+                'priority': 'low',
+            })
+        prev_speaker = speaker
+
+    # --- 3. Verbal references to visual subjects ---
+    visual_keywords = {
+        'look at': 'Show the referenced object or scene',
+        'as you can see': 'Show the referenced visual',
+        'over there': 'Show the referenced location',
+        'this is': 'Close-up of the referenced subject',
+        'here we have': 'Detail shot of the subject',
+        'for example': 'Visual example of the concept',
+        'let me show': 'Demonstrate the referenced action',
+    }
+    for seg in transcription:
+        text = seg.get('text', '').lower()
+        for phrase, prompt_hint in visual_keywords.items():
+            if phrase in text:
+                insertions.append({
+                    'timestamp': round(seg['start'] + 0.5, 2),
+                    'duration': 2.0,
+                    'reason': f'Verbal cue "{phrase}" — show what\'s referenced',
+                    'type': 'verbal_reference',
+                    'prompt': f'{prompt_hint}: {seg.get("text", "")[:60]}',
+                    'priority': 'medium',
+                })
+                break  # One per segment
+
+    # Deduplicate (merge overlapping within 2s)
+    insertions.sort(key=lambda x: x['timestamp'])
+    deduped = []
+    for ins in insertions:
+        if deduped and abs(ins['timestamp'] - deduped[-1]['timestamp']) < 2.0:
+            # Keep higher priority
+            if ins.get('priority', 'low') == 'high' or (
+                ins.get('priority') == 'medium' and deduped[-1].get('priority') == 'low'
+            ):
+                deduped[-1] = ins
+        else:
+            deduped.append(ins)
+
+    return deduped
+
+
+# =============================================================================
+# LOWER-THIRD / TEXT OVERLAY SUGGESTIONS
+# =============================================================================
+
+def suggest_text_overlays(
+    scenes: List[Dict],
+    transcription: List[Dict],
+    narrative_arc: Dict,
+    video_duration: float
+) -> List[Dict]:
+    """
+    Suggest text overlays, lower-thirds, and title cards.
+
+    Professional videos use:
+    - Speaker name tags (lower-thirds) on first appearance
+    - Topic titles at section transitions
+    - Key stat/quote callouts
+    - Intro/outro title cards
+
+    Args:
+        scenes: Analyzed scenes with shot_type, description
+        transcription: Enhanced transcription with speaker_id
+        narrative_arc: Narrative arc with beats, climax
+        video_duration: Total duration
+
+    Returns:
+        List of text overlay suggestion dicts
+    """
+    overlays = []
+
+    # --- 1. Intro Title Card ---
+    overlays.append({
+        'timestamp': 0.5,
+        'duration': 3.0,
+        'type': 'title_card',
+        'position': 'center',
+        'text': '[Video Title]',
+        'style': 'large_bold',
+        'animation_in': 'fade_up',
+        'animation_out': 'fade',
+        'reason': 'Opening title card — standard professional practice',
+        'priority': 'high',
+    })
+
+    # --- 2. Speaker Name Tags ---
+    seen_speakers = set()
+    for seg in transcription:
+        speaker = seg.get('speaker_id', 0)
+        if speaker not in seen_speakers:
+            seen_speakers.add(speaker)
+            # Find the first talking_head or close_up scene near this timestamp
+            seg_time = seg.get('start', 0)
+            is_on_camera = any(
+                abs(s['timestamp'] - seg_time) < 3.0 and
+                s.get('shot_type') in ('talking_head', 'close_up', 'medium_shot')
+                for s in scenes
+            )
+            if is_on_camera:
+                overlays.append({
+                    'timestamp': round(seg_time + 0.5, 2),
+                    'duration': 4.0,
+                    'type': 'lower_third',
+                    'position': 'bottom_left',
+                    'text': f'[Speaker {speaker + 1} Name]',
+                    'subtitle': '[Title/Role]',
+                    'style': 'name_tag',
+                    'animation_in': 'slide_right',
+                    'animation_out': 'slide_left',
+                    'reason': f'First appearance of speaker {speaker + 1}',
+                    'priority': 'high',
+                })
+
+    # --- 3. Section/Topic Titles ---
+    # Use narrative beats as section markers
+    beats = narrative_arc.get('narrative_beats', [])
+    for beat in beats:
+        if beat.get('type') == 'beat':
+            overlays.append({
+                'timestamp': round(beat['timestamp'], 2),
+                'duration': 2.5,
+                'type': 'section_title',
+                'position': 'bottom_center',
+                'text': '[Section Title]',
+                'style': 'section_header',
+                'animation_in': 'pop',
+                'animation_out': 'fade',
+                'reason': f'Narrative intensity beat at {beat["timestamp"]:.1f}s — section marker',
+                'priority': 'medium',
+            })
+
+    # --- 4. Key Moment Callouts ---
+    climax_t = narrative_arc.get('climax_timestamp', 0)
+    if climax_t > 0:
+        overlays.append({
+            'timestamp': round(climax_t, 2),
+            'duration': 2.0,
+            'type': 'callout',
+            'position': 'center',
+            'text': '[Key Moment / Quote]',
+            'style': 'emphasis_large',
+            'animation_in': 'slam',
+            'animation_out': 'fade',
+            'reason': 'Climax of the narrative arc — emphasize with callout',
+            'priority': 'medium',
+        })
+
+    # --- 5. Outro Card ---
+    if video_duration > 5:
+        overlays.append({
+            'timestamp': round(video_duration - 5.0, 2),
+            'duration': 4.0,
+            'type': 'end_card',
+            'position': 'center',
+            'text': '[Subscribe / Follow / CTA]',
+            'style': 'large_bold',
+            'animation_in': 'fade_up',
+            'animation_out': 'fade',
+            'reason': 'End card with call-to-action — standard professional practice',
+            'priority': 'high',
+        })
+
+    overlays.sort(key=lambda x: x['timestamp'])
+    return overlays
+
+
+# =============================================================================
+# TENSION/RELEASE PACING INTELLIGENCE
+# =============================================================================
+
+def suggest_pacing_adjustments(
+    narrative_arc: Dict,
+    scenes: List[Dict],
+    transitions: List[Dict],
+    genre_rules: Optional[Dict] = None
+) -> List[Dict]:
+    """
+    Suggest pacing adjustments based on narrative arc analysis.
+
+    Professional editors control pacing by:
+    - Inserting rest moments after high-intensity peaks
+    - Accelerating cuts leading to climax
+    - Adding speed ramps for emphasis
+    - Varying shot duration for rhythm
+
+    Args:
+        narrative_arc: Arc analysis with intensity_curve, climax, beats
+        scenes: Analyzed scenes
+        transitions: Current transition list
+        genre_rules: Optional genre pacing rules
+
+    Returns:
+        List of pacing adjustment suggestions
+    """
+    adjustments = []
+    intensity_curve = narrative_arc.get('intensity_curve', [])
+    climax_t = narrative_arc.get('climax_timestamp', 0)
+    arc_type = narrative_arc.get('arc_type', 'flat')
+
+    if not intensity_curve or len(intensity_curve) < 3:
+        return adjustments
+
+    # Get genre pacing targets
+    pacing_rules = {}
+    if genre_rules:
+        pacing_rules = genre_rules.get('pacing_rules', {})
+    target_shot = pacing_rules.get('target_shot_duration', 3.0)
+    allow_ramps = pacing_rules.get('allow_speed_ramps', True)
+
+    # --- 1. Rest Moments After Peaks ---
+    # Find intensity peaks (local maxima above 0.7)
+    for i in range(1, len(intensity_curve) - 1):
+        curr = intensity_curve[i]
+        prev_val = intensity_curve[i - 1].get('intensity_smoothed',
+                                               intensity_curve[i - 1].get('intensity', 0))
+        curr_val = curr.get('intensity_smoothed', curr.get('intensity', 0))
+        next_val = intensity_curve[i + 1].get('intensity_smoothed',
+                                               intensity_curve[i + 1].get('intensity', 0))
+
+        if curr_val > 0.65 and curr_val >= prev_val and curr_val > next_val:
+            # Peak found → suggest rest moment after
+            rest_t = intensity_curve[i + 1]['timestamp']
+            adjustments.append({
+                'timestamp': round(rest_t, 2),
+                'type': 'rest_moment',
+                'action': 'extend_shot',
+                'target_duration': target_shot * 2.0,
+                'reason': f'Rest moment after intensity peak ({curr_val:.2f}) — '
+                          f'let the viewer breathe before continuing',
+                'priority': 'high',
+            })
+
+    # --- 2. Accelerate Cuts Before Climax ---
+    if climax_t > 2.0:
+        # Find transitions in the 5 seconds before climax
+        pre_climax = [t for t in transitions
+                      if climax_t - 5.0 <= t.get('timestamp', 0) < climax_t
+                      and t.get('type') not in ('start', 'end')]
+        if len(pre_climax) < 2 and arc_type in ('ascending', 'peak_middle'):
+            adjustments.append({
+                'timestamp': round(climax_t - 3.0, 2),
+                'type': 'cut_acceleration',
+                'action': 'add_cuts',
+                'suggested_interval': target_shot * 0.5,
+                'reason': f'Build tension before climax at {climax_t:.1f}s — '
+                          f'increase cut frequency for momentum',
+                'priority': 'high',
+            })
+
+    # --- 3. Speed Ramp Suggestions ---
+    if allow_ramps:
+        for i, scene in enumerate(scenes):
+            motion_mag = scene.get('motion_magnitude', 0)
+            emotion = scene.get('emotion', 'neutral')
+
+            # High motion + exciting emotion = speed ramp opportunity
+            if motion_mag > 3.0 and emotion in ('exciting', 'dramatic'):
+                adjustments.append({
+                    'timestamp': round(scene['timestamp'], 2),
+                    'type': 'speed_ramp',
+                    'action': 'slow_motion',
+                    'speed_factor': 0.5,  # 50% speed
+                    'duration': 1.5,
+                    'reason': f'High motion ({motion_mag:.1f}) + {emotion} emotion — '
+                              f'slow-motion for dramatic emphasis',
+                    'priority': 'medium',
+                })
+
+            # Static after fast motion = dramatic freeze opportunity
+            if i > 0:
+                prev_motion = scenes[i - 1].get('motion_magnitude', 0)
+                if prev_motion > 3.0 and motion_mag < 0.5:
+                    adjustments.append({
+                        'timestamp': round(scene['timestamp'], 2),
+                        'type': 'speed_ramp',
+                        'action': 'freeze_frame',
+                        'duration': 0.5,
+                        'reason': f'Sudden stop after fast motion — freeze frame for impact',
+                        'priority': 'low',
+                    })
+
+    # --- 4. Pacing Variation Warning ---
+    # Check if all shot durations are too uniform (boring pacing)
+    if len(transitions) > 4:
+        shot_durs = []
+        for i in range(len(transitions) - 1):
+            dur = transitions[i + 1].get('timestamp', 0) - transitions[i].get('timestamp', 0)
+            if dur > 0:
+                shot_durs.append(dur)
+        if shot_durs:
+            std_dur = float(np.std(shot_durs))
+            mean_dur = float(np.mean(shot_durs))
+            if std_dur < mean_dur * 0.15 and len(shot_durs) > 3:
+                adjustments.append({
+                    'timestamp': 0,
+                    'type': 'pacing_warning',
+                    'action': 'vary_duration',
+                    'current_mean': round(mean_dur, 2),
+                    'current_std': round(std_dur, 2),
+                    'reason': f'Shot durations are too uniform (mean={mean_dur:.1f}s, '
+                              f'std={std_dur:.2f}s). Vary cut timing for dynamic pacing.',
+                    'priority': 'medium',
+                })
+
+    # Deduplicate close timestamps
+    adjustments.sort(key=lambda x: x['timestamp'])
+    deduped = []
+    for adj in adjustments:
+        if deduped and abs(adj['timestamp'] - deduped[-1]['timestamp']) < 1.0:
+            if adj.get('priority') == 'high':
+                deduped[-1] = adj
+        else:
+            deduped.append(adj)
+
+    return deduped
 
 
 def generate_audio_description_llm(visual_description: str, duration: float = 3.0) -> Optional[str]:
@@ -1541,12 +4430,13 @@ def transcribe_audio(
 
             language = detected_lang
 
-        # Transcribe with detected/specified language
+        # Transcribe with detected/specified language and word-level timestamps
         result = model.transcribe(
             audio_path,
             language=language,
             task='transcribe',
-            verbose=False
+            verbose=False,
+            word_timestamps=True
         )
 
         # Get the detected language from result
@@ -1555,12 +4445,24 @@ def transcribe_audio(
 
         transcription = []
         for segment in result['segments']:
+            # Extract word-level timestamps if available
+            words = []
+            if 'words' in segment:
+                for w in segment['words']:
+                    words.append({
+                        'word': w.get('word', '').strip(),
+                        'start': round(w.get('start', 0), 3),
+                        'end': round(w.get('end', 0), 3),
+                        'probability': round(w.get('probability', 0.9), 3),
+                    })
+
             transcription.append({
                 'text': segment['text'].strip(),
                 'start': segment['start'],
                 'end': segment['end'],
                 'confidence': segment.get('confidence', 0.9),
-                'language': detected_language
+                'language': detected_language,
+                'words': words,
             })
 
         # Log first few segments for debugging
@@ -1792,9 +4694,47 @@ def infer_sounds_keyword_based(description: str) -> str:
     return "Neutral indoor room tone with subtle air circulation humming softly, distant muffled activity, quiet electronic hum from devices, occasional settling creaks from building, calm atmospheric presence with natural room reverb"
 
 
+def _parse_blip2_response(text: str) -> Dict[str, str]:
+    """Parse a BLIP-2 response into visual description and sound hints.
+
+    Splits response into visual vs sound-related sentences using keyword detection.
+    Returns dict with 'visual' and 'sound_hint' keys.
+    """
+    sound_keywords = {'sound', 'hear', 'noise', 'audio', 'music', 'voice',
+                      'loud', 'quiet', 'ring', 'buzz', 'crash', 'bang',
+                      'whisper', 'shout', 'sing', 'play'}
+
+    # Split into sentences
+    sentences = [s.strip() for s in text.replace('. ', '.\n').split('\n') if s.strip()]
+
+    visual_parts = []
+    sound_parts = []
+
+    for sentence in sentences:
+        words = set(sentence.lower().split())
+        if words & sound_keywords:
+            sound_parts.append(sentence)
+        else:
+            visual_parts.append(sentence)
+
+    visual = ' '.join(visual_parts) if visual_parts else text
+    sound_hint = ' '.join(sound_parts) if sound_parts else ''
+
+    return {'visual': visual, 'sound_hint': sound_hint}
+
+
 def analyze_frame_content(frame, model, processor) -> Dict[str, Any]:
     """
-    Dynamically analyze frame content using vision-language model.
+    Dynamically analyze frame content using vision-language model,
+    shot type classification, and color/lighting mood analysis.
+
+    Supports both BLIP-2 (richer prompted generation) and BLIP v1 (basic captioning).
+    BLIP-2 uses a single multi-modal call with a prompt that asks about visuals,
+    actions, and sounds simultaneously.
+
+    Also runs:
+    - classify_shot_type: face detection + composition → shot grammar
+    - analyze_frame_color_mood: HSV/LAB stats → mood from color/lighting
 
     Args:
         frame: Video frame (BGR format from OpenCV)
@@ -1802,50 +4742,96 @@ def analyze_frame_content(frame, model, processor) -> Dict[str, Any]:
         processor: Model processor
 
     Returns:
-        Dict with dynamic description and extracted semantic info
+        Dict with description, shot_type, color_mood, and semantic info
     """
     import cv2
     import torch
     from PIL import Image
 
+    # --- Shot type classification (fast, OpenCV only) ---
+    shot_type_data = classify_shot_type(frame)
+
+    # --- Color/lighting mood analysis (fast, numpy/OpenCV only) ---
+    color_mood_data = analyze_frame_color_mood(frame)
+
     # Convert BGR to RGB
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(rgb_frame)
 
-    # Generate natural language caption
-    inputs = processor(pil_image, return_tensors="pt")
-    if torch.cuda.is_available():
-        inputs = {k: v.to("cuda") for k, v in inputs.items()}
+    is_blip2 = getattr(model, '_is_blip2', False)
 
-    with torch.no_grad():
-        # Generate general description - this is what BLIP does best
-        out = model.generate(**inputs, max_length=50)
-        general_description = processor.decode(out[0], skip_special_tokens=True)
+    if is_blip2:
+        # BLIP-2 path: prompted generation for richer descriptions
+        prompt = "Question: What is shown in this image, what action is happening, and what sounds would be present? Answer:"
+        inputs = processor(pil_image, text=prompt, return_tensors="pt")
+        if torch.cuda.is_available():
+            inputs = {k: v.to("cuda") if hasattr(v, 'to') else v for k, v in inputs.items()}
 
-    # Infer sounds from the visual description using our smart mapping
-    sound_description = infer_sounds_from_description(general_description)
+        with torch.no_grad():
+            out = model.generate(**inputs, max_new_tokens=120)
+            raw_text = processor.decode(out[0], skip_special_tokens=True).strip()
 
-    return {
-        'description': general_description,
-        'action_description': general_description,  # Use same description
-        'sound_description': sound_description,
-        'confidence': 0.85
-    }
+        # Parse the combined response into visual and sound components
+        parsed = _parse_blip2_response(raw_text)
+        general_description = parsed['visual'] if parsed['visual'] else raw_text
+
+        # Use parsed sound hint to improve sound inference
+        sound_input = f"{general_description} {parsed['sound_hint']}" if parsed['sound_hint'] else general_description
+        sound_description = infer_sounds_from_description(sound_input)
+
+        action_description = raw_text
+
+        return {
+            'description': general_description,
+            'action_description': action_description,
+            'sound_description': sound_description,
+            'confidence': 0.90,
+            'shot_type': shot_type_data,
+            'color_mood': color_mood_data,
+        }
+    else:
+        # BLIP v1 path: basic captioning
+        inputs = processor(pil_image, return_tensors="pt")
+        if torch.cuda.is_available():
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+
+        with torch.no_grad():
+            out = model.generate(**inputs, max_length=50)
+            general_description = processor.decode(out[0], skip_special_tokens=True)
+
+        sound_description = infer_sounds_from_description(general_description)
+
+        return {
+            'description': general_description,
+            'action_description': general_description,
+            'sound_description': sound_description,
+            'confidence': 0.85,
+            'shot_type': shot_type_data,
+            'color_mood': color_mood_data,
+        }
 
 
 def analyze_scenes(
     video_path: str,
     progress_callback: Optional[Callable] = None,
-    use_adaptive_sampling: bool = True
+    use_adaptive_sampling: bool = True,
+    analysis_strategy: Optional[Dict] = None,
+    audio_advanced: Optional[Dict] = None,
+    audio_content: Optional[Dict] = None
 ) -> List[Dict]:
     """
     Dynamically analyze video using vision-language model.
-    Enhanced with adaptive sampling and emotion detection.
+    Enhanced with adaptive sampling, emotion detection, and pre-classification strategy.
 
     Args:
         video_path: Path to video file
         progress_callback: Optional callback(stage, progress, message)
         use_adaptive_sampling: Use motion-based adaptive sampling (Quick Win #1)
+        analysis_strategy: Optional strategy dict from get_analysis_strategy().
+            If skip_blip=True, returns timestamps-only (no model inference).
+            Strategy intervals override default sampling parameters.
+        audio_advanced: Optional advanced audio analysis for emotion fusion
+        audio_content: Optional audio content analysis for emotion fusion
 
     Returns:
         List of scenes with natural language descriptions and emotion data
@@ -1853,7 +4839,16 @@ def analyze_scenes(
     import cv2
 
     try:
-        model, processor = get_vlm_model()
+        # Extract strategy parameters
+        skip_blip = False
+        base_interval = 3.0
+        min_interval = 1.5
+        max_interval = 5.0
+        if analysis_strategy:
+            skip_blip = analysis_strategy.get('skip_blip', False)
+            base_interval = analysis_strategy.get('frame_sample_interval', 3.0)
+            min_interval = analysis_strategy.get('min_sample_interval', 1.5)
+            max_interval = analysis_strategy.get('max_sample_interval', 5.0)
 
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -1862,16 +4857,16 @@ def analyze_scenes(
 
         scenes = []
 
-        # Quick Win #1: Use adaptive sampling based on motion detection
+        # Use adaptive sampling based on motion detection
         if use_adaptive_sampling:
             if progress_callback:
                 progress_callback("scene_analysis", 35, "Detecting motion for adaptive sampling...")
 
             sample_points = get_adaptive_sample_points(
                 video_path,
-                base_interval=3.0,
-                min_interval=1.5,  # More samples during action
-                max_interval=5.0,  # Fewer samples during static scenes
+                base_interval=base_interval,
+                min_interval=min_interval,
+                max_interval=max_interval,
                 motion_threshold=0.03
             )
             total_samples = len(sample_points)
@@ -1880,13 +4875,44 @@ def analyze_scenes(
                 progress_callback("scene_analysis", 40,
                                 f"Adaptive sampling: {total_samples} frames selected")
         else:
-            # Uniform sampling every 3 seconds
-            sample_points = list(np.arange(0, duration, 3.0))
+            sample_points = list(np.arange(0, duration, base_interval))
             total_samples = len(sample_points)
 
+        # Compute motion context between consecutive sample frames
+        if progress_callback:
+            progress_callback("scene_analysis", 38, "Computing optical flow motion context...")
+        motion_data = compute_motion_context(video_path, sample_points)
+
+        # If skip_blip, return timestamps-only without model inference
+        if skip_blip:
+            if progress_callback:
+                progress_callback("scene_analysis", 70,
+                                f"Skipping BLIP (pre-classification), returning {total_samples} timestamps")
+            for idx, timestamp in enumerate(sample_points):
+                motion = motion_data[idx] if idx < len(motion_data) else {}
+                scenes.append({
+                    'timestamp': timestamp,
+                    'type': 'dynamic_moment',
+                    'description': '',
+                    'action_description': '',
+                    'sound_description': '',
+                    'confidence': 0.3,
+                    'emotion': 'neutral',
+                    'emotion_confidence': 0.2,
+                    'suggested_transitions': ['dissolve', 'fade'],
+                    'sfx_mood': 'ambient, neutral',
+                    'motion_magnitude': motion.get('motion_magnitude', 0),
+                    'motion_type': motion.get('motion_type', 'static'),
+                    'dominant_direction': motion.get('dominant_direction', 'static'),
+                    'camera_subtype': motion.get('camera_subtype', 'none'),
+                })
+            cap.release()
+            return scenes
+
+        model, processor = get_vlm_model()
         processed_samples = 0
 
-        for timestamp in sample_points:
+        for idx, timestamp in enumerate(sample_points):
             frame_idx = int(timestamp * fps)
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
@@ -1894,11 +4920,46 @@ def analyze_scenes(
             if not ret:
                 continue
 
-            # Analyze frame
+            # Analyze frame (includes shot type + color mood)
             analysis = analyze_frame_content(frame, model, processor)
 
-            # Quick Win #4: Detect emotion from description
-            emotion_data = detect_emotion_from_description(analysis['description'])
+            # Compute audio emotion scores for fusion (if audio data available)
+            audio_emotion_scores = None
+            if audio_advanced and audio_content:
+                audio_emotion_scores = compute_audio_emotion_at_time(
+                    timestamp, audio_advanced, audio_content
+                )
+
+            # Get color-based emotion scores as additional modality
+            color_mood_data = analysis.get('color_mood', {})
+            color_emotion_scores = _color_mood_to_emotion_scores(color_mood_data)
+
+            # Fuse all three modalities: visual keywords + audio + color
+            # If audio scores exist, blend color into audio before passing
+            if audio_emotion_scores:
+                fused_audio_color = {}
+                all_emo = set(list(audio_emotion_scores.keys()) + list(color_emotion_scores.keys()))
+                for emo in all_emo:
+                    a = audio_emotion_scores.get(emo, 0.0)
+                    c = color_emotion_scores.get(emo, 0.0)
+                    # Audio 60%, color 40% within the non-visual channel
+                    fused_audio_color[emo] = a * 0.6 + c * 0.4
+                combined_scores = fused_audio_color
+            elif color_emotion_scores:
+                combined_scores = color_emotion_scores
+            else:
+                combined_scores = None
+
+            # Detect emotion with multi-modal fusion
+            emotion_data = detect_emotion_from_description(
+                analysis['description'],
+                audio_emotion_scores=combined_scores
+            )
+
+            shot_type_data = analysis.get('shot_type', {})
+
+            # Look up motion context for this sample
+            motion = motion_data[idx] if idx < len(motion_data) else {}
 
             scene = {
                 'timestamp': timestamp,
@@ -1907,11 +4968,26 @@ def analyze_scenes(
                 'action_description': analysis['action_description'],
                 'sound_description': analysis['sound_description'],
                 'confidence': analysis['confidence'],
-                # Enhanced with emotion data
+                # Shot type classification
+                'shot_type': shot_type_data.get('shot_type', 'b_roll'),
+                'face_count': shot_type_data.get('face_count', 0),
+                'face_area_ratio': shot_type_data.get('face_area_ratio', 0),
+                # Color/lighting mood
+                'color_mood': color_mood_data.get('color_mood', 'neutral'),
+                'color_temperature': color_mood_data.get('color_temperature', 'neutral'),
+                'brightness_key': color_mood_data.get('brightness_key', 'mid_key'),
+                'saturation_level': color_mood_data.get('saturation_level', 'normal'),
+                'dominant_colors': color_mood_data.get('dominant_colors', []),
+                # Motion context (optical flow)
+                'motion_magnitude': motion.get('motion_magnitude', 0),
+                'motion_type': motion.get('motion_type', 'static'),
+                'dominant_direction': motion.get('dominant_direction', 'static'),
+                'camera_subtype': motion.get('camera_subtype', 'none'),
+                # Emotion data (tri-modal fusion: visual keywords + audio + color)
                 'emotion': emotion_data['emotion'],
                 'emotion_confidence': emotion_data['confidence'],
                 'suggested_transitions': emotion_data['suggested_transitions'],
-                'sfx_mood': emotion_data['sfx_mood']
+                'sfx_mood': emotion_data['sfx_mood'],
             }
 
             scenes.append(scene)
@@ -2428,10 +5504,31 @@ def analyze_video(
         progress_callback("transcription", 10, "Transcribing audio...")
     transcription = transcribe_audio(audio_path, progress_callback)
 
+    # Enhance transcription with speech analysis (energy, speaker, rate)
+    if progress_callback:
+        progress_callback("speech_analysis", 14, "Enhancing transcription with speech analysis...")
+    transcription = enhance_transcription_with_speech_analysis(transcription, audio_path)
+
+    # Quick audio pre-classification (~2s on first 30s of audio)
+    if progress_callback:
+        progress_callback("pre_classification", 16, "Quick audio pre-classification...")
+    pre_classification = quick_classify_audio(audio_path, transcription)
+    video_type = pre_classification.get('video_type', 'unknown')
+    analysis_strategy = get_analysis_strategy(video_type)
+    print(f"Pre-classification: {video_type} "
+          f"(speech={pre_classification.get('speech_ratio', 0):.1%}, "
+          f"harmonic={pre_classification.get('harmonic_ratio', 0):.1%})", file=sys.stderr)
+
     # Advanced audio analysis with librosa (beats, tempo, onsets)
     if progress_callback:
         progress_callback("audio_advanced", 18, "Running advanced audio analysis (librosa)...")
     audio_advanced = analyze_audio_advanced(audio_path, progress_callback)
+
+    # Genre-specific editing rules (depends on video_type + tempo)
+    genre_rules = get_genre_editing_rules(video_type, audio_advanced.get('tempo', 120))
+    print(f"Genre rules: {genre_rules.get('genre', 'unknown')} "
+          f"(preferred transitions: {genre_rules.get('transition_rules', {}).get('preferred', [])})",
+          file=sys.stderr)
 
     # Detect existing audio content (for smart SFX suggestions)
     if progress_callback:
@@ -2443,10 +5540,15 @@ def analyze_video(
         progress_callback("audio_analysis", 32, "Analyzing audio features...")
     audio_features = analyze_audio_features(audio_path, progress_callback)
 
-    # Analyze scenes with BLIP (adaptive sampling & emotion detection)
+    # Analyze scenes with BLIP (adaptive sampling, emotion detection, audio fusion)
     if progress_callback:
         progress_callback("scene_analysis", 40, "Analyzing video scenes with AI vision...")
-    scenes = analyze_scenes(video_path, progress_callback, use_adaptive_sampling=True)
+    scenes = analyze_scenes(
+        video_path, progress_callback, use_adaptive_sampling=True,
+        analysis_strategy=analysis_strategy,
+        audio_advanced=audio_advanced,
+        audio_content=audio_content
+    )
 
     # Professional scene detection with PySceneDetect
     if progress_callback:
@@ -2459,13 +5561,86 @@ def analyze_video(
     transitions = _merge_transitions(
         scene_detection.get('cuts', []),
         scenes,
-        audio_advanced
+        audio_advanced,
+        video_path=video_path,
+        genre_rules=genre_rules
     )
+
+    # Narrative arc detection (intensity curve from emotion + motion + cuts + energy)
+    if progress_callback:
+        progress_callback("narrative_arc", 84, "Detecting narrative arc and intensity curve...")
+    narrative_arc = detect_narrative_arc(scenes, audio_advanced, scene_detection)
+    print(f"Narrative arc: {narrative_arc.get('arc_type', 'unknown')} "
+          f"(climax at {narrative_arc.get('climax_timestamp', 0):.1f}s, "
+          f"mean intensity {narrative_arc.get('mean_intensity', 0):.2f})", file=sys.stderr)
+
+    # Visual rhythm alignment analysis (cut-to-beat alignment)
+    if progress_callback:
+        progress_callback("visual_rhythm", 86, "Analyzing visual rhythm alignment...")
+    visual_rhythm = analyze_visual_rhythm(
+        scene_detection.get('cuts', []),
+        audio_advanced.get('beats', []),
+        audio_advanced.get('tempo', 120)
+    )
+    print(f"Visual rhythm: alignment={visual_rhythm.get('beat_alignment_score', 0):.0%}, "
+          f"pattern={visual_rhythm.get('pattern', 'unknown')}, "
+          f"visual tempo={visual_rhythm.get('visual_tempo_bpm', 0):.0f} CPM", file=sys.stderr)
+
+    # Frame-accurate visual impact detection
+    if progress_callback:
+        progress_callback("impact_detection", 88, "Detecting frame-accurate visual impacts...")
+    # Use cut timestamps as candidates for impact detection
+    cut_timestamps = [c['timestamp'] for c in scene_detection.get('cuts', [])]
+    visual_impacts = detect_visual_impacts(
+        video_path, cut_timestamps,
+        fps=scene_detection.get('fps', 30.0)
+    )
+    print(f"Visual impacts: {len(visual_impacts)} frame-accurate impacts detected", file=sys.stderr)
 
     # Generate SFX suggestions (enhanced with beats, onsets, and audio content awareness)
     if progress_callback:
-        progress_callback("sfx_suggestions", 85, "Generating audio-aware SFX suggestions...")
+        progress_callback("sfx_suggestions", 90, "Generating audio-aware SFX suggestions...")
     sfx_suggestions = suggest_sfx_pro(scenes, transcription, audio_features, audio_advanced, audio_content)
+
+    # Snap SFX timestamps to frame-accurate visual impacts
+    if visual_impacts:
+        impact_times = {round(imp['timestamp'], 2): imp for imp in visual_impacts}
+        for sfx in sfx_suggestions:
+            sfx_t = sfx.get('timestamp', 0)
+            # Find nearest impact within 0.5s
+            best_impact = None
+            best_dist = 0.5
+            for imp_t, imp in impact_times.items():
+                dist = abs(sfx_t - imp_t)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_impact = imp
+            if best_impact:
+                sfx['original_timestamp'] = sfx['timestamp']
+                sfx['timestamp'] = best_impact['timestamp']
+                sfx['impact_snapped'] = True
+                sfx['impact_type'] = best_impact.get('type', 'unknown')
+
+    # Generate creative SFX layers for each scene (with temporal context)
+    sfx_layers = []
+    for i, scene in enumerate(scenes):
+        prev_s = scenes[i - 1] if i > 0 else None
+        next_s = scenes[i + 1] if i < len(scenes) - 1 else None
+        layers = creative_sfx_layer(scene, genre_rules, prev_scene=prev_s, next_scene=next_s)
+        if layers:
+            sfx_layers.append({
+                'timestamp': scene.get('timestamp', 0),
+                'layers': layers,
+            })
+
+    # Color grading / LUT suggestions
+    if progress_callback:
+        progress_callback("color_grading", 92, "Generating color grading suggestions...")
+    color_grading = suggest_color_grade(scenes)
+    print(f"Color grading: LUT={color_grading.get('overall_lut', 'none')}, "
+          f"consistency={color_grading.get('consistency_score', 0):.0%}, "
+          f"scenes needing correction: {color_grading.get('scenes_needing_correction', 0)}",
+          file=sys.stderr)
 
     # Calculate emotion distribution for BGM suggestions
     emotion_distribution = {}
@@ -2489,6 +5664,32 @@ def analyze_video(
         emotion_distribution=emotion_distribution,
         video_duration=video_duration
     )
+
+    # Audio ducking / mix level recommendations
+    if progress_callback:
+        progress_callback("audio_mix", 98, "Computing audio mix map...")
+    audio_mix_map = compute_audio_mix_map(
+        transcription, audio_advanced, audio_content,
+        sfx_suggestions, video_duration
+    )
+    print(f"Audio mix: speech coverage={audio_mix_map.get('speech_coverage', 0):.0%}, "
+          f"ducking points={len(audio_mix_map.get('ducking_points', []))}, "
+          f"mix notes={len(audio_mix_map.get('mix_notes', []))}",
+          file=sys.stderr)
+
+    # B-roll insertion point detection
+    broll_points = detect_broll_insertion_points(scenes, transcription, scene_detection)
+    print(f"B-roll points:        {len(broll_points)} suggested", file=sys.stderr)
+
+    # Text overlay / lower-third suggestions
+    text_overlays = suggest_text_overlays(scenes, transcription, narrative_arc, video_duration)
+    print(f"Text overlays:        {len(text_overlays)} suggested", file=sys.stderr)
+
+    # Pacing adjustment suggestions
+    pacing_adjustments = suggest_pacing_adjustments(
+        narrative_arc, scenes, transitions, genre_rules
+    )
+    print(f"Pacing adjustments:   {len(pacing_adjustments)} suggested", file=sys.stderr)
 
     if progress_callback:
         progress_callback("completed", 100, "Analysis complete")
@@ -2518,6 +5719,12 @@ def analyze_video(
     print(f"BGM suggestions:      {len(bgm_suggestions)}", file=sys.stderr)
     print(f"Transitions:          {len(transitions)}", file=sys.stderr)
     print(f"Emotion distribution: {emotion_distribution}", file=sys.stderr)
+    print(f"Narrative arc:        {narrative_arc.get('arc_type', 'unknown')} (climax at {narrative_arc.get('climax_timestamp', 0):.1f}s)", file=sys.stderr)
+    print(f"Visual rhythm:        alignment={visual_rhythm.get('beat_alignment_score', 0):.0%}, pattern={visual_rhythm.get('pattern', 'unknown')}", file=sys.stderr)
+    print(f"Visual impacts:       {len(visual_impacts)} frame-accurate", file=sys.stderr)
+    # Count speaker changes in enhanced transcription
+    speaker_ids = set(seg.get('speaker_id', 0) for seg in transcription)
+    print(f"Speakers detected:    {len(speaker_ids)}", file=sys.stderr)
     print(f"{'='*60}\n", file=sys.stderr)
 
     return {
@@ -2558,36 +5765,88 @@ def analyze_video(
             "avg_scene_duration": scene_detection.get('avg_scene_duration', 0),
             "detection_method": scene_detection.get('detection_method', 'unknown')
         },
-        "emotion_distribution": emotion_distribution
+        "emotion_distribution": emotion_distribution,
+        # Quick audio pre-classification (runs before heavy analysis)
+        "pre_classification": pre_classification,
+        # Narrative arc detection (intensity curve, climax, arc shape)
+        "narrative_arc": narrative_arc,
+        # Visual rhythm alignment (cut-to-beat alignment score, pacing pattern)
+        "visual_rhythm": visual_rhythm,
+        # Frame-accurate visual impact timestamps
+        "visual_impacts": visual_impacts,
+        # Color grading / LUT suggestions
+        "color_grading": color_grading,
+        # Audio ducking / mix level recommendations
+        "audio_mix_map": {
+            'speech_coverage': audio_mix_map.get('speech_coverage', 0),
+            'dialogue_regions': audio_mix_map.get('dialogue_regions', []),
+            'ducking_points': audio_mix_map.get('ducking_points', []),
+            'mix_notes': audio_mix_map.get('mix_notes', []),
+            # Omit full volume curves from response to save size; frontend can request if needed
+            'bgm_volume_curve_sample': audio_mix_map.get('bgm_volume_curve', [])[:20],
+        },
+        # Genre-specific editing rules
+        "genre_rules": genre_rules,
+        # Creative SFX layering (Foley + ambient + accent per scene)
+        "sfx_layers": sfx_layers,
+        # B-roll insertion point suggestions
+        "broll_points": broll_points,
+        # Text overlay / lower-third suggestions
+        "suggested_text_overlays": text_overlays,
+        # Pacing adjustment recommendations
+        "pacing_adjustments": pacing_adjustments,
     }
 
 
 def _merge_transitions(
     cuts: List[Dict],
     scenes: List[Dict],
-    audio_advanced: Dict
+    audio_advanced: Dict,
+    video_path: Optional[str] = None,
+    genre_rules: Optional[Dict] = None
 ) -> List[Dict]:
     """
-    Merge PySceneDetect cuts with scene analysis and audio data.
+    Merge PySceneDetect cuts with scene analysis, audio data, and visual comparison.
 
     Creates intelligent transition suggestions based on:
     - Cut locations from PySceneDetect
-    - Scene emotions from BLIP analysis
+    - Scene emotions from BLIP analysis (with color mood fusion)
     - Beat sync points from librosa
+    - Scene-pair visual comparison: color delta, shot type change, motion direction
+    - Shot scale continuity rules and genre-specific preferences
     """
+    import cv2
+
     transitions = []
     beats = audio_advanced.get('beats', [])
     tempo = audio_advanced.get('tempo', 120)
 
+    # Open video for frame extraction at cut points (for scene-pair comparison)
+    cap = None
+    fps = 30.0
+    if video_path:
+        try:
+            cap = cv2.VideoCapture(video_path)
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        except Exception:
+            cap = None
+
     for cut in cuts:
         timestamp = cut['timestamp']
 
-        # Find nearby scene for emotion context
-        nearby_scene = None
+        # Find scenes before and after cut for context
+        scene_before = None
+        scene_after = None
         for scene in scenes:
-            if abs(scene.get('timestamp', 0) - timestamp) < 3.0:
-                nearby_scene = scene
-                break
+            st = scene.get('timestamp', 0)
+            if st <= timestamp:
+                if scene_before is None or st > scene_before.get('timestamp', 0):
+                    scene_before = scene
+            if st > timestamp:
+                if scene_after is None or st < scene_after.get('timestamp', float('inf')):
+                    scene_after = scene
+
+        nearby_scene = scene_before or scene_after
 
         # Find nearest beat for sync suggestion
         nearest_beat = None
@@ -2598,32 +5857,114 @@ def _merge_transitions(
                 min_beat_dist = dist
                 nearest_beat = beat
 
-        # Determine transition type based on context
+        # Beat-snap: move timestamp to nearest beat if close enough
+        beat_snapped = False
+        original_timestamp = None
+        if nearest_beat and min_beat_dist <= 0.3:
+            original_timestamp = timestamp
+            timestamp = nearest_beat['timestamp']
+            beat_snapped = True
+
+        # --- Scene-pair visual comparison ---
+        visual_comparison = None
+        if cap is not None:
+            try:
+                # Extract frame just before cut and just after cut
+                before_frame_idx = max(0, int((timestamp - 0.1) * fps))
+                after_frame_idx = int((timestamp + 0.1) * fps)
+
+                cap.set(cv2.CAP_PROP_POS_FRAMES, before_frame_idx)
+                ret_a, frame_a = cap.read()
+
+                cap.set(cv2.CAP_PROP_POS_FRAMES, after_frame_idx)
+                ret_b, frame_b = cap.read()
+
+                if ret_a and ret_b:
+                    visual_comparison = compare_scene_pair_visuals(frame_a, frame_b)
+            except Exception:
+                visual_comparison = None
+
+        # Determine transition type — visual comparison takes priority over emotion-only
         emotion = nearby_scene.get('emotion', 'neutral') if nearby_scene else 'neutral'
-        suggested = cut.get('suggested_transition', 'fade')
 
-        # Override with emotion-based transitions
-        if emotion == 'exciting':
-            suggested = 'glitch' if tempo > 120 else 'zoom_in'
-        elif emotion == 'calm':
-            suggested = 'dissolve'
-        elif emotion == 'dramatic':
-            suggested = 'flash' if cut['type'] == 'fast_cut' else 'zoom_in'
-        elif emotion == 'happy':
-            suggested = 'zoom_in'
-        elif emotion == 'sad':
-            suggested = 'fade'
+        if visual_comparison:
+            # Use visual-relationship-based transition (professional approach)
+            suggested = visual_comparison['recommended_transition']
+            transition_duration = visual_comparison['transition_duration']
+            reason_base = visual_comparison['transition_reason']
 
-        transitions.append({
+            # Emotion can override in extreme cases
+            if emotion == 'exciting' and suggested in ('fade', 'dissolve'):
+                suggested = 'glitch' if tempo > 120 else 'zoom_in'
+                reason_base += f', overridden by {emotion} emotion'
+            elif emotion == 'dramatic' and cut.get('type') == 'fast_cut' and suggested in ('fade', 'dissolve'):
+                suggested = 'flash'
+                reason_base += f', overridden by {emotion} emotion'
+        else:
+            # Fallback to emotion-based transitions (no video access)
+            suggested = cut.get('suggested_transition', 'fade')
+            transition_duration = 0.3
+            reason_base = f'emotion: {emotion}'
+
+            if emotion == 'exciting':
+                suggested = 'glitch' if tempo > 120 else 'zoom_in'
+            elif emotion == 'calm':
+                suggested = 'dissolve'
+                transition_duration = 0.6
+            elif emotion == 'dramatic':
+                suggested = 'flash' if cut.get('type') == 'fast_cut' else 'zoom_in'
+            elif emotion == 'happy':
+                suggested = 'zoom_in'
+            elif emotion == 'sad':
+                suggested = 'fade'
+                transition_duration = 0.5
+
+        # --- Continuity scoring & genre override ---
+        continuity = score_transition_continuity(
+            scene_before, scene_after, suggested, genre_rules
+        )
+        # Apply continuity override if score is low and override is available
+        if continuity['suggested_override'] and continuity['continuity_score'] < 0.6:
+            suggested = continuity['suggested_override']
+            reason_base += f", continuity override: {continuity['override_reason']}"
+
+        # Apply genre-specific max duration
+        if genre_rules:
+            max_dur = genre_rules.get('transition_rules', {}).get('max_duration')
+            if max_dur and transition_duration > max_dur:
+                transition_duration = max_dur
+
+        transition_entry = {
             'timestamp': timestamp,
             'type': cut['type'],
             'suggested_transition': suggested,
+            'transition_duration': transition_duration,
             'confidence': cut.get('confidence', 0.9),
             'emotion_context': emotion,
-            'beat_synced': min_beat_dist < 0.2 if nearest_beat else False,
+            'beat_synced': beat_snapped or (min_beat_dist < 0.2 if nearest_beat else False),
+            'beat_snapped': beat_snapped,
+            'original_timestamp': original_timestamp,
             'nearest_beat_offset': min_beat_dist if nearest_beat else None,
-            'reason': f"PySceneDetect {cut['type']}, emotion: {emotion}"
-        })
+            'continuity_score': continuity['continuity_score'],
+            'continuity_issues': continuity['issues'],
+            'reason': f"PySceneDetect {cut['type']}, {reason_base}"
+                      + (f", snapped to beat ({original_timestamp:.2f}s -> {timestamp:.2f}s)" if beat_snapped else ""),
+        }
+
+        # Add visual comparison data if available
+        if visual_comparison:
+            transition_entry['visual_comparison'] = {
+                'shot_type_a': visual_comparison.get('shot_type_a'),
+                'shot_type_b': visual_comparison.get('shot_type_b'),
+                'color_mismatch': visual_comparison.get('color_mismatch', False),
+                'motion_direction': visual_comparison.get('motion_direction', 'none'),
+                'scale_delta': visual_comparison.get('scale_delta', 0),
+            }
+
+        transitions.append(transition_entry)
+
+    if cap is not None:
+        cap.release()
 
     # Add start and end markers
     if not transitions or transitions[0]['timestamp'] > 0.5:
@@ -2631,11 +5972,49 @@ def _merge_transitions(
             'timestamp': 0,
             'type': 'start',
             'suggested_transition': 'fade_in',
+            'transition_duration': 0.5,
             'confidence': 1.0,
             'reason': 'Video start'
         })
 
     return transitions
+
+
+def _are_semantically_similar(prompt_a: str, prompt_b: str, threshold: float = 0.7) -> bool:
+    """Check if two SFX prompts are semantically similar.
+
+    Uses sentence-transformers if available (already loaded for SFX matching),
+    falls back to word-overlap ratio.
+
+    Args:
+        prompt_a: First SFX prompt
+        prompt_b: Second SFX prompt
+        threshold: Similarity threshold (0.0-1.0)
+
+    Returns:
+        True if prompts are semantically similar above threshold
+    """
+    # Try semantic similarity with sentence model
+    model = get_sentence_model()
+    if model is not None:
+        try:
+            import torch
+            from sentence_transformers import util
+            emb_a = model.encode(prompt_a, convert_to_tensor=True)
+            emb_b = model.encode(prompt_b, convert_to_tensor=True)
+            similarity = float(util.cos_sim(emb_a, emb_b)[0][0])
+            return similarity >= threshold
+        except Exception:
+            pass
+
+    # Fallback: word overlap ratio
+    words_a = set(prompt_a.lower().split())
+    words_b = set(prompt_b.lower().split())
+    if not words_a or not words_b:
+        return False
+    overlap = len(words_a & words_b)
+    union = len(words_a | words_b)
+    return (overlap / union) > 0.5 if union > 0 else False
 
 
 def suggest_sfx_pro(
@@ -2946,21 +6325,58 @@ def suggest_sfx_pro(
             })
             accent_idx += 1
 
-    # Sort and deduplicate
+    # Sort and context-aware deduplicate
     suggestions.sort(key=lambda x: x['timestamp'])
+
+    # Type priority for replacement when too close
+    type_priority = {
+        'scene_contextual': 3,
+        'audio_opportunity': 2,
+        'speech_accent': 1,
+    }
 
     unique = []
     for suggestion in suggestions:
         if not unique:
             unique.append(suggestion)
-        elif suggestion['timestamp'] - unique[-1]['timestamp'] >= 1.5:
+            continue
+
+        # Check against all existing suggestions for conflicts
+        conflict_idx = None
+        for i, existing in enumerate(unique):
+            time_gap = abs(suggestion['timestamp'] - existing['timestamp'])
+            same_type = suggestion.get('type', '') == existing.get('type', '')
+
+            # Different-type gap: 1.0s (allow close but distinct sounds)
+            # Same-type gap: 3.0s (avoid repetitive sounds)
+            min_gap = 3.0 if same_type else 1.0
+
+            if time_gap < min_gap:
+                conflict_idx = i
+                break
+
+            # Semantic similarity check for same-type pairs within 10s
+            if same_type and time_gap < 10.0:
+                if _are_semantically_similar(
+                    suggestion.get('prompt', ''),
+                    existing.get('prompt', ''),
+                    threshold=0.7
+                ):
+                    conflict_idx = i
+                    break
+
+        if conflict_idx is None:
             unique.append(suggestion)
-        elif suggestion.get('type') == 'scene_contextual' and unique[-1].get('type') != 'scene_contextual':
-            unique[-1] = suggestion
-        elif suggestion.get('type') == 'audio_opportunity' and unique[-1].get('type') not in ['scene_contextual', 'audio_opportunity']:
-            unique[-1] = suggestion
-        elif suggestion.get('confidence', 0) > unique[-1].get('confidence', 0) + 0.1:
-            unique[-1] = suggestion
+        else:
+            # Priority-based replacement
+            existing = unique[conflict_idx]
+            new_priority = type_priority.get(suggestion.get('type', ''), 0)
+            old_priority = type_priority.get(existing.get('type', ''), 0)
+
+            if new_priority > old_priority:
+                unique[conflict_idx] = suggestion
+            elif new_priority == old_priority and suggestion.get('confidence', 0) > existing.get('confidence', 0):
+                unique[conflict_idx] = suggestion
 
     return unique[:sfx_strategy.get('max_total_sfx', 20)]
 

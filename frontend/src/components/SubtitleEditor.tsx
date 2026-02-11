@@ -59,28 +59,108 @@ export default function SubtitleEditor() {
     setNewSubtitle({ text: '', start: 0, end: 0 })
   }
 
+  // Speaker colors for differentiation
+  const SPEAKER_COLORS = [
+    '#ffffff', '#00BFFF', '#FFD700', '#FF6B6B',
+    '#7CFC00', '#FF69B4', '#00CED1', '#FFA500',
+  ]
+
   const handleAutoGenerateFromTranscription = () => {
     if (!analysis?.transcription) {
       showWarning('Please analyze the video first to generate transcription')
       return
     }
 
-    showSuccess('Subtitles generated from transcription!')
+    const captionRules = analysis.genre_rules?.caption_rules
+    const maxWordsPerLine = captionRules?.max_words_per_line || 8
 
-    analysis.transcription.forEach((transcript: { text: string; start: number; end: number }) => {
-      addSubtitle({
-        text: transcript.text,
-        start_time: transcript.start,
-        end_time: transcript.end,
-        style: {
-          fontSize: 24,
-          fontFamily: 'Arial',
-          color: '#ffffff',
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          position: 'bottom'
+    let count = 0
+    analysis.transcription.forEach((transcript) => {
+      const words = transcript.words
+      const speakerId = transcript.speaker_id
+      const energyLevel = transcript.energy_level
+
+      // Build speaker-aware style
+      const baseStyle: any = {
+        fontSize: 24,
+        fontFamily: 'Arial',
+        color: '#ffffff',
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        position: 'bottom' as const,
+      }
+
+      // Apply speaker color
+      if (speakerId !== undefined && speakerId !== null) {
+        baseStyle.color = SPEAKER_COLORS[speakerId % SPEAKER_COLORS.length]
+      }
+
+      // Apply energy emphasis
+      if (energyLevel === 'high') {
+        baseStyle.fontWeight = 'bold'
+        baseStyle.fontSize = 28
+      } else if (energyLevel === 'low') {
+        baseStyle.fontStyle = 'italic'
+      }
+
+      // Genre style override
+      if (captionRules?.style === 'minimal') {
+        baseStyle.backgroundColor = 'transparent'
+        baseStyle.fontSize = Math.min(baseStyle.fontSize, 20)
+      } else if (captionRules?.style === 'bold') {
+        baseStyle.fontWeight = 'bold'
+      }
+
+      // Use word-level timing if available
+      if (words && words.length > 0) {
+        let currentWords: typeof words = []
+        let chunkStart = words[0].start
+
+        for (const w of words) {
+          currentWords.push(w)
+          if (currentWords.length >= maxWordsPerLine) {
+            addSubtitle({
+              text: currentWords.map(cw => cw.word).join(' '),
+              start_time: chunkStart,
+              end_time: w.end,
+              style: baseStyle
+            })
+            count++
+            currentWords = []
+            chunkStart = 0 // Will be set by next word
+          } else if (currentWords.length === 1) {
+            chunkStart = w.start
+          }
         }
-      })
+        // Remaining words
+        if (currentWords.length > 0) {
+          addSubtitle({
+            text: currentWords.map(cw => cw.word).join(' '),
+            start_time: chunkStart,
+            end_time: currentWords[currentWords.length - 1].end,
+            style: baseStyle
+          })
+          count++
+        }
+      } else {
+        // Fallback: use segment as-is
+        addSubtitle({
+          text: transcript.text,
+          start_time: transcript.start,
+          end_time: transcript.end,
+          style: baseStyle
+        })
+        count++
+      }
     })
+
+    const hasSpeakers = analysis.transcription.some(t => t.speaker_id !== undefined)
+    const hasWords = analysis.transcription.some(t => t.words && t.words.length > 0)
+    const extras = [
+      hasWords ? 'word-level timing' : null,
+      hasSpeakers ? 'speaker colors' : null,
+    ].filter(Boolean).join(', ')
+
+    showSuccess(`${count} subtitles generated${extras ? ` with ${extras}` : ''}!`)
   }
 
   return (

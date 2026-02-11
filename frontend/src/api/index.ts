@@ -25,6 +25,7 @@ export type {
   Transition,
   BackgroundAudio,
   BGMSuggestion,
+  AnalysisScene,
 } from './projects'
 export type { VideoUploadResponse, VideoMetadata, AudioExtractResponse } from './video'
 export type { TaskResponse, TaskStatus, SFXGenerateRequest, AutoGenerateRequest, AutoGenerateResult, TemplateSettings } from './ai'

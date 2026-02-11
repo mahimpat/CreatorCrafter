@@ -31,12 +31,8 @@ interface AutoEditPanelProps {
   isAnalyzing: boolean
   hasClips: boolean
   hasAnalysis: boolean
-  analysis?: {
-    scenes?: Array<{ timestamp: number; description: string }>
-    suggestedSFX?: Array<{ timestamp: number; prompt: string; confidence: number }>
-    suggestedTransitions?: Array<{ timestamp: number; suggested_transition: string; confidence: number }>
-    transcription?: Array<{ text: string; start: number; end: number }>
-  } | null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  analysis?: any
   onAnalyze: () => void
   onComplete: () => void
   onPreview?: () => void

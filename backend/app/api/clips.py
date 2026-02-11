@@ -20,9 +20,14 @@ from app.schemas.clip import (
 )
 from app.api.deps import get_current_user
 from app.services.file_service import file_service
-from app.services.video_stitcher import VideoStitcher, ClipInfo, TransitionInfo, SFXTrackInfo
+from app.services.video_stitcher import (
+    VideoStitcher, ClipInfo, TransitionInfo, SFXTrackInfo,
+    SubtitleInfo, TextOverlayInfo, ColorGradeInfo, AudioDuckPoint
+)
 from app.models.transition import Transition
 from app.models.sfx_track import SFXTrack
+from app.models.subtitle import Subtitle
+from app.models.text_overlay import TextOverlay
 from app.models.background_audio import BackgroundAudio
 from app.config import settings
 
@@ -433,11 +438,16 @@ async def stitch_clips(
     background_tasks: BackgroundTasks,
     include_sfx: bool = True,
     include_bgm: bool = True,
+    include_subtitles: bool = True,
+    include_text_overlays: bool = True,
+    include_color_grading: bool = True,
+    include_audio_ducking: bool = True,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Stitch all clips together with transitions, SFX, and BGM, then export.
+    Stitch all clips together with transitions, SFX, BGM, subtitles,
+    text overlays, color grading, and audio ducking, then export.
     Runs in background with WebSocket progress updates.
     Returns a task_id for tracking progress.
     """
@@ -542,6 +552,72 @@ async def stitch_clips(
             if not os.path.exists(bgm_path):
                 bgm_path = None
 
+    # Gather subtitles for burn-in
+    subtitle_infos = None
+    if include_subtitles:
+        subtitles_db = db.query(Subtitle).filter(
+            Subtitle.project_id == project_id
+        ).order_by(Subtitle.start_time).all()
+
+        if subtitles_db:
+            subtitle_infos = []
+            for sub in subtitles_db:
+                subtitle_infos.append(SubtitleInfo(
+                    text=sub.text,
+                    start_time=sub.start_time,
+                    end_time=sub.end_time,
+                    style=sub.style
+                ))
+
+    # Gather text overlays
+    overlay_infos = None
+    if include_text_overlays:
+        overlays_db = db.query(TextOverlay).filter(
+            TextOverlay.project_id == project_id
+        ).order_by(TextOverlay.start_time).all()
+
+        if overlays_db:
+            overlay_infos = []
+            for ovl in overlays_db:
+                overlay_infos.append(TextOverlayInfo(
+                    text=ovl.text,
+                    start_time=ovl.start_time,
+                    end_time=ovl.end_time,
+                    style=ovl.style
+                ))
+
+    # Gather color grading and audio ducking from analysis results
+    color_grade_info = None
+    ducking_info = None
+
+    if project.analysis_results:
+        analysis = project.analysis_results
+
+        # Color grading from analysis
+        if include_color_grading:
+            cg_data = analysis.get('color_grading', {})
+            global_adj = cg_data.get('global_adjustments', {})
+            if global_adj:
+                color_grade_info = ColorGradeInfo(
+                    brightness=global_adj.get('brightness', 0.0),
+                    contrast=global_adj.get('contrast', 1.0),
+                    saturation=global_adj.get('saturation', 1.0),
+                    gamma=global_adj.get('gamma', 1.0),
+                )
+
+        # Audio ducking from analysis
+        if include_audio_ducking:
+            mix_map = analysis.get('audio_mix_map', {})
+            duck_points = mix_map.get('ducking_points', [])
+            if duck_points:
+                ducking_info = []
+                for dp in duck_points:
+                    ducking_info.append(AudioDuckPoint(
+                        timestamp=dp.get('timestamp', 0),
+                        bgm_volume=dp.get('bgm_volume', 1.0),
+                        is_speech=dp.get('is_speech', False),
+                    ))
+
     # Get output directory for exports
     export_dir = file_service.get_file_path(
         current_user.id, project_id, "exports", ""
@@ -567,10 +643,25 @@ async def stitch_clips(
         bgm_path=bgm_path,
         bgm_volume=bgm_volume,
         sfx_infos=sfx_infos,
+        subtitle_infos=subtitle_infos,
+        overlay_infos=overlay_infos,
+        color_grade_info=color_grade_info,
+        ducking_infos=ducking_info,
     )
+
+    extras = []
+    if subtitle_infos:
+        extras.append(f"{len(subtitle_infos)} subtitles")
+    if overlay_infos:
+        extras.append(f"{len(overlay_infos)} overlays")
+    if color_grade_info:
+        extras.append("color grading")
+    if ducking_info:
+        extras.append("audio ducking")
+    extras_str = f" + {', '.join(extras)}" if extras else ""
 
     return {
         "success": True,
         "task_id": task_id,
-        "message": f"Export started for {len(clips)} clips"
+        "message": f"Export started for {len(clips)} clips{extras_str}"
     }

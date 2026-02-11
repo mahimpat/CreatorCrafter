@@ -79,37 +79,200 @@ export interface BGMSuggestion {
   generation_prompt?: string
 }
 
-export interface VideoAnalysisResult {
-  scenes: Array<{
-    timestamp: number
-    type: string
-    description: string
-    action_description?: string
-    sound_description?: string
-    confidence: number
-  }>
-  suggestedSFX: Array<{
-    timestamp: number
-    prompt: string
-    reason: string
-    visual_context?: string
-    action_context?: string
-    confidence: number
-  }>
-  suggestedTransitions?: Array<{
-    timestamp: number
-    type: 'cut' | 'gradual' | 'start' | 'end'
-    confidence: number
-    suggested_transition: 'cut' | 'fade' | 'fade_in' | 'fade_out' | 'dissolve' | 'wipe' | 'slide'
-    reason: string
-  }>
-  suggestedBGM?: BGMSuggestion[]
-  transcription: Array<{
-    text: string
+export interface AnalysisScene {
+  timestamp: number
+  type: string
+  description: string
+  action_description?: string
+  sound_description?: string
+  confidence: number
+  emotion?: { dominant: string; scores: Record<string, number> }
+  motion_context?: { motion_level: string; direction?: string }
+  shot_type?: string
+  color_mood?: string
+}
+
+export interface AnalysisSFX {
+  timestamp: number
+  prompt: string
+  reason: string
+  visual_context?: string
+  action_context?: string
+  confidence: number
+  layer_type?: 'foley' | 'ambient' | 'accent' | 'contrast' | 'flat'
+}
+
+export interface AnalysisTransition {
+  timestamp: number
+  type: string
+  confidence: number
+  suggested_transition?: string
+  reason: string
+  duration?: number
+  continuity_score?: number
+  beat_synced?: boolean
+}
+
+export interface TranscriptionSegment {
+  text: string
+  start: number
+  end: number
+  confidence: number
+  speaker_id?: number
+  energy_level?: 'low' | 'medium' | 'high'
+  words?: Array<{
+    word: string
     start: number
     end: number
-    confidence: number
+    probability: number
   }>
+}
+
+export interface SFXLayerEntry {
+  timestamp: number
+  foley?: { prompt: string; confidence: number; duration_hint?: number }
+  ambient?: { prompt: string; confidence: number; duration_hint?: number }
+  accent?: { prompt: string; confidence: number; duration_hint?: number }
+  contrast?: { prompt: string; confidence: number; duration_hint?: number }
+}
+
+export interface ColorGradingData {
+  overall_lut?: string
+  consistency_score?: number
+  global_adjustments?: {
+    brightness: number
+    contrast: number
+    saturation: number
+    gamma: number
+  }
+  per_scene_grades?: Array<{
+    timestamp: number
+    lift?: Record<string, number>
+    gamma?: Record<string, number>
+    gain?: Record<string, number>
+  }>
+}
+
+export interface AudioMixMapData {
+  bgm_volume_curve?: Array<{ timestamp: number; volume: number }>
+  ducking_points?: Array<{
+    timestamp: number
+    bgm_volume: number
+    sfx_volume: number
+    is_speech: boolean
+  }>
+  mix_notes?: string[]
+}
+
+export interface NarrativeArcData {
+  arc_type?: string
+  phases?: Array<{
+    phase: string
+    start_time: number
+    end_time: number
+    intensity: number
+  }>
+  climax_timestamp?: number
+}
+
+export interface PacingAdjustment {
+  timestamp: number
+  type: string
+  reason: string
+  suggestion: string
+  severity?: 'low' | 'medium' | 'high'
+}
+
+export interface BRollPoint {
+  timestamp: number
+  duration: number
+  reason: string
+  prompt?: string
+  type?: string
+}
+
+export interface TextOverlaySuggestion {
+  text: string
+  type: 'intro_title' | 'lower_third' | 'section_title' | 'callout' | 'outro_title'
+  start_time?: number
+  end_time?: number
+  timestamp?: number
+}
+
+export interface VisualImpact {
+  timestamp: number
+  type: string
+  intensity: number
+  description?: string
+}
+
+export interface GenreRules {
+  transition_rules?: {
+    preferred_types?: string[]
+    max_duration?: number
+  }
+  sfx_rules?: {
+    max_per_minute?: number
+    max_duration?: number
+    min_duration?: number
+  }
+  pacing_rules?: {
+    target_pace?: string
+  }
+  caption_rules?: {
+    style?: string
+    max_words_per_line?: number
+  }
+}
+
+export interface VideoAnalysisResult {
+  // Core analysis
+  scenes: AnalysisScene[]
+  suggestedSFX: AnalysisSFX[]
+  suggestedTransitions?: AnalysisTransition[]
+  suggestedBGM?: BGMSuggestion[]
+  transcription: TranscriptionSegment[]
+
+  // Enhanced analysis data
+  sfx_layers?: SFXLayerEntry[]
+  visual_impacts?: VisualImpact[]
+  color_grading?: ColorGradingData
+  audio_mix_map?: AudioMixMapData
+  narrative_arc?: NarrativeArcData
+  pacing_adjustments?: PacingAdjustment[]
+  suggested_text_overlays?: TextOverlaySuggestion[]
+  broll_points?: BRollPoint[]
+  genre_rules?: GenreRules
+  pre_classification?: {
+    video_type: string
+    speech_ratio?: number
+    harmonic_ratio?: number
+  }
+  emotion_distribution?: Record<string, number>
+  visual_rhythm?: Record<string, unknown>
+  audio_features?: Record<string, unknown>
+  audio_advanced?: {
+    tempo?: number
+    beats?: Array<{ timestamp: number; strength: number }>
+    beat_sync_points?: number[]
+    onsets?: Array<{ timestamp: number; strength: number; type?: string }>
+    spectral?: Record<string, unknown>
+  }
+  audio_content?: Record<string, unknown>
+
+  // Auto-generate metadata (added after auto-gen runs)
+  auto_generate_metadata?: {
+    genre_detected: string
+    subtitles_word_level: boolean
+    sfx_layering_used: boolean
+    transitions_ai_scored: boolean
+    text_overlays_auto: number
+    color_grading_available: boolean
+    audio_ducking_available: boolean
+    narrative_arc_available: boolean
+    pacing_adjustments_count: number
+    broll_suggestions_count: number
+  }
 }
 
 export interface VideoClip {
@@ -236,7 +399,14 @@ export const projectsApi = {
     ),
   reorderClips: (projectId: number, clipOrders: Array<{ id: number; timeline_order: number }>) =>
     apiClient.put<VideoClip[]>(`/projects/${projectId}/clips/reorder`, { clip_orders: clipOrders }),
-  stitchClips: (projectId: number, options?: { include_sfx?: boolean; include_bgm?: boolean }) =>
+  stitchClips: (projectId: number, options?: {
+    include_sfx?: boolean
+    include_bgm?: boolean
+    include_subtitles?: boolean
+    include_text_overlays?: boolean
+    include_color_grading?: boolean
+    include_audio_ducking?: boolean
+  }) =>
     apiClient.post<{ success: boolean; task_id: string; message: string }>(
       `/projects/${projectId}/clips/stitch`,
       null,
