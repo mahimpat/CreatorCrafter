@@ -82,6 +82,7 @@ export default function VideoEditor() {
   const shouldAutoPlayRef = useRef(false)
   const sfxAudioRefs = useRef<Map<number, HTMLAudioElement>>(new Map())
   const currentTimeRef = useRef(0)
+  const videoErrorRetryRef = useRef(0)
 
   // === useProject MUST BE CALLED BEFORE callbacks that use its return values ===
   const {
@@ -109,6 +110,7 @@ export default function VideoEditor() {
     setProjectMode,
     getSFXStreamUrl,
     refreshProject,
+    refreshVideoUrl,
   } = useProject()
 
   // WebGL support detection
@@ -148,9 +150,32 @@ export default function VideoEditor() {
     }
   }, [])
 
-  const handleVideoError = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+  const handleVideoError = useCallback(async (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const video = e.currentTarget
     console.error('Video error:', video.error)
+
+    // Attempt recovery: token may have expired, rebuild URL with fresh token
+    const isAuthLikely = video.error && (
+      video.error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ||
+      video.error.code === MediaError.MEDIA_ERR_NETWORK
+    )
+
+    if (isAuthLikely && videoErrorRetryRef.current < 2) {
+      videoErrorRetryRef.current++
+      try {
+        // Trigger a lightweight API call to refresh the token via interceptor
+        if (project?.id) {
+          await projectsApi.get(project.id)
+        }
+        // Rebuild the video URL with the now-fresh token
+        refreshVideoUrl()
+        return // URL change will trigger video reload
+      } catch {
+        // Token refresh failed, fall through to show error
+      }
+    }
+
+    videoErrorRetryRef.current = 0
     setIsVideoLoading(false)
     videoReadyRef.current = false
 
@@ -161,7 +186,7 @@ export default function VideoEditor() {
         recoverable: isNetworkError
       })
     }
-  }, [])
+  }, [project?.id, refreshVideoUrl])
 
   const handleLoadStart = useCallback(() => {
     setIsVideoLoading(true)
@@ -172,6 +197,7 @@ export default function VideoEditor() {
   const handleCanPlay = useCallback(() => {
     setIsVideoLoading(false)
     videoReadyRef.current = true
+    videoErrorRetryRef.current = 0
     // Note: Seeking is handled by handleLoadedMetadata, not here
     // This just marks the video as ready to play
   }, [])
@@ -388,7 +414,7 @@ export default function VideoEditor() {
     } else if (sortedClips.length === 0) {
       setCurrentClipUrl(null)
     }
-  }, [sortedClips, currentClipIndex, getClipStreamUrl, preloadClip])
+  }, [sortedClips, currentClipIndex, getClipStreamUrl, preloadClip, videoUrl])
 
   // Load clips, BGM, and transitions on mount
   useEffect(() => {

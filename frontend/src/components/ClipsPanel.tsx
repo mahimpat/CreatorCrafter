@@ -27,9 +27,10 @@ export default function ClipsPanel({
   const [showUploader, setShowUploader] = useState(clips.length === 0)
 
   useEffect(() => {
-    // Show uploader if no clips
     if (clips.length === 0) {
       setShowUploader(true)
+    } else {
+      setShowUploader(false)
     }
   }, [clips.length])
 

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # JWT Authentication
     SECRET_KEY: str = "your-secret-key-change-in-production-use-openssl-rand-hex-32"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours - desktop app sessions are long
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Storage

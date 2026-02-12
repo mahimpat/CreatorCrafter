@@ -70,6 +70,7 @@ interface ProjectContextType extends ProjectState {
   // Helpers
   getVideoStreamUrl: () => string | null
   getSFXStreamUrl: (filename: string) => string
+  refreshVideoUrl: () => void
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined)
@@ -357,6 +358,17 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
     setState((prev) => ({ ...prev, isAnalyzing: analyzing }))
   }, [])
 
+  // Rebuild video URL with fresh token (call after token refresh)
+  const refreshVideoUrl = useCallback(() => {
+    setState((prev) => {
+      if (!prev.project?.video_filename || !prev.projectId) return prev
+      return {
+        ...prev,
+        videoUrl: buildStreamUrl(prev.projectId, 'source', prev.project.video_filename),
+      }
+    })
+  }, [])
+
   // Helpers
   const getVideoStreamUrl = useCallback(() => {
     return state.videoUrl
@@ -396,6 +408,7 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
         setIsAnalyzing,
         getVideoStreamUrl,
         getSFXStreamUrl,
+        refreshVideoUrl,
       }}
     >
       {children}
