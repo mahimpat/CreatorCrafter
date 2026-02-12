@@ -243,6 +243,49 @@ XFADE_TRANSITIONS = {
     'hologram': 'pixelize',
 }
 
+# Custom FFmpeg xfade expressions for transitions that were previously approximated.
+# FFmpeg custom xfade syntax: xfade=transition=custom:expr='EXPRESSION'
+# Variables: X, Y (pixel coords), W, H (dimensions), P (progress 0->1),
+# A (pixel from clip 1), B (pixel from clip 2), a0(x,y), b0(x,y) (sampling)
+XFADE_CUSTOM_EXPRESSIONS = {
+    # Circle wipe with soft edge (was: circleclose/circleopen)
+    'circle_in': "if(lte(hypot(X-W/2,Y-H/2), P*hypot(W/2,H/2)*1.1+10), B, A)",
+    'circle_out': "if(gte(hypot(X-W/2,Y-H/2), (1-P)*hypot(W/2,H/2)*1.1+10), B, A)",
+
+    # Diamond wipe (was: diagtl/diagbr)
+    'diamond_in': "if(lte(abs(X-W/2)/W+abs(Y-H/2)/H, P*1.2), B, A)",
+    'diamond_out': "if(gte(abs(X-W/2)/W+abs(Y-H/2)/H, (1-P)*1.2), B, A)",
+
+    # Diagonal feathered wipes
+    'wipe_diagonal_tl': "A*(1-clip((X/W+Y/H-2*P*1.2)/(0.15+0.001),0,1))+B*clip((X/W+Y/H-2*P*1.2)/(0.15+0.001),0,1)",
+    'wipe_diagonal_br': "A*(1-clip((2-X/W-Y/H-2*P*1.2)/(0.15+0.001),0,1))+B*clip((2-X/W-Y/H-2*P*1.2)/(0.15+0.001),0,1)",
+
+    # Zoom in/out (was: zoomin/fadewhite)
+    'zoom_in': "a0(W/2+(X-W/2)*(1-P), H/2+(Y-H/2)*(1-P))*(1-P)+B*P",
+    'zoom_out': "A*(1-P)+b0(W/2+(X-W/2)*P, H/2+(Y-H/2)*P)*P",
+
+    # Noise dissolve (was: dissolve)
+    'liquid': "if(gt(random(Y*W+X+1)*(1.2-abs(P-0.5)*0.4), 1-P), B, A)",
+    'smoke': "if(gt(random(Y*W+X+1)*(1.2-abs(P-0.5)*0.4), 1-P), B, A)",
+
+    # Pixelate with variable block size (was: pixelize for everything)
+    'pixelate': "if(lt(P,0.5), a0(floor(X/(2+200*(0.5-abs(P-0.5))))*(2+200*(0.5-abs(P-0.5))),floor(Y/(2+200*(0.5-abs(P-0.5))))*(2+200*(0.5-abs(P-0.5)))), b0(floor(X/(2+200*(0.5-abs(P-0.5))))*(2+200*(0.5-abs(P-0.5))),floor(Y/(2+200*(0.5-abs(P-0.5))))*(2+200*(0.5-abs(P-0.5)))))",
+    'glitch': "if(gt(random(floor(Y/20)*W+floor(X/20)+P*100),0.5-P*0.5), B, A)",
+    'glitch_heavy': "if(gt(random(floor(Y/10)*W+floor(X/10)+P*200),0.3-P*0.3), B, A)",
+
+    # Star/heart shapes - radial with angular modulation
+    'star_in': "if(lte(hypot(X-W/2,Y-H/2)*(1+0.3*cos(5*atan2(Y-H/2,X-W/2))), P*hypot(W/2,H/2)*1.3), B, A)",
+    'heart_in': "if(lte(hypot(X-W/2,Y-H/2)*(1-0.3*cos(atan2(Y-H/2,X-W/2))), P*hypot(W/2,H/2)*1.3), B, A)",
+
+    # Blinds / bars
+    'blinds': "if(gt(mod(Y, H/10), (1-P)*H/10), B, A)",
+    'bars_horizontal': "if(gt(mod(Y, H/8), (1-P)*H/8), B, A)",
+    'bars_vertical': "if(gt(mod(X, W/8), (1-P)*W/8), B, A)",
+
+    # Spin (was: radial)
+    'spin': "if(lt(mod(atan2(Y-H/2,X-W/2)+3.14159, 6.28318), P*6.28318), B, A)",
+}
+
 
 def _escape_drawtext(text: str) -> str:
     """Escape text for FFmpeg drawtext filter.
@@ -273,9 +316,34 @@ class VideoStitcher:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def get_xfade_transition(self, transition_type: str) -> Optional[str]:
-        """Get the FFmpeg xfade transition name for our transition type."""
-        return XFADE_TRANSITIONS.get(transition_type, 'fade')
+    def get_xfade_transition(self, transition_type: str) -> Tuple[Optional[str], Optional[str]]:
+        """Get the FFmpeg xfade transition name and optional custom expression.
+
+        Returns:
+            Tuple of (xfade_name, custom_expr). If custom_expr is set,
+            xfade_name will be 'custom'.
+        """
+        # Check custom expressions first for higher-fidelity export
+        if transition_type in XFADE_CUSTOM_EXPRESSIONS:
+            return ('custom', XFADE_CUSTOM_EXPRESSIONS[transition_type])
+        # Fall back to built-in xfade types
+        return (XFADE_TRANSITIONS.get(transition_type, 'fade'), None)
+
+    def _get_easing_expr(self, easing: str) -> str:
+        """Return an FFmpeg expression that remaps P with an easing curve.
+
+        For custom xfade expressions, P can be replaced with this to apply easing.
+        Built-in xfade transitions don't support easing natively.
+        """
+        if easing == 'ease-in':
+            return '(P*P*P)'
+        if easing == 'ease-out':
+            return '(1-pow(1-P,3))'
+        if easing == 'ease-in-out':
+            return 'if(lt(P,0.5),4*P*P*P,1-pow(-2*P+2,3)/2)'
+        if easing == 'ease':
+            return 'if(lt(P,0.5),2*P*P,1-pow(-2*P+2,2)/2)'
+        return 'P'  # linear
 
     def stitch_clips(
         self,
@@ -706,7 +774,7 @@ class VideoStitcher:
                 output_video = f"vt{i}" if i < len(transitions) - 1 else "vout"
                 output_audio = f"at{i}" if i < len(transitions) - 1 else "aout"
 
-                xfade_type = self.get_xfade_transition(transition.type)
+                xfade_type, custom_expr = self.get_xfade_transition(transition.type)
 
                 if xfade_type is None or transition.type == 'cut':
                     filter_parts.append(
@@ -717,10 +785,26 @@ class VideoStitcher:
                     )
                 else:
                     offset = current_offset - transition.duration
-                    filter_parts.append(
-                        f"[{prev_video}][{next_video}]xfade=transition={xfade_type}:"
-                        f"duration={transition.duration}:offset={offset}[{output_video}]"
-                    )
+
+                    if custom_expr:
+                        # Apply easing to custom expression by replacing P
+                        easing = (transition.parameters or {}).get('easing', 'linear')
+                        easing_expr = self._get_easing_expr(easing)
+                        if easing_expr != 'P':
+                            expr_with_easing = custom_expr.replace('P', easing_expr)
+                        else:
+                            expr_with_easing = custom_expr
+                        filter_parts.append(
+                            f"[{prev_video}][{next_video}]xfade=transition=custom:"
+                            f"duration={transition.duration}:offset={offset}:"
+                            f"expr='{expr_with_easing}'[{output_video}]"
+                        )
+                    else:
+                        filter_parts.append(
+                            f"[{prev_video}][{next_video}]xfade=transition={xfade_type}:"
+                            f"duration={transition.duration}:offset={offset}[{output_video}]"
+                        )
+
                     audio_filter_parts.append(
                         f"[{prev_audio}][{next_audio}]acrossfade=d={transition.duration}[{output_audio}]"
                     )

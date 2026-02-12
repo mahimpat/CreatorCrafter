@@ -397,6 +397,8 @@ export const projectsApi = {
     apiClient.post<{ original_clip: VideoClip; new_clip: VideoClip; message: string }>(
       `/projects/${projectId}/clips/${clipId}/split?split_time=${splitTime}`
     ),
+  convertSourceToClip: (projectId: number) =>
+    apiClient.post<VideoClip>(`/projects/${projectId}/clips/convert-source`),
   reorderClips: (projectId: number, clipOrders: Array<{ id: number; timeline_order: number }>) =>
     apiClient.put<VideoClip[]>(`/projects/${projectId}/clips/reorder`, { clip_orders: clipOrders }),
   stitchClips: (projectId: number, options?: {

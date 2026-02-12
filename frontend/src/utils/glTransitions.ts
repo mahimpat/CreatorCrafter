@@ -76,6 +76,43 @@ void main() {
 `;
 
 /**
+ * Simplex noise GLSL (2D) - Ashima Arts, MIT License
+ * Prepended into custom shaders that need organic/noisy edges.
+ */
+const SIMPLEX_NOISE_GLSL = `
+vec3 mod289v3(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec2 mod289v2(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec3 permute(vec3 x) { return mod289v3(((x * 34.0) + 1.0) * x); }
+
+float snoise(vec2 v) {
+  const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                      -0.577350269189626, 0.024390243902439);
+  vec2 i = floor(v + dot(v, C.yy));
+  vec2 x0 = v - i + dot(i, C.xx);
+  vec2 i1;
+  i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+  vec4 x12 = x0.xyxy + C.xxzz;
+  x12.xy -= i1;
+  i = mod289v2(i);
+  vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0))
+           + i.x + vec3(0.0, i1.x, 1.0));
+  vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy),
+               dot(x12.zw, x12.zw)), 0.0);
+  m = m * m;
+  m = m * m;
+  vec3 x_ = 2.0 * fract(p * C.www) - 1.0;
+  vec3 h = abs(x_) - 0.5;
+  vec3 ox = floor(x_ + 0.5);
+  vec3 a0_ = x_ - ox;
+  m *= 1.79284291400159 - 0.85373472095314 * (a0_ * a0_ + h * h);
+  vec3 g;
+  g.x = a0_.x * x0.x + h.x * x0.y;
+  g.yz = a0_.yz * x12.xz + h.yz * x12.yw;
+  return 130.0 * dot(m, g);
+}
+`;
+
+/**
  * Mapping from our internal transition types to gl-transitions names
  * This maps 90+ internal effect names to the corresponding gl-transition
  */
@@ -139,7 +176,12 @@ export const TRANSITION_MAP: Record<string, string> = {
   'wave': 'ripple',
   'swirl': 'Swirl',
   'morph': 'Mosaic',
-  'liquid': 'ripple',
+  'liquid': 'dissolveNoise',
+
+  // === ORGANIC (noise-driven custom shaders) ===
+  'ink_drop': 'inkSpread',
+  'film_burn': 'burnEdge',
+  'paint_splatter': 'tearAway',
 
   // === GLITCH/DIGITAL ===
   'glitch': 'GlitchDisplace',
@@ -193,7 +235,6 @@ export const TRANSITION_MAP: Record<string, string> = {
   // === CINEMATIC ===
   'cinematic': 'directionalwarp',
   'film': 'FilmBurn',
-  'film_burn': 'FilmBurn',
 
   // === PATTERN TRANSITIONS ===
   'perlin': 'perlin',
@@ -253,25 +294,83 @@ vec4 transition(vec2 uv) {
  * Custom shaders for effects not in gl-transitions
  */
 const CUSTOM_SHADERS: Record<string, string> = {
-  // Simple wipe transitions (gl-transitions doesn't have these built-in)
-  'wipeLeft': `
+  // Noise-enhanced wipe transitions with organic edges
+  'wipeLeft': SIMPLEX_NOISE_GLSL + `
 vec4 transition(vec2 uv) {
-  return mix(getFromColor(uv), getToColor(uv), step(1.0 - progress, uv.x));
+  float edge = (1.0 - progress) * 1.2 - 0.1;
+  float n = snoise(uv * 8.0) * 0.15;
+  float mask = smoothstep(edge - 0.08, edge + 0.08, uv.x + n);
+  return mix(getToColor(uv), getFromColor(uv), mask);
 }
 `,
-  'wipeRight': `
+  'wipeRight': SIMPLEX_NOISE_GLSL + `
 vec4 transition(vec2 uv) {
-  return mix(getFromColor(uv), getToColor(uv), step(uv.x, progress));
+  float edge = progress * 1.2 - 0.1;
+  float n = snoise(uv * 8.0) * 0.15;
+  float mask = smoothstep(edge - 0.08, edge + 0.08, uv.x + n);
+  return mix(getFromColor(uv), getToColor(uv), mask);
 }
 `,
-  'wipeUp': `
+  'wipeUp': SIMPLEX_NOISE_GLSL + `
 vec4 transition(vec2 uv) {
-  return mix(getFromColor(uv), getToColor(uv), step(1.0 - progress, uv.y));
+  float edge = (1.0 - progress) * 1.2 - 0.1;
+  float n = snoise(uv * 8.0) * 0.15;
+  float mask = smoothstep(edge - 0.08, edge + 0.08, uv.y + n);
+  return mix(getToColor(uv), getFromColor(uv), mask);
 }
 `,
-  'wipeDown': `
+  'wipeDown': SIMPLEX_NOISE_GLSL + `
 vec4 transition(vec2 uv) {
-  return mix(getFromColor(uv), getToColor(uv), step(uv.y, progress));
+  float edge = progress * 1.2 - 0.1;
+  float n = snoise(uv * 8.0) * 0.15;
+  float mask = smoothstep(edge - 0.08, edge + 0.08, uv.y + n);
+  return mix(getFromColor(uv), getToColor(uv), mask);
+}
+`,
+  // Full-screen noise dissolve
+  'dissolveNoise': SIMPLEX_NOISE_GLSL + `
+vec4 transition(vec2 uv) {
+  float n = snoise(uv * 12.0) * 0.5 + 0.5;
+  float threshold = progress * 1.2 - 0.1;
+  float mask = smoothstep(threshold - 0.05, threshold + 0.05, n);
+  return mix(getFromColor(uv), getToColor(uv), mask);
+}
+`,
+  // Directional wipe with bright edge glow (film burn effect)
+  'burnEdge': SIMPLEX_NOISE_GLSL + `
+vec4 transition(vec2 uv) {
+  float edge = progress * 1.3 - 0.15;
+  float n = snoise(uv * 6.0) * 0.12;
+  float d = uv.x + n;
+  float mask = smoothstep(edge - 0.06, edge + 0.06, d);
+  // Orange/white glow at the transition boundary
+  float glow = smoothstep(0.12, 0.0, abs(d - edge)) * (1.0 - step(1.0, progress));
+  vec4 from = getFromColor(uv);
+  vec4 to = getToColor(uv);
+  vec4 result = mix(from, to, mask);
+  result.rgb += vec3(1.0, 0.6, 0.2) * glow * 1.5;
+  return result;
+}
+`,
+  // Circle from center with noise-distorted radius
+  'inkSpread': SIMPLEX_NOISE_GLSL + `
+vec4 transition(vec2 uv) {
+  vec2 center = vec2(0.5, 0.5);
+  float dist = length(uv - center);
+  float n = snoise(uv * 10.0) * 0.08;
+  float radius = progress * 0.9;
+  float mask = smoothstep(radius - 0.06, radius + 0.06, dist + n);
+  return mix(getToColor(uv), getFromColor(uv), mask);
+}
+`,
+  // Diagonal tear with rough noise edge
+  'tearAway': SIMPLEX_NOISE_GLSL + `
+vec4 transition(vec2 uv) {
+  float diag = (uv.x + uv.y) * 0.5;
+  float edge = progress * 1.3 - 0.15;
+  float n = snoise(uv * 10.0) * 0.18;
+  float mask = smoothstep(edge - 0.07, edge + 0.07, diag + n);
+  return mix(getFromColor(uv), getToColor(uv), mask);
 }
 `,
   'fade': FADE_SHADER,

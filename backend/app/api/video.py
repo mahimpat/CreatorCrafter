@@ -142,37 +142,74 @@ async def extract_audio(
     # Ensure output directory exists
     os.makedirs(os.path.dirname(audio_path), exist_ok=True)
 
-    # Extract audio using FFmpeg
+    # Check if video has an audio stream before attempting extraction
     try:
-        result = subprocess.run(
-            [
-                'ffmpeg', '-y',
-                '-i', video_path,
-                '-vn',
-                '-acodec', 'pcm_s16le',
-                '-ar', '44100',
-                '-ac', '2',
-                audio_path
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minute timeout
+        probe_result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'a',
+             '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', video_path],
+            capture_output=True, text=True, timeout=30
         )
+        has_audio = bool(probe_result.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        has_audio = True  # Assume yes and let FFmpeg handle it
 
-        if result.returncode != 0:
-            print(f"FFmpeg stderr: {result.stderr}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"FFmpeg error: {result.stderr[:500]}"
+    if not has_audio:
+        # Video has no audio stream — generate a silent WAV file matching the video duration
+        try:
+            # Get video duration
+            dur_result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'csv=p=0', video_path],
+                capture_output=True, text=True, timeout=30
+            )
+            duration = float(dur_result.stdout.strip()) if dur_result.stdout.strip() else 10.0
+
+            result = subprocess.run(
+                ['ffmpeg', '-y', '-f', 'lavfi', '-i',
+                 f'anullsrc=r=44100:cl=stereo', '-t', str(duration),
+                 '-acodec', 'pcm_s16le', audio_path],
+                capture_output=True, text=True, timeout=300
+            )
+            if result.returncode != 0:
+                print(f"FFmpeg silent audio stderr: {result.stderr}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to generate silent audio: {result.stderr[:500]}"
+                )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=500, detail="Silent audio generation timed out")
+    else:
+        # Extract audio using FFmpeg
+        try:
+            result = subprocess.run(
+                [
+                    'ffmpeg', '-y',
+                    '-i', video_path,
+                    '-vn',
+                    '-acodec', 'pcm_s16le',
+                    '-ar', '44100',
+                    '-ac', '2',
+                    audio_path
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
             )
 
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="Audio extraction timed out")
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=500,
-            detail="FFmpeg not found. Please install FFmpeg: brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
-        )
+            if result.returncode != 0:
+                print(f"FFmpeg stderr: {result.stderr}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"FFmpeg error: {result.stderr[:500]}"
+                )
+
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=500, detail="Audio extraction timed out")
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=500,
+                detail="FFmpeg not found. Please install FFmpeg: brew install ffmpeg (macOS) or apt install ffmpeg (Linux)"
+            )
 
     return {
         "audio_filename": audio_filename,

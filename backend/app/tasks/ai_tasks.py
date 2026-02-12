@@ -187,21 +187,33 @@ def run_multi_clip_analysis(
                         if os.path.exists(audio_path):
                             os.remove(audio_path)
 
-                        result = subprocess.run([
-                            'ffmpeg', '-y', '-i', clip_path,
-                            '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1',
-                            audio_path
-                        ], capture_output=True, text=True, timeout=120)
+                        # Check if clip has an audio stream
+                        probe = subprocess.run(
+                            ['ffprobe', '-v', 'error', '-select_streams', 'a',
+                             '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', clip_path],
+                            capture_output=True, text=True, timeout=30
+                        )
+                        clip_has_audio = bool(probe.stdout.strip())
 
-                        if result.returncode != 0:
-                            print(f"FFmpeg audio extraction failed for clip {clip_num}: {result.stderr}", file=sys.stderr)
+                        if not clip_has_audio:
+                            print(f"Clip {clip_num} has no audio stream, skipping audio extraction", file=sys.stderr)
                             audio_path = None
-                        elif os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
-                            audio_valid = True
-                            print(f"Successfully extracted audio for clip {clip_num}", file=sys.stderr)
                         else:
-                            print(f"Audio extraction created empty file for clip {clip_num}", file=sys.stderr)
-                            audio_path = None
+                            result = subprocess.run([
+                                'ffmpeg', '-y', '-i', clip_path,
+                                '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1',
+                                audio_path
+                            ], capture_output=True, text=True, timeout=120)
+
+                            if result.returncode != 0:
+                                print(f"FFmpeg audio extraction failed for clip {clip_num}: {result.stderr}", file=sys.stderr)
+                                audio_path = None
+                            elif os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
+                                audio_valid = True
+                                print(f"Successfully extracted audio for clip {clip_num}", file=sys.stderr)
+                            else:
+                                print(f"Audio extraction created empty file for clip {clip_num}", file=sys.stderr)
+                                audio_path = None
                     except subprocess.TimeoutExpired:
                         print(f"Audio extraction timed out for clip {clip_num}", file=sys.stderr)
                         audio_path = None

@@ -74,6 +74,101 @@ async def list_clips(
     return clips
 
 
+@router.post("/{project_id}/clips/convert-source", response_model=VideoClipResponse)
+async def convert_source_to_clip(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Convert the project's source video into a clip.
+
+    Used when switching from single-video mode to automatic (clip-based) mode
+    so the existing video becomes the first clip in the timeline.
+    """
+    import shutil
+
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if not project.video_filename:
+        raise HTTPException(status_code=400, detail="No source video to convert")
+
+    # Check if clips already exist (don't convert twice)
+    existing_clips = db.query(VideoClip).filter(
+        VideoClip.project_id == project_id
+    ).count()
+
+    if existing_clips > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Project already has clips. Source video was not converted."
+        )
+
+    # Copy source video file to clips directory
+    source_path = file_service.get_file_path(
+        current_user.id, project_id, "source", project.video_filename
+    )
+    if not os.path.exists(source_path):
+        raise HTTPException(status_code=404, detail="Source video file not found")
+
+    clips_dir = os.path.dirname(
+        file_service.get_file_path(current_user.id, project_id, "clips", "dummy")
+    )
+    os.makedirs(clips_dir, exist_ok=True)
+
+    clip_filename = project.video_filename
+    clip_path = os.path.join(clips_dir, clip_filename)
+    shutil.copy2(source_path, clip_path)
+
+    # Extract metadata
+    metadata = get_video_metadata(clip_path)
+
+    duration = None
+    width = None
+    height = None
+    fps = None
+
+    if 'streams' in metadata:
+        for stream in metadata['streams']:
+            if stream.get('codec_type') == 'video':
+                duration = float(stream.get('duration', 0))
+                width = stream.get('width')
+                height = stream.get('height')
+                fps_str = stream.get('r_frame_rate', '0/1')
+                if '/' in fps_str:
+                    num, denom = fps_str.split('/')
+                    fps = float(num) / float(denom) if float(denom) != 0 else None
+                break
+
+    if not duration and 'format' in metadata:
+        duration = float(metadata['format'].get('duration', 0))
+
+    # Create clip record
+    clip = VideoClip(
+        project_id=project_id,
+        filename=clip_filename,
+        original_name=project.video_filename,
+        original_order=0,
+        timeline_order=0,
+        duration=duration,
+        width=width,
+        height=height,
+        fps=fps,
+        clip_metadata=metadata
+    )
+
+    db.add(clip)
+    db.commit()
+    db.refresh(clip)
+
+    return clip
+
+
 @router.post("/{project_id}/clips", response_model=VideoClipResponse)
 async def upload_clip(
     project_id: int,

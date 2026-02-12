@@ -3731,6 +3731,7 @@ def creative_sfx_layer(
 
     elif motion_type == 'subject_motion' and motion_mag > 1.0:
         speed_word = 'rapid' if motion_mag > 4.0 else 'quick' if motion_mag > 2.0 else 'moderate'
+        direction = dominant_dir or 'forward'
         accent_prompt = (f'{speed_word} movement whoosh at {direction} trajectory, '
                         f'object displacement with air turbulence, '
                         f'{"sharp attack" if motion_mag > 3 else "smooth onset"}')

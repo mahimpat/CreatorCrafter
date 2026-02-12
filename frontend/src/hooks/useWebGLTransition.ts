@@ -16,10 +16,12 @@ import {
   isWebGL2Supported,
 } from '../utils/webglUtils';
 import { VERTEX_SHADER, getTransitionShader } from '../utils/glTransitions';
+import { applyEasing } from '../utils/easingFunctions';
 
 export interface TransitionConfig {
   type: string;
   duration: number; // in seconds
+  easing?: string;
 }
 
 export interface UseWebGLTransitionOptions {
@@ -71,6 +73,7 @@ export function useWebGLTransition({
   const startTimeRef = useRef<number>(0);
   const durationRef = useRef<number>(0);
   const currentTransitionTypeRef = useRef<string>('fade');
+  const easingTypeRef = useRef<string>('linear');
 
   /**
    * Initialize WebGL context and resources
@@ -163,9 +166,10 @@ export function useWebGLTransition({
 
     const { gl, program, fromTexture, toTexture, positionBuffer, texCoordBuffer, uniformLocations } = state;
 
-    // Calculate progress
+    // Calculate progress with easing
     const elapsed = timestamp - startTimeRef.current;
-    const currentProgress = Math.min(elapsed / (durationRef.current * 1000), 1.0);
+    const linearProgress = Math.min(elapsed / (durationRef.current * 1000), 1.0);
+    const currentProgress = applyEasing(linearProgress, easingTypeRef.current);
 
     setProgress(currentProgress);
     onProgress?.(currentProgress);
@@ -209,8 +213,8 @@ export function useWebGLTransition({
     // Draw
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // Continue animation or complete
-    if (currentProgress < 1.0) {
+    // Continue animation or complete (use linear progress for timing)
+    if (linearProgress < 1.0) {
       animationFrameRef.current = requestAnimationFrame(renderFrame);
     } else {
       setIsTransitioning(false);
@@ -273,6 +277,7 @@ export function useWebGLTransition({
     setIsTransitioning(true);
     setProgress(0);
     durationRef.current = config.duration;
+    easingTypeRef.current = config.easing || 'linear';
     startTimeRef.current = performance.now();
 
     // Start animation loop

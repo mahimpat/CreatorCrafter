@@ -149,8 +149,10 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
     setState((prev) => ({ ...prev, isAnalyzing: true }))
 
     try {
-      // Extract audio first (only for single video mode, clips handle audio extraction in backend)
-      if (state.videoUrl) {
+      // Extract audio first — only for single video mode (semi_manual/manual).
+      // In automatic (clip-based) mode, the backend analysis endpoint
+      // handles audio extraction for each clip internally.
+      if (state.videoUrl && state.projectMode !== 'automatic') {
         await videoApi.extractAudio(state.projectId)
       }
 
@@ -162,7 +164,7 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
       console.error('Failed to start analysis:', error)
       setState((prev) => ({ ...prev, isAnalyzing: false }))
     }
-  }, [state.projectId, state.videoUrl])
+  }, [state.projectId, state.videoUrl, state.projectMode])
 
   // Subtitle operations
   const addSubtitle = useCallback(

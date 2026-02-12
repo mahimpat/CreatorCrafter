@@ -274,6 +274,7 @@ export default function VideoEditor() {
   const [webglTransitionConfig, setWebglTransitionConfig] = useState<{
     type: string
     duration: number
+    easing?: string
   } | null>(null)
   const [nextClipUrl, setNextClipUrl] = useState<string | null>(null)
 
@@ -419,9 +420,17 @@ export default function VideoEditor() {
   // Load clips, BGM, and transitions on mount
   useEffect(() => {
     if (project?.id) {
-      // Load video clips
+      // Load video clips — if in automatic mode with a source video but no clips,
+      // auto-convert the source video into the first clip
       projectsApi.listClips(project.id)
-        .then(res => setVideoClips(res.data))
+        .then(res => {
+          setVideoClips(res.data)
+          if (res.data.length === 0 && projectMode === 'automatic' && videoUrl) {
+            projectsApi.convertSourceToClip(project.id)
+              .then(clipRes => setVideoClips([clipRes.data]))
+              .catch(() => {}) // silently ignore if conversion fails
+          }
+        })
         .catch(err => console.error('Failed to load clips:', err))
 
       // Load BGM tracks
@@ -536,6 +545,23 @@ export default function VideoEditor() {
     },
     [uploadVideo, projectMode, project?.id]
   )
+
+  // Handle mode changes — when switching to automatic mode, convert source video to a clip
+  const handleModeChange = useCallback(async (newMode: typeof projectMode) => {
+    await setProjectMode(newMode)
+
+    // When switching to automatic mode with a source video but no clips,
+    // automatically convert the source video into a clip
+    if (newMode === 'automatic' && videoUrl && project?.id && videoClips.length === 0) {
+      try {
+        const res = await projectsApi.convertSourceToClip(project.id)
+        setVideoClips([res.data])
+      } catch (err) {
+        // If conversion fails (e.g. already has clips), silently ignore
+        console.warn('Source-to-clip conversion skipped:', err)
+      }
+    }
+  }, [setProjectMode, videoUrl, project?.id, videoClips.length])
 
   const togglePlayPause = useCallback(() => {
     if (!videoRef.current) return
@@ -731,6 +757,7 @@ export default function VideoEditor() {
             setWebglTransitionConfig({
               type: appliedTransition.type,
               duration: appliedTransition.duration,
+              easing: (appliedTransition.parameters?.easing as string) || 'ease-in-out',
             })
           } else if (attempts < maxAttempts) {
             // Wait and check again
@@ -1426,7 +1453,7 @@ export default function VideoEditor() {
             <h1>{project?.name}</h1>
             <ModeSwitcher
               currentMode={projectMode}
-              onModeChange={setProjectMode}
+              onModeChange={handleModeChange}
             />
             {hasUnsavedChanges && <span className="unsaved-badge">Unsaved</span>}
           </div>
