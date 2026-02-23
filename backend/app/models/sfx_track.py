@@ -19,6 +19,7 @@ class SFXTrack(Base):
     start_time = Column(Float, nullable=False)      # Seconds
     duration = Column(Float, nullable=False)        # Seconds
     volume = Column(Float, default=1.0)             # 0.0 to 1.0
+    speed = Column(Float, default=1.0)              # 0.25 to 4.0 playback rate
     prompt = Column(String(500), nullable=True)     # Original generation prompt
 
     # Relationships

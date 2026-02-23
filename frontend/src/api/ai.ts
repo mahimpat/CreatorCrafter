@@ -104,8 +104,8 @@ export const aiApi = {
   getAnalysisResults: (projectId: number) =>
     apiClient.get<VideoAnalysisResult>(`/ai/${projectId}/analysis-results`),
 
-  generateSFX: (projectId: number, prompt: string, duration: number) =>
-    apiClient.post<TaskResponse>(`/ai/${projectId}/generate-sfx`, { prompt, duration }),
+  generateSFX: (projectId: number, prompt: string, duration: number, startTime: number = 0) =>
+    apiClient.post<TaskResponse>(`/ai/${projectId}/generate-sfx`, { prompt, duration, start_time: startTime }),
 
   getSFXStatus: (projectId: number, taskId: string) =>
     apiClient.get<TaskStatus>(`/ai/${projectId}/sfx/status/${taskId}`),

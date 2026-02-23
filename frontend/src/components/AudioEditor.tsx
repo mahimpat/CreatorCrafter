@@ -82,7 +82,7 @@ export default function AudioEditor({
 
     try {
       setIsGenerating(true)
-      await generateSFX(prompt, duration)
+      await generateSFX(prompt, duration, currentTime)
       setPrompt('')
       showSuccess('SFX generated successfully!')
     } catch (error) {
@@ -96,7 +96,9 @@ export default function AudioEditor({
   const handleUseSFXSuggestion = async (suggestion: SFXSuggestion, index: number) => {
     try {
       setGeneratingIndex(index)
-      await generateSFX(suggestion.prompt, suggestion.duration_hint || duration)
+      const sfxDuration = Math.max(0.5, suggestion.duration_hint || duration)
+      const sfxPrompt = suggestion.prompt.slice(0, 1000)
+      await generateSFX(sfxPrompt, sfxDuration, suggestion.timestamp)
       showSuccess('SFX generated successfully!')
     } catch (error) {
       console.error('Error generating suggested SFX:', error)

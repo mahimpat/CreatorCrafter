@@ -2,7 +2,7 @@
  * Project Context - State management for the video editor
  * Adapted for web API instead of Electron IPC
  */
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react'
 import {
   projectsApi,
   videoApi,
@@ -14,6 +14,7 @@ import {
   TextOverlay,
   VideoAnalysisResult,
 } from '../api'
+import { useUndoRedo, UndoAction } from '../hooks/useUndoRedo'
 
 interface ProjectState {
   project: Project | null
@@ -30,6 +31,7 @@ interface ProjectState {
   isAnalyzing: boolean
   hasUnsavedChanges: boolean
   isSaving: boolean
+  lastSavedAt: Date | null
 }
 
 interface ProjectContextType extends ProjectState {
@@ -51,7 +53,7 @@ interface ProjectContextType extends ProjectState {
   addSFXTrack: (track: Omit<SFXTrack, 'id' | 'project_id'>) => Promise<void>
   updateSFXTrack: (id: number, data: Partial<SFXTrack>) => Promise<void>
   deleteSFXTrack: (id: number) => Promise<void>
-  generateSFX: (prompt: string, duration: number) => Promise<void>
+  generateSFX: (prompt: string, duration: number, startTime?: number) => Promise<void>
 
   // Overlay operations
   addTextOverlay: (overlay: Omit<TextOverlay, 'id' | 'project_id'>) => Promise<void>
@@ -67,10 +69,17 @@ interface ProjectContextType extends ProjectState {
   setAnalysis: (analysis: VideoAnalysisResult | null) => void
   setIsAnalyzing: (analyzing: boolean) => void
 
+  // Undo/Redo
+  undo: () => Promise<void>
+  redo: () => Promise<void>
+  canUndo: boolean
+  canRedo: boolean
+
   // Helpers
   getVideoStreamUrl: () => string | null
   getSFXStreamUrl: (filename: string) => string
   refreshVideoUrl: () => void
+  lastSavedAt: Date | null
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined)
@@ -88,6 +97,8 @@ const buildStreamUrl = (projectId: number, assetType: string, filename: string):
 }
 
 export function ProjectProvider({ children, initialProject }: ProjectProviderProps) {
+  const { pushAction, popUndo, popRedo, canUndo, canRedo } = useUndoRedo()
+
   const [state, setState] = useState<ProjectState>({
     project: initialProject,
     projectId: initialProject.id,
@@ -105,6 +116,7 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
     isAnalyzing: false,
     hasUnsavedChanges: false,
     isSaving: false,
+    lastSavedAt: null,
   })
 
   // Video controls
@@ -172,33 +184,38 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
       if (!state.projectId) return
 
       const res = await projectsApi.createSubtitle(state.projectId, subtitle)
+      pushAction({ type: 'add', entityType: 'subtitle', entityId: res.data.id, previousState: null, newState: res.data as unknown as Record<string, unknown> })
       setState((prev) => ({
         ...prev,
         subtitles: [...prev.subtitles, res.data],
         hasUnsavedChanges: true,
       }))
     },
-    [state.projectId]
+    [state.projectId, pushAction]
   )
 
   const updateSubtitle = useCallback(
     async (id: number, data: Partial<Subtitle>) => {
       if (!state.projectId) return
 
+      const oldItem = state.subtitles.find(s => s.id === id)
       const res = await projectsApi.updateSubtitle(state.projectId, id, data)
+      pushAction({ type: 'update', entityType: 'subtitle', entityId: id, previousState: (oldItem || null) as unknown as Record<string, unknown>, newState: res.data as unknown as Record<string, unknown> })
       setState((prev) => ({
         ...prev,
         subtitles: prev.subtitles.map((s) => (s.id === id ? res.data : s)),
         hasUnsavedChanges: true,
       }))
     },
-    [state.projectId]
+    [state.projectId, state.subtitles, pushAction]
   )
 
   const deleteSubtitle = useCallback(
     async (id: number) => {
       if (!state.projectId) return
 
+      const oldItem = state.subtitles.find(s => s.id === id)
+      pushAction({ type: 'delete', entityType: 'subtitle', entityId: id, previousState: (oldItem || null) as unknown as Record<string, unknown>, newState: null })
       await projectsApi.deleteSubtitle(state.projectId, id)
       setState((prev) => ({
         ...prev,
@@ -215,33 +232,38 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
       if (!state.projectId) return
 
       const res = await projectsApi.createSFXTrack(state.projectId, track)
+      pushAction({ type: 'add', entityType: 'sfx', entityId: res.data.id, previousState: null, newState: res.data as unknown as Record<string, unknown> })
       setState((prev) => ({
         ...prev,
         sfxTracks: [...prev.sfxTracks, res.data],
         hasUnsavedChanges: true,
       }))
     },
-    [state.projectId]
+    [state.projectId, pushAction]
   )
 
   const updateSFXTrack = useCallback(
     async (id: number, data: Partial<SFXTrack>) => {
       if (!state.projectId) return
 
+      const oldItem = state.sfxTracks.find(t => t.id === id)
       const res = await projectsApi.updateSFXTrack(state.projectId, id, data)
+      pushAction({ type: 'update', entityType: 'sfx', entityId: id, previousState: (oldItem || null) as unknown as Record<string, unknown>, newState: res.data as unknown as Record<string, unknown> })
       setState((prev) => ({
         ...prev,
         sfxTracks: prev.sfxTracks.map((t) => (t.id === id ? res.data : t)),
         hasUnsavedChanges: true,
       }))
     },
-    [state.projectId]
+    [state.projectId, state.sfxTracks, pushAction]
   )
 
   const deleteSFXTrack = useCallback(
     async (id: number) => {
       if (!state.projectId) return
 
+      const oldItem = state.sfxTracks.find(t => t.id === id)
+      pushAction({ type: 'delete', entityType: 'sfx', entityId: id, previousState: (oldItem || null) as unknown as Record<string, unknown>, newState: null })
       await projectsApi.deleteSFXTrack(state.projectId, id)
       setState((prev) => ({
         ...prev,
@@ -249,15 +271,15 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
         hasUnsavedChanges: true,
       }))
     },
-    [state.projectId]
+    [state.projectId, state.sfxTracks, pushAction]
   )
 
   const generateSFX = useCallback(
-    async (prompt: string, duration: number) => {
+    async (prompt: string, duration: number, startTime?: number) => {
       if (!state.projectId) return
 
       // SFX generation runs in background, results come via WebSocket
-      await aiApi.generateSFX(state.projectId, prompt, duration)
+      await aiApi.generateSFX(state.projectId, prompt, duration, startTime ?? 0)
     },
     [state.projectId]
   )
@@ -268,33 +290,38 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
       if (!state.projectId) return
 
       const res = await projectsApi.createOverlay(state.projectId, overlay)
+      pushAction({ type: 'add', entityType: 'overlay', entityId: res.data.id, previousState: null, newState: res.data as unknown as Record<string, unknown> })
       setState((prev) => ({
         ...prev,
         textOverlays: [...prev.textOverlays, res.data],
         hasUnsavedChanges: true,
       }))
     },
-    [state.projectId]
+    [state.projectId, pushAction]
   )
 
   const updateTextOverlay = useCallback(
     async (id: number, data: Partial<TextOverlay>) => {
       if (!state.projectId) return
 
+      const oldItem = state.textOverlays.find(o => o.id === id)
       const res = await projectsApi.updateOverlay(state.projectId, id, data)
+      pushAction({ type: 'update', entityType: 'overlay', entityId: id, previousState: (oldItem || null) as unknown as Record<string, unknown>, newState: res.data as unknown as Record<string, unknown> })
       setState((prev) => ({
         ...prev,
         textOverlays: prev.textOverlays.map((o) => (o.id === id ? res.data : o)),
         hasUnsavedChanges: true,
       }))
     },
-    [state.projectId]
+    [state.projectId, state.textOverlays, pushAction]
   )
 
   const deleteTextOverlay = useCallback(
     async (id: number) => {
       if (!state.projectId) return
 
+      const oldItem = state.textOverlays.find(o => o.id === id)
+      pushAction({ type: 'delete', entityType: 'overlay', entityId: id, previousState: (oldItem || null) as unknown as Record<string, unknown>, newState: null })
       await projectsApi.deleteOverlay(state.projectId, id)
       setState((prev) => ({
         ...prev,
@@ -304,6 +331,99 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
     },
     [state.projectId]
   )
+
+  // Undo/Redo execution
+  const applyAction = useCallback(async (action: UndoAction, reverse: boolean) => {
+    if (!state.projectId) return
+    const pid = state.projectId
+
+    if (reverse) {
+      // Undo: reverse the action
+      if (action.type === 'add') {
+        // Undo add = delete
+        if (action.entityType === 'subtitle') {
+          await projectsApi.deleteSubtitle(pid, action.entityId)
+          setState(prev => ({ ...prev, subtitles: prev.subtitles.filter(s => s.id !== action.entityId) }))
+        } else if (action.entityType === 'sfx') {
+          await projectsApi.deleteSFXTrack(pid, action.entityId)
+          setState(prev => ({ ...prev, sfxTracks: prev.sfxTracks.filter(t => t.id !== action.entityId) }))
+        } else if (action.entityType === 'overlay') {
+          await projectsApi.deleteOverlay(pid, action.entityId)
+          setState(prev => ({ ...prev, textOverlays: prev.textOverlays.filter(o => o.id !== action.entityId) }))
+        }
+      } else if (action.type === 'update' && action.previousState) {
+        // Undo update = restore previous state
+        if (action.entityType === 'subtitle') {
+          const res = await projectsApi.updateSubtitle(pid, action.entityId, action.previousState as Partial<Subtitle>)
+          setState(prev => ({ ...prev, subtitles: prev.subtitles.map(s => s.id === action.entityId ? res.data : s) }))
+        } else if (action.entityType === 'sfx') {
+          const res = await projectsApi.updateSFXTrack(pid, action.entityId, action.previousState as Partial<SFXTrack>)
+          setState(prev => ({ ...prev, sfxTracks: prev.sfxTracks.map(t => t.id === action.entityId ? res.data : t) }))
+        } else if (action.entityType === 'overlay') {
+          const res = await projectsApi.updateOverlay(pid, action.entityId, action.previousState as Partial<TextOverlay>)
+          setState(prev => ({ ...prev, textOverlays: prev.textOverlays.map(o => o.id === action.entityId ? res.data : o) }))
+        }
+      } else if (action.type === 'delete' && action.previousState) {
+        // Undo delete = re-create
+        if (action.entityType === 'subtitle') {
+          const res = await projectsApi.createSubtitle(pid, action.previousState as Omit<Subtitle, 'id' | 'project_id'>)
+          setState(prev => ({ ...prev, subtitles: [...prev.subtitles, res.data] }))
+        } else if (action.entityType === 'sfx') {
+          const res = await projectsApi.createSFXTrack(pid, action.previousState as Omit<SFXTrack, 'id' | 'project_id'>)
+          setState(prev => ({ ...prev, sfxTracks: [...prev.sfxTracks, res.data] }))
+        } else if (action.entityType === 'overlay') {
+          const res = await projectsApi.createOverlay(pid, action.previousState as Omit<TextOverlay, 'id' | 'project_id'>)
+          setState(prev => ({ ...prev, textOverlays: [...prev.textOverlays, res.data] }))
+        }
+      }
+    } else {
+      // Redo: re-apply the action
+      if (action.type === 'add' && action.newState) {
+        if (action.entityType === 'subtitle') {
+          const res = await projectsApi.createSubtitle(pid, action.newState as Omit<Subtitle, 'id' | 'project_id'>)
+          setState(prev => ({ ...prev, subtitles: [...prev.subtitles, res.data] }))
+        } else if (action.entityType === 'sfx') {
+          const res = await projectsApi.createSFXTrack(pid, action.newState as Omit<SFXTrack, 'id' | 'project_id'>)
+          setState(prev => ({ ...prev, sfxTracks: [...prev.sfxTracks, res.data] }))
+        } else if (action.entityType === 'overlay') {
+          const res = await projectsApi.createOverlay(pid, action.newState as Omit<TextOverlay, 'id' | 'project_id'>)
+          setState(prev => ({ ...prev, textOverlays: [...prev.textOverlays, res.data] }))
+        }
+      } else if (action.type === 'update' && action.newState) {
+        if (action.entityType === 'subtitle') {
+          const res = await projectsApi.updateSubtitle(pid, action.entityId, action.newState as Partial<Subtitle>)
+          setState(prev => ({ ...prev, subtitles: prev.subtitles.map(s => s.id === action.entityId ? res.data : s) }))
+        } else if (action.entityType === 'sfx') {
+          const res = await projectsApi.updateSFXTrack(pid, action.entityId, action.newState as Partial<SFXTrack>)
+          setState(prev => ({ ...prev, sfxTracks: prev.sfxTracks.map(t => t.id === action.entityId ? res.data : t) }))
+        } else if (action.entityType === 'overlay') {
+          const res = await projectsApi.updateOverlay(pid, action.entityId, action.newState as Partial<TextOverlay>)
+          setState(prev => ({ ...prev, textOverlays: prev.textOverlays.map(o => o.id === action.entityId ? res.data : o) }))
+        }
+      } else if (action.type === 'delete') {
+        if (action.entityType === 'subtitle') {
+          await projectsApi.deleteSubtitle(pid, action.entityId)
+          setState(prev => ({ ...prev, subtitles: prev.subtitles.filter(s => s.id !== action.entityId) }))
+        } else if (action.entityType === 'sfx') {
+          await projectsApi.deleteSFXTrack(pid, action.entityId)
+          setState(prev => ({ ...prev, sfxTracks: prev.sfxTracks.filter(t => t.id !== action.entityId) }))
+        } else if (action.entityType === 'overlay') {
+          await projectsApi.deleteOverlay(pid, action.entityId)
+          setState(prev => ({ ...prev, textOverlays: prev.textOverlays.filter(o => o.id !== action.entityId) }))
+        }
+      }
+    }
+  }, [state.projectId])
+
+  const undo = useCallback(async () => {
+    const action = popUndo()
+    if (action) await applyAction(action, true)
+  }, [popUndo, applyAction])
+
+  const redo = useCallback(async () => {
+    const action = popRedo()
+    if (action) await applyAction(action, false)
+  }, [popRedo, applyAction])
 
   // Project operations
   const saveProject = useCallback(async () => {
@@ -371,6 +491,23 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
     })
   }, [])
 
+  // Auto-save: debounce 30s after changes detected
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (state.hasUnsavedChanges && state.projectId) {
+      autoSaveTimerRef.current = setTimeout(() => {
+        setState((prev) => ({
+          ...prev,
+          hasUnsavedChanges: false,
+          lastSavedAt: new Date(),
+        }))
+      }, 30000)
+    }
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    }
+  }, [state.hasUnsavedChanges, state.projectId])
+
   // Helpers
   const getVideoStreamUrl = useCallback(() => {
     return state.videoUrl
@@ -411,6 +548,11 @@ export function ProjectProvider({ children, initialProject }: ProjectProviderPro
         getVideoStreamUrl,
         getSFXStreamUrl,
         refreshVideoUrl,
+        lastSavedAt: state.lastSavedAt,
+        undo,
+        redo,
+        canUndo,
+        canRedo,
       }}
     >
       {children}

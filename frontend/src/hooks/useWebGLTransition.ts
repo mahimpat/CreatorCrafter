@@ -2,7 +2,9 @@
  * useWebGLTransition Hook
  *
  * Manages WebGL-based video transitions using gl-transitions shaders.
- * Handles context creation, texture management, and animation rendering.
+ * Uses a snapshot canvas as the "from" texture (always instantly ready)
+ * and a video element as the "to" texture.
+ * This avoids the need for two videos decoding simultaneously.
  */
 
 import { useRef, useCallback, useEffect, useState } from 'react';
@@ -24,12 +26,18 @@ export interface TransitionConfig {
   easing?: string;
 }
 
+/** The "from" source can be a canvas (snapshot) or a video element */
+type TexSource = HTMLCanvasElement | HTMLVideoElement;
+
 export interface UseWebGLTransitionOptions {
   canvasRef: React.RefObject<HTMLCanvasElement>;
-  fromVideoRef: React.RefObject<HTMLVideoElement>;
+  /** "From" source — typically a snapshot canvas with the last frame of the outgoing clip */
+  fromRef: React.RefObject<TexSource>;
+  /** "To" source — the video element playing the incoming clip */
   toVideoRef: React.RefObject<HTMLVideoElement>;
   onComplete?: () => void;
   onProgress?: (progress: number) => void;
+  onError?: (error: string) => void;
 }
 
 export interface UseWebGLTransitionReturn {
@@ -56,12 +64,21 @@ interface WebGLState {
   };
 }
 
+/** Get width/height from either a canvas or video element */
+function getSourceDimensions(source: TexSource): { width: number; height: number } {
+  if (source instanceof HTMLVideoElement) {
+    return { width: source.videoWidth, height: source.videoHeight };
+  }
+  return { width: source.width, height: source.height };
+}
+
 export function useWebGLTransition({
   canvasRef,
-  fromVideoRef,
+  fromRef,
   toVideoRef,
   onComplete,
   onProgress,
+  onError,
 }: UseWebGLTransitionOptions): UseWebGLTransitionReturn {
   const [isSupported] = useState(() => isWebGL2Supported());
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -70,6 +87,16 @@ export function useWebGLTransition({
 
   const webglStateRef = useRef<WebGLState | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const retryTimeoutRef = useRef<number | null>(null);
+  const transitionActiveRef = useRef(false);
+
+  // Use refs for callbacks to avoid stale closures in the animation loop
+  const onCompleteRef = useRef(onComplete);
+  const onProgressRef = useRef(onProgress);
+  const onErrorRef = useRef(onError);
+  onCompleteRef.current = onComplete;
+  onProgressRef.current = onProgress;
+  onErrorRef.current = onError;
   const startTimeRef = useRef<number>(0);
   const durationRef = useRef<number>(0);
   const currentTransitionTypeRef = useRef<string>('fade');
@@ -151,16 +178,10 @@ export function useWebGLTransition({
   const renderFrame = useCallback((timestamp: number) => {
     const state = webglStateRef.current;
     const canvas = canvasRef.current;
-    const fromVideo = fromVideoRef.current;
+    const fromSource = fromRef.current;
     const toVideo = toVideoRef.current;
 
-    if (!state || !canvas || !fromVideo || !toVideo) {
-      console.warn('[WebGL] renderFrame: Missing required elements', {
-        state: !!state,
-        canvas: !!canvas,
-        fromVideo: !!fromVideo,
-        toVideo: !!toVideo,
-      });
+    if (!state || !canvas || !fromSource || !toVideo) {
       return;
     }
 
@@ -172,16 +193,15 @@ export function useWebGLTransition({
     const currentProgress = applyEasing(linearProgress, easingTypeRef.current);
 
     setProgress(currentProgress);
-    onProgress?.(currentProgress);
+    onProgressRef.current?.(currentProgress);
 
-    // Resize canvas to match video
-    if (fromVideo.videoWidth && fromVideo.videoHeight) {
-      if (canvas.width !== fromVideo.videoWidth || canvas.height !== fromVideo.videoHeight) {
-        canvas.width = fromVideo.videoWidth;
-        canvas.height = fromVideo.videoHeight;
+    // Resize canvas to match source dimensions
+    const dims = getSourceDimensions(fromSource);
+    if (dims.width && dims.height) {
+      if (canvas.width !== dims.width || canvas.height !== dims.height) {
+        canvas.width = dims.width;
+        canvas.height = dims.height;
       }
-    } else {
-      console.warn('[WebGL] fromVideo has no dimensions:', fromVideo.videoWidth, fromVideo.videoHeight);
     }
 
     // Set viewport
@@ -197,10 +217,11 @@ export function useWebGLTransition({
     // Setup vertex attributes
     setupVertexAttributes(gl, program, positionBuffer, texCoordBuffer);
 
-    // Update textures from video frames
+    // Update "from" texture (canvas snapshot — static, but re-uploading is fine)
     gl.activeTexture(gl.TEXTURE0);
-    updateVideoTexture(gl, fromTexture, fromVideo);
+    updateVideoTexture(gl, fromTexture, fromSource);
 
+    // Update "to" texture (live video frames)
     gl.activeTexture(gl.TEXTURE1);
     updateVideoTexture(gl, toTexture, toVideo);
 
@@ -213,46 +234,66 @@ export function useWebGLTransition({
     // Draw
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // Continue animation or complete (use linear progress for timing)
+    // Continue animation or complete
     if (linearProgress < 1.0) {
       animationFrameRef.current = requestAnimationFrame(renderFrame);
     } else {
-      setIsTransitioning(false);
+      transitionActiveRef.current = false;
       setProgress(1);
-      onComplete?.();
+      onCompleteRef.current?.();
     }
-  }, [canvasRef, fromVideoRef, toVideoRef, onComplete, onProgress]);
+  }, [canvasRef, fromRef, toVideoRef]);
 
   /**
    * Start a transition
    */
   const startTransition = useCallback((config: TransitionConfig) => {
+    // Don't restart if a transition is already actively running
+    if (transitionActiveRef.current) {
+      return;
+    }
+
     if (!isSupported) {
-      console.error('[WebGL] WebGL not supported');
       setError('WebGL not supported');
       return;
     }
 
-    const fromVideo = fromVideoRef.current;
+    const fromSource = fromRef.current;
     const toVideo = toVideoRef.current;
 
-    if (!fromVideo || !toVideo) {
-      console.error('[WebGL] Video elements not available', { fromVideo: !!fromVideo, toVideo: !!toVideo });
-      setError('Video elements not available');
+    if (!fromSource || !toVideo) {
+      setError('Source elements not available');
+      onErrorRef.current?.('Source elements not available');
       return;
     }
 
-    // Check if videos are ready
-    if (fromVideo.readyState < 2 || toVideo.readyState < 2) {
-      console.warn('[WebGL] Videos not ready, waiting...', { from: fromVideo.readyState, to: toVideo.readyState });
-      // Try again after a short delay
-      setTimeout(() => startTransition(config), 100);
+    // The "from" source is a canvas snapshot — always ready.
+    // Only check if the "to" video is ready.
+    if (toVideo.readyState < 2) {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+      retryTimeoutRef.current = window.setTimeout(() => {
+        retryTimeoutRef.current = null;
+        startTransition(config);
+      }, 50);
       return;
+    }
+
+    // Cancel any pending retry
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+
+    // Cancel any existing animation before cleanup
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
 
     // Initialize WebGL if needed or if transition type changed
     if (!webglStateRef.current || currentTransitionTypeRef.current !== config.type) {
-      // Clean up old state if exists
       if (webglStateRef.current) {
         const { gl, program, fromTexture, toTexture, positionBuffer, texCoordBuffer } = webglStateRef.current;
         gl.deleteProgram(program);
@@ -260,18 +301,17 @@ export function useWebGLTransition({
         gl.deleteTexture(toTexture);
         gl.deleteBuffer(positionBuffer);
         gl.deleteBuffer(texCoordBuffer);
+        webglStateRef.current = null;
       }
 
       if (!initWebGL(config.type)) {
-        console.error('[WebGL] Failed to initialize WebGL');
+        onErrorRef.current?.(`Shader compilation failed for: ${config.type}`);
         return;
       }
     }
 
-    // Cancel any existing animation
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
+    // Mark transition as active
+    transitionActiveRef.current = true;
 
     // Start transition
     setIsTransitioning(true);
@@ -282,16 +322,21 @@ export function useWebGLTransition({
 
     // Start animation loop
     animationFrameRef.current = requestAnimationFrame(renderFrame);
-  }, [isSupported, fromVideoRef, toVideoRef, initWebGL, renderFrame]);
+  }, [isSupported, fromRef, toVideoRef, initWebGL, renderFrame]);
 
   /**
    * Stop the current transition
    */
   const stopTransition = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+    transitionActiveRef.current = false;
     setIsTransitioning(false);
   }, []);
 
@@ -300,6 +345,9 @@ export function useWebGLTransition({
    */
   useEffect(() => {
     return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }

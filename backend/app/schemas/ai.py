@@ -20,8 +20,9 @@ class AnalyzeResponse(BaseModel):
 
 class SFXGenerateRequest(BaseModel):
     """Schema for SFX generation request (uses ElevenLabs API)."""
-    prompt: str = Field(..., min_length=1, max_length=500)
+    prompt: str = Field(..., min_length=1, max_length=1000)
     duration: float = Field(..., gt=0, le=22)  # ElevenLabs max is 22 seconds
+    start_time: float = Field(default=0.0, ge=0)  # Timeline position for the SFX
 
 
 class SFXGenerateResponse(BaseModel):

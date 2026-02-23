@@ -121,7 +121,7 @@ export const TRANSITION_MAP: Record<string, string> = {
   'cut': 'fade', // Just use fade with very fast duration
   'fade': 'fade',
   'crossfade': 'fade',
-  'dissolve': 'Dissolve',
+  'dissolve': 'fade',
 
   // === DIRECTIONAL WIPES ===
   'wipe_left': 'wipeLeft',
@@ -131,29 +131,29 @@ export const TRANSITION_MAP: Record<string, string> = {
   'directional_wipe': 'directionalwipe',
 
   // === SLIDES ===
-  'slide_left': 'SimpleZoom', // Slide alternatives
-  'slide_right': 'SimpleZoom',
-  'push_left': 'Mosaic',
-  'push_right': 'Mosaic',
+  'slide_left': 'Directional',
+  'slide_right': 'Directional',
+  'push_left': 'Directional',
+  'push_right': 'Directional',
 
   // === 3D TRANSITIONS ===
   'cube': 'cube',
   'cube_left': 'cube',
   'cube_right': 'cube',
-  'flip': 'Flip',
-  'flip_horizontal': 'Flip',
-  'flip_vertical': 'Flip',
+  'flip': 'GridFlip',
+  'flip_horizontal': 'GridFlip',
+  'flip_vertical': 'GridFlip',
   'rotate': 'rotate_scale_fade',
   'spin': 'rotate_scale_fade',
-  'door': 'DoorWay',
-  'doorway': 'DoorWay',
+  'door': 'doorway',
+  'doorway': 'doorway',
 
   // === ZOOM TRANSITIONS ===
   'zoom': 'ZoomInCircles',
   'zoom_in': 'ZoomInCircles',
   'zoom_out': 'SimpleZoom',
   'circle_zoom': 'ZoomInCircles',
-  'crosszoom': 'crosszoom',
+  'crosszoom': 'CrossZoom',
 
   // === CIRCLE/RADIAL ===
   'circle': 'circle',
@@ -175,7 +175,7 @@ export const TRANSITION_MAP: Record<string, string> = {
   'waterdrop': 'WaterDrop',
   'wave': 'ripple',
   'swirl': 'Swirl',
-  'morph': 'Mosaic',
+  'morph': 'morph',
   'liquid': 'dissolveNoise',
 
   // === ORGANIC (noise-driven custom shaders) ===
@@ -187,21 +187,21 @@ export const TRANSITION_MAP: Record<string, string> = {
   'glitch': 'GlitchDisplace',
   'digital_glitch': 'GlitchDisplace',
   'glitch_displace': 'GlitchDisplace',
-  'static': 'Dissolve',
+  'static': 'randomsquares',
   'pixelate': 'pixelize',
   'pixel': 'pixelize',
   'mosaic': 'Mosaic',
 
   // === FLASH/COLOR ===
-  'flash': 'luminance_melt',
-  'white_flash': 'luminance_melt',
+  'flash': 'fadecolor',
+  'white_flash': 'fadecolor',
   'color_fade': 'ColourDistance',
   'colorfade': 'ColourDistance',
   'luminance': 'luminance_melt',
 
   // === SHAPE TRANSITIONS ===
   'heart': 'heart',
-  'star': 'star',
+  'star': 'heart',
   'diamond': 'Radial',
   'hexagon': 'hexagonalize',
   'squares': 'squareswire',
@@ -210,21 +210,21 @@ export const TRANSITION_MAP: Record<string, string> = {
   // === BLINDS/BARS ===
   'blinds': 'WindowBlinds',
   'window_blinds': 'WindowBlinds',
-  'bars_horizontal': 'ButterflyWaveScrawler',
-  'bars_vertical': 'ButterflyWaveScrawler',
+  'bars_horizontal': 'windowslice',
+  'bars_vertical': 'windowblinds',
   'venetian': 'WindowBlinds',
 
   // === ADVANCED CREATIVE ===
   'burn': 'Burn',
   'fire': 'Burn',
   'wind': 'wind',
-  'page_curl': 'Dreamy',
-  'book': 'BookFlip',
-  'book_flip': 'BookFlip',
+  'page_curl': 'InvertedPageCurl',
+  'book': 'InvertedPageCurl',
+  'book_flip': 'InvertedPageCurl',
   'kaleidoscope': 'kaleidoscope',
   'crosswarp': 'crosswarp',
   'squeeze': 'squeeze',
-  'stretch': 'stretch',
+  'stretch': 'squeeze',
 
   // === BOUNCY/PLAYFUL ===
   'bounce': 'Bounce',
@@ -234,7 +234,7 @@ export const TRANSITION_MAP: Record<string, string> = {
 
   // === CINEMATIC ===
   'cinematic': 'directionalwarp',
-  'film': 'FilmBurn',
+  'film': 'undulatingBurnOut',
 
   // === PATTERN TRANSITIONS ===
   'perlin': 'perlin',
@@ -374,6 +374,7 @@ vec4 transition(vec2 uv) {
 }
 `,
   'fade': FADE_SHADER,
+  'dissolve': FADE_SHADER,
 };
 
 /**
@@ -426,9 +427,10 @@ export function getTransitionShader(transitionType: string): string {
     if (transition.defaultParams) {
       for (const [param, value] of Object.entries(transition.defaultParams)) {
         // Remove the uniform declaration from shader code since we'll use a const
-        // This regex matches: uniform <type> <param>; with optional comment
+        // This regex matches: uniform <type> <param>[/* comment */]; with optional trailing comment
+        // The [^;]* handles inline comments like /* = 0.4 */ between param name and semicolon
         glslCode = glslCode.replace(
-          new RegExp(`uniform\\s+\\w+\\s+${param}\\s*;[^\\n]*\\n?`, 'g'),
+          new RegExp(`uniform\\s+\\w+\\s+${param}\\b[^;]*;[^\\n]*\\n?`, 'g'),
           ''
         );
 

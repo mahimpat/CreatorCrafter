@@ -850,6 +850,82 @@ def run_auto_generate(
                 base_progress = 65
 
             # ============================================================
+            # STEP 2.5: Auto-split single clip at scene boundaries
+            #           so transitions can be created between sub-clips
+            # ============================================================
+            if include_transitions and len(clip_ids) == 1 and suggested_transitions:
+                from app.models.video_clip import VideoClip as VClip
+
+                # Get scene boundary timestamps (exclude start/end markers)
+                scene_boundaries = sorted(
+                    [t['timestamp'] for t in suggested_transitions
+                     if t.get('type') in ('cut', 'gradual', 'clip')
+                     and t.get('confidence', 0) >= transition_confidence_threshold],
+                )
+
+                if scene_boundaries:
+                    loop.run_until_complete(send_progress(
+                        user_id, "auto_generate", task_id, project_id,
+                        "transitions", base_progress + 1,
+                        f"Splitting clip at {len(scene_boundaries)} scene boundaries..."
+                    ))
+
+                    original_clip = db.query(VClip).filter(
+                        VClip.id == clip_ids[0]
+                    ).first()
+
+                    if original_clip:
+                        clip_start = original_clip.start_trim
+                        clip_end = (original_clip.duration or 0) - original_clip.end_trim
+                        clip_effective = clip_end - clip_start
+
+                        # Filter boundaries to be within the clip's visible range
+                        # and ensure minimum 1-second segments
+                        valid_boundaries = []
+                        for ts in scene_boundaries:
+                            if ts > clip_start + 1.0 and ts < clip_end - 1.0:
+                                if not valid_boundaries or (ts - valid_boundaries[-1]) >= 1.0:
+                                    valid_boundaries.append(ts)
+
+                        if valid_boundaries:
+                            # Create sub-clips by splitting at each boundary
+                            # Original clip becomes the first segment
+                            new_clip_ids = []
+                            original_end_trim = original_clip.end_trim
+
+                            # Update original clip to end at first boundary
+                            original_clip.end_trim = (original_clip.duration or 0) - valid_boundaries[0]
+                            original_clip.original_name = f"{original_clip.original_name or 'Clip'} (1)"
+                            new_clip_ids.append(original_clip.id)
+
+                            # Create clips for each segment between boundaries
+                            for i, boundary in enumerate(valid_boundaries):
+                                next_boundary = valid_boundaries[i + 1] if i + 1 < len(valid_boundaries) else None
+                                seg_end_trim = (original_clip.duration or 0) - next_boundary if next_boundary else original_end_trim
+
+                                new_clip = VClip(
+                                    project_id=project_id,
+                                    filename=original_clip.filename,
+                                    original_name=f"{original_clip.original_name or 'Clip'} ({i + 2})",
+                                    original_order=original_clip.original_order,
+                                    timeline_order=original_clip.timeline_order + i + 1,
+                                    duration=original_clip.duration,
+                                    start_trim=boundary,
+                                    end_trim=seg_end_trim,
+                                    width=original_clip.width,
+                                    height=original_clip.height,
+                                    fps=original_clip.fps,
+                                    clip_metadata=original_clip.clip_metadata,
+                                )
+                                db.add(new_clip)
+                                db.flush()  # Get the ID
+                                new_clip_ids.append(new_clip.id)
+
+                            db.commit()
+                            clip_ids = new_clip_ids
+                            print(f"[auto_generate] Auto-split single clip into {len(clip_ids)} sub-clips at scene boundaries", file=sys.stderr)
+
+            # ============================================================
             # STEP 3: Create transitions using pre-computed
             #         suggestedTransitions with continuity scoring
             # ============================================================
@@ -1114,7 +1190,8 @@ def run_sfx_generation(
     prompt: str,
     duration: float,
     output_path: str,
-    output_filename: str
+    output_filename: str,
+    start_time: float = 0.0,
 ):
     """
     Run SFX generation in background.
@@ -1179,7 +1256,8 @@ def run_sfx_generation(
                 "url": file_url,
                 "prompt": prompt,
                 "duration": duration,
-                "seconds_used": duration
+                "seconds_used": duration,
+                "start_time": start_time,
             }
         ))
 

@@ -128,23 +128,23 @@ export function createVideoTexture(gl: WebGL2RenderingContext): WebGLTexture | n
 }
 
 /**
- * Updates a texture with video frame data
+ * Updates a texture with frame data from a video or canvas element.
+ * gl.texImage2D natively accepts both HTMLVideoElement and HTMLCanvasElement.
  */
 export function updateVideoTexture(
   gl: WebGL2RenderingContext,
   texture: WebGLTexture,
-  video: HTMLVideoElement
+  source: HTMLVideoElement | HTMLCanvasElement
 ): void {
   gl.bindTexture(gl.TEXTURE_2D, texture);
 
-  // Use texImage2D for video frames
   gl.texImage2D(
     gl.TEXTURE_2D,
     0,
     gl.RGBA,
     gl.RGBA,
     gl.UNSIGNED_BYTE,
-    video
+    source
   );
 }
 

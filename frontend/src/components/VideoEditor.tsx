@@ -7,7 +7,7 @@
  * - Frame-accurate seeking using requestVideoFrameCallback
  * - Preloading optimization for smoother clip transitions
  */
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProject } from '../context/ProjectContext'
 import { useWebSocket, ProgressUpdate } from '../hooks/useWebSocket'
@@ -24,7 +24,6 @@ import {
   Sparkles,
   Save,
   Download,
-  Type,
   Subtitles,
   SkipBack,
   SkipForward,
@@ -34,36 +33,42 @@ import {
   Keyboard,
   PanelLeftClose,
   PanelLeft,
-  Scissors,
   MessageSquare,
   AlertCircle,
   RefreshCw,
   Loader2,
   Disc3,
+  MoreHorizontal,
 } from 'lucide-react'
 import { VideoClip, BackgroundAudio, Transition, VideoAnalysisResult, projectsApi } from '../api'
 import Timeline from './Timeline'
-import SubtitleEditor from './SubtitleEditor'
-import OverlayEditor from './OverlayEditor'
 import ClipsPanel from './ClipsPanel'
-import AudioEditor from './AudioEditor'
-import TransitionsEditor, { TransitionType } from './TransitionsEditor'
 import ModeSwitcher from './ModeSwitcher'
 import AssetsPanel from './AssetsPanel'
-import AutoEditPanel from './AutoEditPanel'
-import AnalysisOverlay from './AnalysisOverlay'
-import ExportDialog from './ExportDialog'
-import KeyboardShortcutsHelp from './KeyboardShortcutsHelp'
 import { useToast } from './Toast'
-import ReviewModal from './ReviewModal'
 import WebGLTransitionCanvas from './WebGLTransitionCanvas'
+import type { TransitionType } from './TransitionsEditor'
+import type { ColorGradingSettings } from './ColorGradingPanel'
+
+// Lazy-loaded panels (only load when their tab is opened)
+const SubtitleEditor = React.lazy(() => import('./SubtitleEditor'))
+const OverlayEditor = React.lazy(() => import('./OverlayEditor'))
+const AudioEditor = React.lazy(() => import('./AudioEditor'))
+const TransitionsEditor = React.lazy(() => import('./TransitionsEditor'))
+const AutoEditPanel = React.lazy(() => import('./AutoEditPanel'))
+const AnalysisOverlay = React.lazy(() => import('./AnalysisOverlay'))
+const ColorGradingPanel = React.lazy(() => import('./ColorGradingPanel'))
+const ExportDialog = React.lazy(() => import('./ExportDialog'))
+const KeyboardShortcutsHelp = React.lazy(() => import('./KeyboardShortcutsHelp'))
+const ReviewModal = React.lazy(() => import('./ReviewModal'))
 import { isWebGL2Supported } from '../utils/webglUtils'
 import { TRANSITION_MAP } from '../utils/glTransitions'
+import { getAudioDuration } from '../utils/audioDuration'
 import './VideoEditor.css'
 import './TransitionEffects.css'
 import './TransitionEffects2.css'
 
-type ActiveTab = 'clips' | 'subtitles' | 'audio' | 'overlays' | 'transitions' | 'insights'
+type ActiveTab = 'media' | 'text' | 'audio' | 'effects'
 
 export default function VideoEditor() {
   const navigate = useNavigate()
@@ -78,9 +83,15 @@ export default function VideoEditor() {
   const preloadCacheRef = useRef<Map<string, HTMLVideoElement>>(new Map())
   const isSeekingRef = useRef(false)
   const pendingSeekRef = useRef<number | null>(null)
+  const waitingForClipSwitchRef = useRef(false) // Keep transition snapshot visible until new clip is ready
+  const snapshotCanvasRef = useRef<HTMLCanvasElement>(null)
+  const [snapshotVisible, setSnapshotVisible] = useState(false)
+  const [snapshotFading, setSnapshotFading] = useState(false)
+  const transitionDurationRef = useRef(0.5)
   const isTransitioningRef = useRef(false)
   const shouldAutoPlayRef = useRef(false)
   const sfxAudioRefs = useRef<Map<number, HTMLAudioElement>>(new Map())
+  const sfxGainRefs = useRef<Map<number, { ctx: AudioContext; gain: GainNode; source: MediaElementAudioSourceNode }>>(new Map())
   const currentTimeRef = useRef(0)
   const videoErrorRetryRef = useRef(0)
 
@@ -107,11 +118,26 @@ export default function VideoEditor() {
     setIsAnalyzing,
     saveProject,
     hasUnsavedChanges,
+    lastSavedAt,
     setProjectMode,
     getSFXStreamUrl,
     refreshProject,
     refreshVideoUrl,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useProject()
+
+  // Warn before closing with unsaved changes
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
 
   // WebGL support detection
   const [webglSupported] = useState(() => isWebGL2Supported())
@@ -228,6 +254,20 @@ export default function VideoEditor() {
     seekCompletedRef.current = true
     isSeekingRef.current = false
 
+    // If transitioning and waiting for new clip, start fading out the snapshot
+    if (waitingForClipSwitchRef.current) {
+      waitingForClipSwitchRef.current = false
+      // Start the CSS fade-out of the snapshot overlay
+      setSnapshotFading(true)
+      // After fade completes, hide snapshot and reset transition state
+      const fadeDuration = transitionDurationRef.current * 1000
+      setTimeout(() => {
+        setSnapshotVisible(false)
+        setSnapshotFading(false)
+        isTransitioningRef.current = false
+      }, fadeDuration)
+    }
+
     // If we should auto-play after seek, do it now
     if (shouldAutoPlayRef.current && videoRef.current) {
       videoRef.current.play().catch(err => {
@@ -238,7 +278,12 @@ export default function VideoEditor() {
     }
   }, [setIsPlaying])
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>('subtitles')
+  const [activeTab, setActiveTab] = useState<ActiveTab>('media')
+  const [textSubTab, setTextSubTab] = useState<'subtitles' | 'overlays'>('subtitles')
+  const [effectsSubTab, setEffectsSubTab] = useState<'transitions' | 'insights' | 'color'>('transitions')
+  const [colorGrading, setColorGrading] = useState<ColorGradingSettings>({
+    brightness: 0, contrast: 1, saturation: 1, gamma: 1, preset: 'normal'
+  })
   const [volume, setVolume] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
@@ -249,6 +294,8 @@ export default function VideoEditor() {
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
   const [showReviewModal, setShowReviewModal] = useState(false)
   const [showAssetsPanel, setShowAssetsPanel] = useState(true)
+  const [showOverflowMenu, setShowOverflowMenu] = useState(false)
+  const overflowMenuRef = useRef<HTMLDivElement>(null)
   // Intro/Outro effects (fade in at start, fade out at end)
   const [introEffect, setIntroEffect] = useState<{ type: string; duration: number } | null>(null)
   const [outroEffect, setOutroEffect] = useState<{ type: string; duration: number } | null>(null)
@@ -343,6 +390,14 @@ export default function VideoEditor() {
     if (!project?.id) return null
     const token = localStorage.getItem('access_token')
     const baseUrl = `/api/files/${project.id}/stream/clips/${clip.filename}`
+    return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
+  }, [project?.id])
+
+  // Helper: Build stream URL for a pre-rendered transition video
+  const getTransitionStreamUrl = useCallback((transition: Transition) => {
+    if (!project?.id || !transition.rendered_filename) return null
+    const token = localStorage.getItem('access_token')
+    const baseUrl = `/api/files/${project.id}/stream/transitions/${transition.rendered_filename}`
     return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
   }, [project?.id])
 
@@ -460,12 +515,13 @@ export default function VideoEditor() {
         }
       } else if (update.type === 'sfx_generation_complete') {
         if (update.result) {
-          const result = update.result as { filename: string; prompt: string; duration: number }
+          const result = update.result as { filename: string; prompt: string; duration: number; start_time?: number }
           addSFXTrack({
             filename: result.filename,
-            start_time: currentTimeRef.current,
+            start_time: result.start_time ?? currentTimeRef.current,
             duration: result.duration,
             volume: 1,
+            speed: 1,
             prompt: result.prompt,
           })
         }
@@ -506,6 +562,8 @@ export default function VideoEditor() {
       }
     },
     onExport: () => videoUrl && setShowExportDialog(true),
+    onUndo: canUndo ? () => undo() : undefined,
+    onRedo: canRedo ? () => redo() : undefined,
     enabled: true,
   })
 
@@ -519,6 +577,18 @@ export default function VideoEditor() {
     window.addEventListener('keypress', handleKeyPress)
     return () => window.removeEventListener('keypress', handleKeyPress)
   }, [showExportDialog])
+
+  // Close overflow menu on click outside
+  useEffect(() => {
+    if (!showOverflowMenu) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (overflowMenuRef.current && !overflowMenuRef.current.contains(e.target as Node)) {
+        setShowOverflowMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showOverflowMenu])
 
   // Video handlers
   const handleVideoUpload = useCallback(
@@ -562,6 +632,46 @@ export default function VideoEditor() {
       }
     }
   }, [setProjectMode, videoUrl, project?.id, videoClips.length])
+
+  // Handle asset drop from AssetsPanel onto Timeline
+  const handleAssetDropOnTimeline = useCallback(async (
+    asset: { filename: string; asset_type: string; url: string },
+    targetTrack: 'video' | 'sfx',
+    startTime: number
+  ) => {
+    if (!project?.id) return
+
+    if (targetTrack === 'sfx') {
+      // Audio asset → create SFX track
+      try {
+        const token = localStorage.getItem('access_token')
+        const streamUrl = `/api/files/${project.id}/stream/sfx/${asset.filename}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+        const dur = await getAudioDuration(streamUrl)
+        await addSFXTrack({
+          filename: asset.filename,
+          start_time: startTime,
+          duration: dur,
+          volume: 1,
+          speed: 1,
+          prompt: null,
+        })
+        showSuccess(`Added "${asset.filename}" to SFX track`)
+      } catch (err) {
+        console.error('Failed to add SFX from asset:', err)
+        showError('Failed to add audio to timeline')
+      }
+    } else {
+      // Video asset → create clip from source file
+      try {
+        const res = await projectsApi.createClipFromAsset(project.id, asset.filename)
+        setVideoClips(prev => [...prev, res.data])
+        showSuccess(`Added "${asset.filename}" as clip`)
+      } catch (err) {
+        console.error('Failed to create clip from asset:', err)
+        showError('Failed to add video to timeline')
+      }
+    }
+  }, [project?.id, addSFXTrack, showSuccess, showError])
 
   const togglePlayPause = useCallback(() => {
     if (!videoRef.current) return
@@ -719,79 +829,160 @@ export default function VideoEditor() {
         t => t.from_clip_id === currentClip.id && t.to_clip_id === nextClip.id
       )
 
+      console.log('[Transition] Clip ended:', {
+        fromClipId: currentClip.id,
+        toClipId: nextClip.id,
+        foundTransition: appliedTransition ? {
+          id: appliedTransition.id,
+          type: appliedTransition.type,
+          duration: appliedTransition.duration,
+          rendered: appliedTransition.rendered_filename,
+        } : null,
+      })
+
       const nextUrl = getClipStreamUrl(nextClip)
 
-      // Check if we can use WebGL for this transition
-      const canUseWebGL = webglSupported &&
-        appliedTransition &&
-        appliedTransition.type !== 'cut' &&
-        TRANSITION_MAP[appliedTransition.type]
+      // PRIMARY PATH: Pre-rendered transition video (FFmpeg xfade)
+      if (appliedTransition && appliedTransition.type !== 'cut' && appliedTransition.rendered_filename) {
+        const transitionUrl = getTransitionStreamUrl(appliedTransition)
 
-      if (canUseWebGL && appliedTransition) {
-        // WebGL transition path - true crossfade between both videos
-        // Preload next clip in hidden video
+        if (transitionUrl) {
+          // Pause main video
+          if (videoRef.current) {
+            videoRef.current.pause()
+          }
+
+          // Load pre-rendered transition into toVideo and play it
+          const toVideo = toVideoRef.current
+          if (toVideo) {
+            toVideo.src = transitionUrl
+            toVideo.muted = false
+            toVideo.volume = volume
+            toVideo.style.position = 'absolute'
+            toVideo.style.top = '0'
+            toVideo.style.left = '0'
+            toVideo.style.width = '100%'
+            toVideo.style.height = '100%'
+            toVideo.style.objectFit = 'contain'
+            toVideo.style.opacity = '1'
+            toVideo.style.zIndex = '30'
+            toVideo.style.pointerEvents = 'none'
+            toVideo.load()
+
+            const onCanPlay = () => {
+              toVideo.removeEventListener('canplay', onCanPlay)
+              toVideo.play().catch(() => {})
+            }
+
+            const onEnded = () => {
+              toVideo.removeEventListener('ended', onEnded)
+              toVideo.removeEventListener('canplay', onCanPlay)
+              // Hide transition video
+              toVideo.style.opacity = '0'
+              toVideo.style.zIndex = '1'
+              toVideo.muted = true
+              toVideo.volume = 0
+
+              // Switch to next clip, skipping the overlap portion
+              pendingSeekRef.current = nextClip.start_trim + appliedTransition.duration
+              shouldAutoPlayRef.current = true
+              seekCompletedRef.current = false
+
+              setCurrentClipIndex(nextIndex)
+              setCurrentClipUrl(nextUrl)
+
+              setTimeout(() => {
+                isTransitioningRef.current = false
+              }, 100)
+            }
+
+            toVideo.addEventListener('canplay', onCanPlay)
+            toVideo.addEventListener('ended', onEnded)
+          }
+          return
+        }
+      }
+
+      // FALLBACK: WebGL transition (when pre-rendered file not available)
+      if (appliedTransition && appliedTransition.type !== 'cut' && webglSupported) {
+        const canvas = snapshotCanvasRef.current
+        const video = videoRef.current
+        if (canvas && video && video.videoWidth) {
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+          }
+        }
+
+        setSnapshotVisible(true)
+        setSnapshotFading(false)
+
+        if (video) {
+          video.pause()
+          video.volume = 0
+        }
+
         setNextClipUrl(nextUrl)
 
-        // Wait for toVideo to be ready, then start WebGL transition
-        let attempts = 0
-        const maxAttempts = 60 // 3 seconds max wait (60 * 50ms)
+        const glType = TRANSITION_MAP[appliedTransition.type] || 'fade'
+
         const checkToVideoReady = () => {
-          attempts++
+          const toVideo = toVideoRef.current
+          if (toVideo && toVideo.readyState >= 2) {
+            toVideo.currentTime = nextClip.start_trim
+            toVideo.play().catch(() => {})
 
-          // Check if we should abort (e.g., user seeked elsewhere)
-          if (!isTransitioningRef.current) {
-            return
-          }
-
-          if (toVideoRef.current && toVideoRef.current.readyState >= 2) {
-            // Seek toVideo to start trim position
-            toVideoRef.current.currentTime = nextClip.start_trim
-
-            // Start playing toVideo with volume 0 (will crossfade during transition)
-            toVideoRef.current.volume = 0
-            toVideoRef.current.play().catch(err => {
-              console.warn('toVideo play failed:', err)
-            })
-
-            // Start WebGL transition
             setWebglTransitionConfig({
-              type: appliedTransition.type,
+              type: glType,
               duration: appliedTransition.duration,
-              easing: (appliedTransition.parameters?.easing as string) || 'ease-in-out',
+              easing: (appliedTransition.parameters?.easing as string) || 'easeInOutCubic',
             })
-          } else if (attempts < maxAttempts) {
-            // Wait and check again
-            setTimeout(checkToVideoReady, 50)
           } else {
-            // Fallback: skip WebGL transition and switch directly
-            console.warn('WebGL transition failed - toVideo not ready after', attempts, 'attempts, falling back to direct switch')
-            switchToNextClipDirect(nextIndex, nextClip, nextUrl)
+            setTimeout(checkToVideoReady, 50)
           }
         }
 
-        // Give time for source to start loading
         setTimeout(checkToVideoReady, 50)
-      } else {
-        // CSS fallback or cut transition
-        if (appliedTransition && appliedTransition.type !== 'cut') {
-          performCSSTransition(appliedTransition, nextIndex, nextClip, nextUrl)
-        } else {
-          // No transition or cut - switch immediately
-          switchToNextClipDirect(nextIndex, nextClip, nextUrl)
+      } else if (appliedTransition && appliedTransition.type !== 'cut') {
+        // Fallback: snapshot crossfade when WebGL not available
+        const canvas = snapshotCanvasRef.current
+        const video = videoRef.current
+        if (canvas && video && video.videoWidth) {
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+          }
         }
+
+        transitionDurationRef.current = appliedTransition.duration
+        setSnapshotVisible(true)
+        setSnapshotFading(false)
+
+        waitingForClipSwitchRef.current = true
+        pendingSeekRef.current = nextClip.start_trim
+        shouldAutoPlayRef.current = true
+        seekCompletedRef.current = false
+
+        setCurrentClipIndex(nextIndex)
+        setCurrentClipUrl(nextUrl)
+      } else {
+        // No transition or cut - switch immediately
+        switchToNextClipDirect(nextIndex, nextClip, nextUrl)
       }
     } else {
       // End of timeline
       setIsPlaying(false)
     }
-  }, [currentClipIndex, sortedClips, getClipStreamUrl, setIsPlaying, transitions, webglSupported, switchToNextClipDirect, performCSSTransition])
+  }, [currentClipIndex, sortedClips, getClipStreamUrl, getTransitionStreamUrl, setIsPlaying, transitions, webglSupported, switchToNextClipDirect, volume])
 
-  // Handle WebGL transition progress - crossfade audio between clips
+  // Handle WebGL transition progress - fade in the "to" video audio
   const handleWebGLTransitionProgress = useCallback((progress: number) => {
-    // Crossfade audio: from video fades out, to video fades in
-    if (videoRef.current) {
-      videoRef.current.volume = Math.max(0, (1 - progress) * volume)
-    }
+    // Main video stays muted (snapshot is the "from" source, not the video)
+    // Fade in the "to" video audio as the transition progresses
     if (toVideoRef.current) {
       toVideoRef.current.volume = Math.max(0, progress * volume)
     }
@@ -799,18 +990,17 @@ export default function VideoEditor() {
 
   // Handle WebGL transition complete
   const handleWebGLTransitionComplete = useCallback(() => {
-    // Reset volumes
-    if (videoRef.current) {
-      videoRef.current.volume = volume
-    }
+    // Stop toVideo
     if (toVideoRef.current) {
       toVideoRef.current.pause()
+      toVideoRef.current.muted = true
       toVideoRef.current.volume = 0
     }
 
-    // Clear WebGL transition state
-    setWebglTransitionConfig(null)
-    setNextClipUrl(null)
+    // Restore main video volume (it was muted during transition)
+    if (videoRef.current) {
+      videoRef.current.volume = volume
+    }
 
     // Switch to the next clip
     const nextIndex = currentClipIndex + 1
@@ -824,17 +1014,58 @@ export default function VideoEditor() {
       shouldAutoPlayRef.current = true
       seekCompletedRef.current = false
 
-      // Reset transitioning flag BEFORE setting new clip to avoid race conditions
-      isTransitioningRef.current = false
-
+      // Switch clip — the WebGL canvas stays visible (showing final frame)
+      // until stopTransition is called when webglTransitionConfig becomes null
       setCurrentClipIndex(nextIndex)
       setCurrentClipUrl(nextUrl)
+
+      // Clear everything after a brief delay so the WebGL canvas
+      // stays visible during the video element swap (prevents flash)
+      setTimeout(() => {
+        setWebglTransitionConfig(null)
+        setNextClipUrl(null)
+        setSnapshotVisible(false)
+        setSnapshotFading(false)
+        isTransitioningRef.current = false
+      }, 150)
     } else {
       // End of timeline
+      setWebglTransitionConfig(null)
+      setNextClipUrl(null)
+      setSnapshotVisible(false)
+      setSnapshotFading(false)
       isTransitioningRef.current = false
       setIsPlaying(false)
     }
   }, [currentClipIndex, sortedClips, getClipStreamUrl, volume, setIsPlaying])
+
+  // Handle WebGL transition error - fall back to CSS or direct switch
+  const handleWebGLTransitionError = useCallback((error: string) => {
+    console.warn('[WebGL] Transition failed, falling back to direct switch:', error)
+
+    // Clean up toVideo
+    if (toVideoRef.current) {
+      toVideoRef.current.pause()
+      toVideoRef.current.muted = true
+    }
+
+    // Clear WebGL + snapshot state
+    setWebglTransitionConfig(null)
+    setNextClipUrl(null)
+    setSnapshotVisible(false)
+    setSnapshotFading(false)
+
+    // Fall back to direct clip switch
+    const nextIndex = currentClipIndex + 1
+    if (nextIndex < sortedClips.length) {
+      const nextClip = sortedClips[nextIndex]
+      const nextUrl = getClipStreamUrl(nextClip)
+      switchToNextClipDirect(nextIndex, nextClip, nextUrl)
+    } else {
+      isTransitioningRef.current = false
+      setIsPlaying(false)
+    }
+  }, [currentClipIndex, sortedClips, getClipStreamUrl, switchToNextClipDirect, setIsPlaying])
 
   // Handle loaded metadata - seek to correct position
   const handleLoadedMetadata = useCallback(() => {
@@ -869,6 +1100,19 @@ export default function VideoEditor() {
       seekCompletedRef.current = true
       isSeekingRef.current = false
 
+      // If waiting for clip switch (snapshot transition), trigger fade-out here
+      // since handleSeeked won't fire when no seek is needed
+      if (waitingForClipSwitchRef.current) {
+        waitingForClipSwitchRef.current = false
+        setSnapshotFading(true)
+        const fadeDuration = transitionDurationRef.current * 1000
+        setTimeout(() => {
+          setSnapshotVisible(false)
+          setSnapshotFading(false)
+          isTransitioningRef.current = false
+        }, fadeDuration)
+      }
+
       if (shouldAutoPlayRef.current) {
         videoRef.current.play().catch(err => {
           console.warn('Auto-play failed:', err)
@@ -893,6 +1137,8 @@ export default function VideoEditor() {
         setActiveTransitionEffect(null)
         setWebglTransitionConfig(null)
         setNextClipUrl(null)
+        setSnapshotVisible(false)
+        setSnapshotFading(false)
       }
 
       if (sortedClips.length > 0) {
@@ -962,7 +1208,20 @@ export default function VideoEditor() {
     }
 
     const clip = sortedClips[currentClipIndex]
-    const maxTime = (clip.duration || 0) - clip.end_trim
+    let maxTime = (clip.duration || 0) - clip.end_trim
+
+    // If there's a pre-rendered transition after this clip, end earlier
+    // so the transition video has room to play
+    if (currentClipIndex < sortedClips.length - 1) {
+      const nextClip = sortedClips[currentClipIndex + 1]
+      const transition = transitions.find(
+        t => t.from_clip_id === clip.id && t.to_clip_id === nextClip.id
+      )
+      if (transition && transition.type !== 'cut' && transition.rendered_filename) {
+        maxTime -= transition.duration
+      }
+    }
+
     const video = videoRef.current
 
     // Use requestAnimationFrame for battery-friendly, smooth bound checking
@@ -974,6 +1233,7 @@ export default function VideoEditor() {
         const currentVideoTime = video.currentTime
         // Trigger slightly before the end to ensure smooth transition
         if (currentVideoTime >= maxTime - 0.15 && seekCompletedRef.current) {
+          console.log('[Bounds] Clip boundary reached:', { currentVideoTime, maxTime, clipIndex: currentClipIndex, clipId: clip.id })
           handleClipEnded()
         }
       }
@@ -984,33 +1244,85 @@ export default function VideoEditor() {
     rafId = requestAnimationFrame(checkBounds)
 
     return () => cancelAnimationFrame(rafId)
-  }, [sortedClips, currentClipIndex, handleClipEnded, isPlaying])
+  }, [sortedClips, currentClipIndex, handleClipEnded, isPlaying, transitions])
 
-  // Safety timeout to reset stuck transitions
+  // Preload transition video (or next clip) when we're close to the end of the current clip.
+  useEffect(() => {
+    if (!videoRef.current || sortedClips.length === 0 || !isPlaying) return
+    if (currentClipIndex >= sortedClips.length - 1) return // No next clip
+
+    const clip = sortedClips[currentClipIndex]
+    const maxTime = (clip.duration || 0) - clip.end_trim
+    const video = videoRef.current
+    const nextClip = sortedClips[currentClipIndex + 1]
+    let preloaded = false
+
+    const transition = transitions.find(
+      t => t.from_clip_id === clip.id && t.to_clip_id === nextClip.id && t.type !== 'cut'
+    )
+
+    let rafId: number
+    const checkPreload = () => {
+      // Preload 2 seconds before clip end (or earlier if clip is short)
+      const preloadThreshold = Math.max(maxTime - 2, maxTime * 0.5)
+      if (!preloaded && !isTransitioningRef.current && video.currentTime >= preloadThreshold) {
+        preloaded = true
+
+        if (transition?.rendered_filename && toVideoRef.current) {
+          // Pre-rendered transition: preload the transition video
+          const transitionUrl = getTransitionStreamUrl(transition)
+          if (transitionUrl && toVideoRef.current.src !== transitionUrl) {
+            toVideoRef.current.src = transitionUrl
+            toVideoRef.current.preload = 'auto'
+            toVideoRef.current.load()
+          }
+        } else if (transition && toVideoRef.current) {
+          // WebGL fallback: preload next clip
+          const nextUrl = getClipStreamUrl(nextClip)
+          if (nextUrl && toVideoRef.current.src !== nextUrl) {
+            toVideoRef.current.src = nextUrl
+            toVideoRef.current.preload = 'auto'
+            toVideoRef.current.load()
+          }
+        }
+      }
+      rafId = requestAnimationFrame(checkPreload)
+    }
+
+    rafId = requestAnimationFrame(checkPreload)
+    return () => cancelAnimationFrame(rafId)
+  }, [sortedClips, currentClipIndex, isPlaying, transitions, getClipStreamUrl, getTransitionStreamUrl])
+
+  // Safety timeout to reset stuck transitions and advance to next clip
   useEffect(() => {
     if (!isTransitioningRef.current) return
 
-    // If transitioning takes more than 5 seconds, reset the flag
+    // If transitioning takes more than 5 seconds, force advance to next clip
     const timeout = setTimeout(() => {
       if (isTransitioningRef.current) {
-        console.warn('[Transition] Stuck transition detected, resetting...')
+        console.warn('[Transition] Stuck transition detected, forcing advance to next clip...')
         isTransitioningRef.current = false
         setActiveTransitionEffect(null)
         setWebglTransitionConfig(null)
         setNextClipUrl(null)
+        setSnapshotVisible(false)
+        setSnapshotFading(false)
 
-        // Try to continue playback
-        if (videoRef.current && !videoRef.current.paused) {
-          // Video is playing, let it continue
-        } else if (videoRef.current) {
-          // Try to resume
-          videoRef.current.play().catch(() => {})
+        // Advance to next clip
+        const nextIndex = currentClipIndex + 1
+        if (nextIndex < sortedClips.length) {
+          const nextClip = sortedClips[nextIndex]
+          const nextUrl = getClipStreamUrl(nextClip)
+          switchToNextClipDirect(nextIndex, nextClip, nextUrl)
+        } else {
+          // End of timeline
+          setIsPlaying(false)
         }
       }
     }, 5000)
 
     return () => clearTimeout(timeout)
-  }, [currentClipIndex]) // Reset timeout when clip changes
+  }, [currentClipIndex, sortedClips, getClipStreamUrl, switchToNextClipDirect, setIsPlaying]) // Reset timeout when clip changes
 
   // Sync video position when timeline position changes externally (e.g., clicking timeline)
   // This only syncs when paused and not during transitions
@@ -1042,11 +1354,12 @@ export default function VideoEditor() {
     }
   }, [currentTime, isPlaying, sortedClips, currentClipIndex, getClipAtTime])
 
-  // SFX Audio Playback - create audio elements for SFX tracks (ported from working Electron version)
+  // SFX Audio Playback - create audio elements with GainNode for volume > 100%
   useEffect(() => {
     if (!project) return
 
     const audioMap = sfxAudioRefs.current
+    const gainMap = sfxGainRefs.current
 
     // Remove audio elements for deleted SFX tracks
     audioMap.forEach((audio, trackId) => {
@@ -1054,6 +1367,11 @@ export default function VideoEditor() {
         audio.pause()
         audio.src = ''
         audioMap.delete(trackId)
+        const gainEntry = gainMap.get(trackId)
+        if (gainEntry) {
+          gainEntry.ctx.close().catch(() => {})
+          gainMap.delete(trackId)
+        }
       }
     })
 
@@ -1061,10 +1379,27 @@ export default function VideoEditor() {
     sfxTracks.forEach(track => {
       if (!audioMap.has(track.id)) {
         const audio = new Audio()
+        audio.crossOrigin = 'anonymous'
         const url = getSFXStreamUrl(track.filename)
         audio.src = url
-        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+        audio.playbackRate = track.speed ?? 1
         audio.preload = 'auto'
+
+        // Use Web Audio API GainNode for volume amplification beyond 100%
+        try {
+          const ctx = new AudioContext()
+          const source = ctx.createMediaElementSource(audio)
+          const gain = ctx.createGain()
+          const effectiveVol = track.volume * volume * (isMuted ? 0 : 1)
+          gain.gain.value = effectiveVol
+          source.connect(gain)
+          gain.connect(ctx.destination)
+          gainMap.set(track.id, { ctx, gain, source })
+        } catch (err) {
+          // Fallback: use audio.volume (capped at 1.0)
+          console.warn('[SFX] GainNode failed, using fallback volume:', err)
+          audio.volume = Math.min(1, track.volume * volume * (isMuted ? 0 : 1))
+        }
 
         audio.addEventListener('error', () => {
           console.error('[SFX] Error loading:', track.filename, audio.error?.message)
@@ -1083,22 +1418,34 @@ export default function VideoEditor() {
       const audio = audioMap.get(track.id)
       if (!audio) return
 
+      const speed = track.speed ?? 1
       const trackEnd = track.start_time + track.duration
       const shouldBePlaying = isPlaying && currentTime >= track.start_time && currentTime < trackEnd
 
       if (shouldBePlaying && audio.paused) {
-        // Calculate the position within the SFX track
-        const audioTime = currentTime - track.start_time
+        // Calculate the position within the SFX track (scale by speed)
+        const audioTime = (currentTime - track.start_time) * speed
         audio.currentTime = Math.max(0, audioTime)
-        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+        // Update volume via GainNode or fallback
+        const effectiveVol = track.volume * volume * (isMuted ? 0 : 1)
+        const gainEntry = sfxGainRefs.current.get(track.id)
+        if (gainEntry) {
+          gainEntry.gain.gain.value = effectiveVol
+          if (gainEntry.ctx.state === 'suspended') gainEntry.ctx.resume()
+        } else {
+          audio.volume = Math.min(1, effectiveVol)
+        }
+        audio.playbackRate = speed
         audio.play().catch(err => {
           console.warn('[SFX] Play failed:', track.filename, err.message)
         })
       } else if (!shouldBePlaying && !audio.paused) {
         audio.pause()
       } else if (shouldBePlaying && !audio.paused) {
+        // Keep speed in sync
+        if (audio.playbackRate !== speed) audio.playbackRate = speed
         // Sync audio time with video time (0.1s tolerance like working version)
-        const expectedAudioTime = currentTime - track.start_time
+        const expectedAudioTime = (currentTime - track.start_time) * speed
         if (Math.abs(audio.currentTime - expectedAudioTime) > 0.1) {
           audio.currentTime = Math.max(0, expectedAudioTime)
         }
@@ -1117,12 +1464,19 @@ export default function VideoEditor() {
     }
   }, [isPlaying])
 
-  // Update SFX volume when main volume changes
+  // Update SFX volume and speed when main volume or track params change
   useEffect(() => {
     sfxAudioRefs.current.forEach((audio, trackId) => {
       const track = sfxTracks.find(t => t.id === trackId)
       if (track) {
-        audio.volume = track.volume * volume * (isMuted ? 0 : 1)
+        const effectiveVol = track.volume * volume * (isMuted ? 0 : 1)
+        const gainEntry = sfxGainRefs.current.get(trackId)
+        if (gainEntry) {
+          gainEntry.gain.gain.value = effectiveVol
+        } else {
+          audio.volume = Math.min(1, effectiveVol)
+        }
+        audio.playbackRate = track.speed ?? 1
       }
     })
   }, [volume, isMuted, sfxTracks])
@@ -1202,6 +1556,34 @@ export default function VideoEditor() {
     }
   }
 
+  // Poll for transition render completion
+  const pollForRenderedTransition = useCallback((transitionId: number) => {
+    if (!project?.id) return
+    const projectId = project.id
+    let attempts = 0
+    const maxAttempts = 30 // 60 seconds max
+
+    const poll = async () => {
+      attempts++
+      try {
+        const res = await projectsApi.listTransitions(projectId)
+        const updated = res.data.find(t => t.id === transitionId)
+        if (updated?.rendered_filename) {
+          setTransitions(prev => prev.map(t => t.id === transitionId ? updated : t))
+          console.log('[TransitionRender] Render complete:', updated.rendered_filename)
+          return
+        }
+      } catch { /* ignore polling errors */ }
+
+      if (attempts < maxAttempts) {
+        setTimeout(poll, 2000)
+      }
+    }
+
+    // Start polling after 2 seconds (give FFmpeg time to start)
+    setTimeout(poll, 2000)
+  }, [project?.id])
+
   // Transition handlers
   const handleAddTransition = useCallback(async (
     fromClipId: number,
@@ -1227,6 +1609,10 @@ export default function VideoEditor() {
           duration: transitionDuration,
         })
         setTransitions(prev => prev.map(t => t.id === existingTransition.id ? res.data : t))
+        // Poll for render completion
+        if (type !== 'cut') {
+          pollForRenderedTransition(existingTransition.id)
+        }
       } catch (error) {
         console.error('Failed to update transition:', error)
         throw error
@@ -1235,6 +1621,7 @@ export default function VideoEditor() {
     }
 
     try {
+      console.log('[Transition] Creating transition:', { fromClipId, toClipId, type, transitionDuration })
       const res = await projectsApi.createTransition(project.id, {
         type,
         from_clip_id: fromClipId,
@@ -1242,12 +1629,17 @@ export default function VideoEditor() {
         duration: transitionDuration,
         parameters: null,
       })
+      console.log('[Transition] Created transition:', res.data)
       setTransitions(prev => [...prev, res.data])
+      // Poll for render completion
+      if (type !== 'cut') {
+        pollForRenderedTransition(res.data.id)
+      }
     } catch (error) {
       console.error('Failed to add transition:', error)
       throw error // Re-throw so caller can handle it
     }
-  }, [project?.id, transitions])
+  }, [project?.id, transitions, pollForRenderedTransition])
 
   const handleUpdateTransition = async (
     id: number,
@@ -1263,6 +1655,10 @@ export default function VideoEditor() {
       setTransitions(prev =>
         prev.map(t => (t.id === id ? res.data : t))
       )
+      // Poll for render completion
+      if (type !== 'cut') {
+        pollForRenderedTransition(id)
+      }
     } catch (error) {
       console.error('Failed to update transition:', error)
     }
@@ -1332,6 +1728,7 @@ export default function VideoEditor() {
     if (suggestion.type === 'start') {
       const effectType = mapSuggestedTransitionType(suggestion.suggested_transition)
       setIntroEffect({ type: effectType, duration: 1.0 })
+      showSuccess('Intro effect applied!')
       return
     }
 
@@ -1339,97 +1736,122 @@ export default function VideoEditor() {
     if (suggestion.type === 'end') {
       const effectType = mapSuggestedTransitionType(suggestion.suggested_transition)
       setOutroEffect({ type: effectType, duration: 1.0 })
+      showSuccess('Outro effect applied!')
       return
     }
 
-    // Find the clips at this timestamp to add transition between
-    const clips = [...videoClips].sort((a, b) => a.timeline_order - b.timeline_order)
-
-    if (clips.length < 2) {
-      console.warn('Need at least 2 clips to add a transition')
-      showWarning('Need at least 2 clips to add a transition')
+    if (!project?.id) {
+      showWarning('No project available')
       return
     }
-
-    // Build clip boundaries (end times of each clip on the timeline)
-    const clipBoundaries: Array<{ endTime: number; clipIndex: number }> = []
-    let cumulativeTime = 0
-
-    for (let i = 0; i < clips.length - 1; i++) {
-      const clip = clips[i]
-      const effectiveDuration = getClipEffectiveDuration(clip)
-      cumulativeTime += effectiveDuration
-      clipBoundaries.push({ endTime: cumulativeTime, clipIndex: i })
-    }
-
-    // Find the closest clip boundary to the suggestion timestamp
-    let bestMatch: { clipIndex: number; distance: number } | null = null
-
-    for (const boundary of clipBoundaries) {
-      const distance = Math.abs(boundary.endTime - suggestion.timestamp)
-      if (!bestMatch || distance < bestMatch.distance) {
-        bestMatch = { clipIndex: boundary.clipIndex, distance }
-      }
-    }
-
-    // Use a more lenient threshold (5 seconds or 20% of average clip duration)
-    const avgClipDuration = cumulativeTime / clips.length
-    const threshold = Math.max(5, avgClipDuration * 0.2)
 
     // Map the suggested transition type to a valid enum value
     const transitionType = mapSuggestedTransitionType(suggestion.suggested_transition)
 
-    try {
-      // If only one clip boundary exists, just use it
-      if (clipBoundaries.length === 1) {
-        const fromClip = clips[0]
-        const toClip = clips[1]
-        await handleAddTransition(
-          fromClip.id,
-          toClip.id,
-          transitionType,
-          0.5
-        )
-      } else if (bestMatch && bestMatch.distance <= threshold) {
-        const fromClip = clips[bestMatch.clipIndex]
-        const toClip = clips[bestMatch.clipIndex + 1]
-
-        await handleAddTransition(
-          fromClip.id,
-          toClip.id,
-          transitionType,
-          0.5
-        )
-      } else if (bestMatch) {
-        // Use the closest match even if beyond threshold
-        const fromClip = clips[bestMatch.clipIndex]
-        const toClip = clips[bestMatch.clipIndex + 1]
-
-        await handleAddTransition(
-          fromClip.id,
-          toClip.id,
-          transitionType,
-          0.5
-        )
-      } else {
-        // Fallback to first clip pair
-        console.warn(`No clip boundaries found. Applying to first clip pair.`)
-        const fromClip = clips[0]
-        const toClip = clips[1]
-
-        await handleAddTransition(
-          fromClip.id,
-          toClip.id,
-          transitionType,
-          0.5
-        )
+    // If no clips exist but we have a source video, auto-convert it to a clip first
+    let clips = [...videoClips].sort((a, b) => a.timeline_order - b.timeline_order)
+    if (clips.length === 0 && videoUrl) {
+      try {
+        const clipRes = await projectsApi.convertSourceToClip(project.id)
+        clips = [clipRes.data]
+        setVideoClips([clipRes.data])
+      } catch {
+        showWarning('Could not create clip from source video. Try switching to Automatic mode first.')
+        return
       }
-      showSuccess('Transition applied!')
+    }
+
+    if (clips.length < 1) {
+      showWarning('No clips available to add a transition. Upload a video first.')
+      return
+    }
+
+    // Build timeline map: for each clip, its start/end on the timeline
+    const clipTimeline: Array<{ clip: VideoClip; start: number; end: number }> = []
+    let cumulativeTime = 0
+    for (const clip of clips) {
+      const dur = getClipEffectiveDuration(clip)
+      clipTimeline.push({ clip, start: cumulativeTime, end: cumulativeTime + dur })
+      cumulativeTime += dur
+    }
+
+    // Find which clip contains the suggestion timestamp
+    let containingIndex = -1
+    for (let i = 0; i < clipTimeline.length; i++) {
+      const ct = clipTimeline[i]
+      if (suggestion.timestamp >= ct.start && suggestion.timestamp < ct.end) {
+        containingIndex = i
+        break
+      }
+    }
+    // If timestamp is at the very end, use the last clip
+    if (containingIndex === -1 && suggestion.timestamp >= cumulativeTime - 0.5) {
+      containingIndex = clipTimeline.length - 1
+    }
+    if (containingIndex === -1) {
+      // Fallback: find closest clip
+      let minDist = Infinity
+      for (let i = 0; i < clipTimeline.length; i++) {
+        const mid = (clipTimeline[i].start + clipTimeline[i].end) / 2
+        const dist = Math.abs(suggestion.timestamp - mid)
+        if (dist < minDist) { minDist = dist; containingIndex = i }
+      }
+    }
+
+    // Check if the timestamp is near an existing clip boundary (within 1.5s)
+    // Find the CLOSEST boundary, not just the first match
+    const BOUNDARY_THRESHOLD = 1.5
+    let nearBoundaryIndex = -1
+    let nearBoundaryDist = Infinity
+    for (let i = 0; i < clipTimeline.length - 1; i++) {
+      const dist = Math.abs(suggestion.timestamp - clipTimeline[i].end)
+      if (dist < BOUNDARY_THRESHOLD && dist < nearBoundaryDist) {
+        nearBoundaryDist = dist
+        nearBoundaryIndex = i
+      }
+    }
+
+    try {
+      if (nearBoundaryIndex >= 0) {
+        // Timestamp is near an existing clip boundary - add transition there
+        const fromClip = clips[nearBoundaryIndex]
+        const toClip = clips[nearBoundaryIndex + 1]
+        await handleAddTransition(fromClip.id, toClip.id, transitionType, 0.5)
+        showSuccess(`Transition "${suggestion.suggested_transition}" applied between clips!`)
+      } else {
+        // Timestamp is INSIDE a clip - split the clip at that point
+        if (containingIndex < 0 || containingIndex >= clips.length) {
+          showWarning('Could not find a clip at this timestamp')
+          return
+        }
+        const targetClip = clips[containingIndex]
+        const ct = clipTimeline[containingIndex]
+        // splitTime is relative to the clip's visible start (after start_trim)
+        const splitTime = suggestion.timestamp - ct.start
+        const effectiveDuration = getClipEffectiveDuration(targetClip)
+
+        if (splitTime <= 0.5 || splitTime >= effectiveDuration - 0.5) {
+          showWarning('Transition point is too close to the clip edge')
+          return
+        }
+
+        const splitRes = await projectsApi.splitClip(project.id, targetClip.id, splitTime)
+        const { original_clip, new_clip } = splitRes.data
+
+        // Refresh ALL clips from backend to get correct timeline_order
+        // (backend reorders clips after the split point)
+        const refreshedClips = await projectsApi.listClips(project.id)
+        setVideoClips(refreshedClips.data)
+
+        // Create transition between the two split halves
+        await handleAddTransition(original_clip.id, new_clip.id, transitionType, 0.5)
+        showSuccess(`Clip split at ${splitTime.toFixed(1)}s and "${suggestion.suggested_transition}" transition applied!`)
+      }
     } catch (error) {
       console.error('Failed to apply suggested transition:', error)
-      showError('Failed to apply transition')
+      showError('Failed to apply transition. Check console for details.')
     }
-  }, [videoClips, getClipEffectiveDuration, handleAddTransition, showSuccess, showError])
+  }, [videoClips, videoUrl, project?.id, getClipEffectiveDuration, handleAddTransition, setVideoClips, showSuccess, showWarning, showError])
 
   // Get current subtitle for overlay display
   const currentSubtitle = subtitles.find(
@@ -1446,7 +1868,7 @@ export default function VideoEditor() {
       {/* Header - Simplified */}
       <header className="editor-header">
         <div className="header-left">
-          <button className="back-btn" onClick={() => navigate('/dashboard')}>
+          <button className="back-btn" onClick={() => navigate('/dashboard')} aria-label="Back to dashboard">
             <ArrowLeft size={18} />
           </button>
           <div className="project-info">
@@ -1471,70 +1893,89 @@ export default function VideoEditor() {
             </button>
           )}
 
-          {/* Phase 4: Manual mode intelligence controls */}
+          {/* Manual mode: quick analyze button */}
           {projectMode === 'manual' && (
-            <>
-              {/* Quick-transcribe button */}
-              <button
-                className="analyze-btn"
-                onClick={handleQuickTranscribe}
-                disabled={(!videoUrl && sortedClips.length === 0) || isAnalyzing || isQuickTranscribing}
-                title="Analyze video to get transcription, beats, and scene data"
-              >
-                <Sparkles size={18} />
-                {isAnalyzing || isQuickTranscribing ? 'Analyzing...' : 'Quick Analyze'}
-              </button>
-
-              {/* Beat markers toggle (only when analysis has beats) */}
-              {analysisBeats.length > 0 && (
-                <>
-                  <button
-                    className={`icon-btn ${showBeatMarkers ? 'active' : ''}`}
-                    onClick={() => {
-                      setShowBeatMarkers(!showBeatMarkers)
-                      if (!showBeatMarkers) setSnapToBeats(true)
-                      else setSnapToBeats(false)
-                    }}
-                    title={`Beat markers: ${showBeatMarkers ? 'ON' : 'OFF'} (${analysisBeats.length} beats, ${Math.round(analysis?.audio_advanced?.tempo || 0)} BPM)`}
-                  >
-                    <Disc3 size={18} />
-                  </button>
-                </>
-              )}
-            </>
+            <button
+              className="analyze-btn"
+              onClick={handleQuickTranscribe}
+              disabled={(!videoUrl && sortedClips.length === 0) || isAnalyzing || isQuickTranscribing}
+              title="Analyze video to get transcription, beats, and scene data"
+            >
+              <Sparkles size={18} />
+              {isAnalyzing || isQuickTranscribing ? 'Analyzing...' : 'Quick Analyze'}
+            </button>
           )}
 
-          {/* Only show these in non-automatic modes */}
           {projectMode !== 'automatic' && (
-            <>
-              <button
-                className="shortcuts-btn icon-btn"
-                onClick={() => setShowShortcutsHelp(true)}
-                title="Keyboard Shortcuts"
-              >
-                <Keyboard size={18} />
-              </button>
-              <button className="save-btn" onClick={handleSave}>
-                <Save size={18} />
-                Save
-              </button>
-            </>
+            <button className="save-btn" onClick={handleSave} aria-label="Save project">
+              <Save size={18} />
+              Save
+            </button>
           )}
-          <button
-            className="feedback-btn icon-btn"
-            onClick={() => setShowReviewModal(true)}
-            title="Give Feedback"
-          >
-            <MessageSquare size={18} />
-          </button>
+          {lastSavedAt && !hasUnsavedChanges && (
+            <span className="auto-saved-indicator">Auto-saved</span>
+          )}
           <button
             className="export-btn"
             disabled={!videoUrl && sortedClips.length === 0}
             onClick={() => setShowExportDialog(true)}
+            aria-label="Export video"
           >
             <Download size={18} />
             Export
           </button>
+
+          {/* Overflow menu for secondary actions */}
+          <div className="overflow-menu-container" ref={overflowMenuRef}>
+            <button
+              className="icon-btn overflow-trigger"
+              onClick={() => setShowOverflowMenu(!showOverflowMenu)}
+              aria-label="More options"
+              aria-expanded={showOverflowMenu}
+            >
+              <MoreHorizontal size={18} />
+            </button>
+            {showOverflowMenu && (
+              <div className="overflow-menu">
+                {projectMode !== 'automatic' && (
+                  <button
+                    className="overflow-menu-item"
+                    onClick={() => {
+                      setShowShortcutsHelp(true)
+                      setShowOverflowMenu(false)
+                    }}
+                  >
+                    <Keyboard size={16} />
+                    Keyboard Shortcuts
+                  </button>
+                )}
+                <button
+                  className="overflow-menu-item"
+                  onClick={() => {
+                    setShowReviewModal(true)
+                    setShowOverflowMenu(false)
+                  }}
+                >
+                  <MessageSquare size={16} />
+                  Give Feedback
+                </button>
+                {projectMode === 'manual' && analysisBeats.length > 0 && (
+                  <button
+                    className={`overflow-menu-item ${showBeatMarkers ? 'active' : ''}`}
+                    onClick={() => {
+                      setShowBeatMarkers(!showBeatMarkers)
+                      if (!showBeatMarkers) setSnapToBeats(true)
+                      else setSnapToBeats(false)
+                      setShowOverflowMenu(false)
+                    }}
+                  >
+                    <Disc3 size={16} />
+                    Beat Markers {showBeatMarkers ? 'ON' : 'OFF'}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -1546,6 +1987,7 @@ export default function VideoEditor() {
               className="sidebar-toggle"
               onClick={() => setShowAssetsPanel(!showAssetsPanel)}
               title={showAssetsPanel ? 'Hide Assets' : 'Show Assets'}
+              aria-label={showAssetsPanel ? 'Hide assets panel' : 'Show assets panel'}
             >
               {showAssetsPanel ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
             </button>
@@ -1565,7 +2007,7 @@ export default function VideoEditor() {
                   onTimeUpdate={handleTimeUpdate}
                   onLoadedMetadata={handleLoadedMetadata}
                   onPlay={() => setIsPlaying(true)}
-                  onPause={() => setIsPlaying(false)}
+                  onPause={() => { if (!isTransitioningRef.current) setIsPlaying(false) }}
                   onEnded={sortedClips.length > 0 ? handleClipEnded : undefined}
                   onError={handleVideoError}
                   onLoadStart={handleLoadStart}
@@ -1578,9 +2020,14 @@ export default function VideoEditor() {
                   playsInline
                   muted={isMuted}
                   className={activeTransitionEffect ? `video-transition-${activeTransitionEffect.type} phase-${activeTransitionEffect.phase}` : ''}
-                  style={activeTransitionEffect ? {
-                    '--transition-duration': `${activeTransitionEffect.duration / 2}s`
-                  } as React.CSSProperties : undefined}
+                  style={{
+                    ...(activeTransitionEffect ? {
+                      '--transition-duration': `${activeTransitionEffect.duration / 2}s`
+                    } : {}),
+                    filter: colorGrading.preset !== 'normal' || colorGrading.brightness !== 0 || colorGrading.contrast !== 1 || colorGrading.saturation !== 1
+                      ? `brightness(${1 + colorGrading.brightness}) contrast(${colorGrading.contrast}) saturate(${colorGrading.saturation})`
+                      : undefined,
+                  } as React.CSSProperties}
                 />
 
                 {/* Video loading indicator */}
@@ -1616,7 +2063,6 @@ export default function VideoEditor() {
                   ref={toVideoRef}
                   src={nextClipUrl || ''}
                   preload="auto"
-                  muted
                   playsInline
                   style={{
                     position: 'absolute',
@@ -1633,13 +2079,33 @@ export default function VideoEditor() {
                 {/* WebGL Transition Canvas Overlay */}
                 {webglSupported && (
                   <WebGLTransitionCanvas
-                    fromVideoRef={videoRef}
+                    fromRef={snapshotCanvasRef}
                     toVideoRef={toVideoRef}
                     transition={webglTransitionConfig}
                     onTransitionComplete={handleWebGLTransitionComplete}
                     onTransitionProgress={handleWebGLTransitionProgress}
+                    onTransitionError={handleWebGLTransitionError}
                   />
                 )}
+
+                {/* Snapshot canvas — serves as freeze-frame during load + WebGL "from" texture */}
+                {/* z-index 25: below WebGL canvas (26) so GL transition renders on top */}
+                <canvas
+                  ref={snapshotCanvasRef}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    zIndex: 25,
+                    pointerEvents: 'none',
+                    display: snapshotVisible ? 'block' : 'none',
+                    opacity: snapshotFading ? 0 : 1,
+                    transition: snapshotFading ? `opacity ${transitionDurationRef.current}s ease-in-out` : 'none',
+                  }}
+                />
 
                 {/* Multi-clip navigator */}
                 {sortedClips.length > 1 && (
@@ -1912,7 +2378,7 @@ export default function VideoEditor() {
                 )}
 
                 {/* Analysis overlay */}
-                <AnalysisOverlay isVisible={isAnalyzing} />
+                <Suspense fallback={null}><AnalysisOverlay isVisible={isAnalyzing} /></Suspense>
               </>
             ) : (
               <div className="upload-prompt">
@@ -1989,6 +2455,7 @@ export default function VideoEditor() {
         <div className="side-panel">
           {/* Auto Mode - Always show AutoEditPanel (not tabs) */}
           {projectMode === 'automatic' && project ? (
+            <Suspense fallback={<div className="panel-loading"><Loader2 className="spin" size={20} /></div>}>
             <AutoEditPanel
               projectId={project.id}
               isAnalyzing={isAnalyzing}
@@ -2052,105 +2519,157 @@ export default function VideoEditor() {
               onSetIntroEffect={setIntroEffect}
               onSetOutroEffect={setOutroEffect}
             />
+            </Suspense>
           ) : (
             <>
-              <div className="tab-buttons">
-                {/* Show Clips tab for multi-clip projects */}
+              <div className="tab-buttons" role="tablist">
                 <button
-                  className={activeTab === 'clips' ? 'active' : ''}
-                  onClick={() => setActiveTab('clips')}
+                  className={activeTab === 'media' ? 'active' : ''}
+                  onClick={() => setActiveTab('media')}
+                  role="tab"
+                  aria-selected={activeTab === 'media'}
                 >
-                  <Film size={18} />
-                  Clips
+                  <Film size={16} />
+                  Media
                 </button>
                 <button
-                  className={activeTab === 'subtitles' ? 'active' : ''}
-                  onClick={() => setActiveTab('subtitles')}
+                  className={activeTab === 'text' ? 'active' : ''}
+                  onClick={() => setActiveTab('text')}
+                  role="tab"
+                  aria-selected={activeTab === 'text'}
                 >
-                  <Subtitles size={18} />
-                  Subtitles
+                  <Subtitles size={16} />
+                  Text
                 </button>
                 <button
                   className={activeTab === 'audio' ? 'active' : ''}
                   onClick={() => setActiveTab('audio')}
+                  role="tab"
+                  aria-selected={activeTab === 'audio'}
                 >
-                  <Headphones size={18} />
+                  <Headphones size={16} />
                   Audio
                 </button>
                 <button
-                  className={activeTab === 'overlays' ? 'active' : ''}
-                  onClick={() => setActiveTab('overlays')}
+                  className={activeTab === 'effects' ? 'active' : ''}
+                  onClick={() => setActiveTab('effects')}
+                  role="tab"
+                  aria-selected={activeTab === 'effects'}
                 >
-                  <Type size={18} />
-                  Overlays
+                  <Sparkles size={16} />
+                  Effects
                 </button>
-                <button
-                  className={activeTab === 'transitions' ? 'active' : ''}
-                  onClick={() => setActiveTab('transitions')}
-                >
-                  <Scissors size={18} />
-                  Transitions
-                </button>
-                {analysis && (
-                  <button
-                    className={activeTab === 'insights' ? 'active' : ''}
-                    onClick={() => setActiveTab('insights')}
-                  >
-                    <Wand2 size={18} />
-                    Insights
-                  </button>
-                )}
               </div>
 
-              <div className="tab-content">
-                {activeTab === 'clips' && project && (
+              <div className="tab-content" role="tabpanel">
+                {activeTab === 'media' && (
+                  project ? (
+                    <>
+                      {projectMode === 'automatic' && videoClips.length > 0 && (
+                        <div className="back-to-auto">
+                          <button onClick={() => setActiveTab('text')}>
+                            <Wand2 size={16} />
+                            Continue to Auto Edit
+                          </button>
+                        </div>
+                      )}
+                      <ClipsPanel
+                        projectId={project.id}
+                        clips={videoClips}
+                        onClipsChange={setVideoClips}
+                      />
+                    </>
+                  ) : (
+                    <div className="empty-state">
+                      <Upload size={48} strokeWidth={1} />
+                      <p>Upload clips to get started</p>
+                    </div>
+                  )
+                )}
+                {activeTab === 'text' && (
                   <>
-                    {projectMode === 'automatic' && videoClips.length > 0 && (
-                      <div className="back-to-auto">
-                        <button onClick={() => setActiveTab('subtitles')}>
-                          <Wand2 size={16} />
-                          Continue to Auto Edit
-                        </button>
-                      </div>
-                    )}
-                    <ClipsPanel
-                      projectId={project.id}
-                      clips={videoClips}
-                      onClipsChange={setVideoClips}
-                    />
+                    <div className="sub-tab-toggle">
+                      <button
+                        className={textSubTab === 'subtitles' ? 'active' : ''}
+                        onClick={() => setTextSubTab('subtitles')}
+                      >
+                        Subtitles
+                      </button>
+                      <button
+                        className={textSubTab === 'overlays' ? 'active' : ''}
+                        onClick={() => setTextSubTab('overlays')}
+                      >
+                        Overlays
+                      </button>
+                    </div>
+                    {textSubTab === 'subtitles' && <Suspense fallback={<div className="panel-loading"><Loader2 className="spin" size={20} /></div>}><SubtitleEditor /></Suspense>}
+                    {textSubTab === 'overlays' && <Suspense fallback={<div className="panel-loading"><Loader2 className="spin" size={20} /></div>}><OverlayEditor /></Suspense>}
                   </>
                 )}
-                {activeTab === 'subtitles' && <SubtitleEditor />}
-                {activeTab === 'audio' && project && (
-                  <AudioEditor
-                    projectId={project.id}
-                    bgmTracks={bgmTracks}
-                    onBGMChange={setBgmTracks}
-                    suggestedSFX={analysis?.suggestedSFX}
-                    suggestedBGM={analysis?.suggestedBGM}
-                  />
+                {activeTab === 'audio' && (
+                  project ? (
+                    <Suspense fallback={<div className="panel-loading"><Loader2 className="spin" size={20} /></div>}>
+                      <AudioEditor
+                        projectId={project.id}
+                        bgmTracks={bgmTracks}
+                        onBGMChange={setBgmTracks}
+                        suggestedSFX={analysis?.suggestedSFX}
+                        suggestedBGM={analysis?.suggestedBGM}
+                      />
+                    </Suspense>
+                  ) : (
+                    <div className="empty-state">
+                      <Headphones size={48} strokeWidth={1} />
+                      <p>Add sound effects or background music</p>
+                    </div>
+                  )
                 )}
-                {activeTab === 'overlays' && <OverlayEditor />}
-                {activeTab === 'transitions' && project && (
-                  <TransitionsEditor
-                    transitions={transitions}
-                    suggestedTransitions={analysis?.suggestedTransitions}
-                    onAddTransition={handleAddTransition}
-                    onUpdateTransition={handleUpdateTransition}
-                    onDeleteTransition={handleDeleteTransition}
-                    onApplySuggested={handleApplySuggestedTransition}
-                    clips={videoClips.map(c => ({
-                      id: c.id,
-                      original_name: c.original_name,
-                      timeline_order: c.timeline_order,
-                    }))}
-                    introEffect={introEffect}
-                    outroEffect={outroEffect}
-                    onRemoveIntroEffect={() => setIntroEffect(null)}
-                    onRemoveOutroEffect={() => setOutroEffect(null)}
-                  />
-                )}
-                {activeTab === 'insights' && analysis && (
+                {activeTab === 'effects' && (
+                  <>
+                    <div className="sub-tab-toggle">
+                      <button
+                        className={effectsSubTab === 'transitions' ? 'active' : ''}
+                        onClick={() => setEffectsSubTab('transitions')}
+                      >
+                        Transitions
+                      </button>
+                      <button
+                        className={effectsSubTab === 'color' ? 'active' : ''}
+                        onClick={() => setEffectsSubTab('color')}
+                      >
+                        Color
+                      </button>
+                      {analysis && (
+                        <button
+                          className={effectsSubTab === 'insights' ? 'active' : ''}
+                          onClick={() => setEffectsSubTab('insights')}
+                        >
+                          Insights
+                        </button>
+                      )}
+                    </div>
+                    {effectsSubTab === 'transitions' && project && (
+                      <Suspense fallback={<div className="panel-loading"><Loader2 className="spin" size={20} /></div>}>
+                      <TransitionsEditor
+                        transitions={transitions}
+                        suggestedTransitions={analysis?.suggestedTransitions}
+                        onAddTransition={handleAddTransition}
+                        onUpdateTransition={handleUpdateTransition}
+                        onDeleteTransition={handleDeleteTransition}
+                        onApplySuggested={handleApplySuggestedTransition}
+                        clips={videoClips.map(c => ({
+                          id: c.id,
+                          original_name: c.original_name,
+                          timeline_order: c.timeline_order,
+                        }))}
+                        introEffect={introEffect}
+                        outroEffect={outroEffect}
+                        onRemoveIntroEffect={() => setIntroEffect(null)}
+                        onRemoveOutroEffect={() => setOutroEffect(null)}
+                      />
+                      </Suspense>
+                    )}
+                    {effectsSubTab === 'insights' && analysis && (
                   <div className="insights-panel" style={{ padding: '12px', fontSize: '0.9em' }}>
                     <h3 style={{ marginBottom: 12 }}>Analysis Intelligence</h3>
 
@@ -2309,6 +2828,16 @@ export default function VideoEditor() {
                       </div>
                     )}
                   </div>
+                    )}
+                    {effectsSubTab === 'color' && (
+                      <Suspense fallback={<div className="panel-loading"><Loader2 className="spin" size={20} /></div>}>
+                        <ColorGradingPanel
+                          settings={colorGrading}
+                          onSettingsChange={setColorGrading}
+                        />
+                      </Suspense>
+                    )}
+                  </>
                 )}
               </div>
             </>
@@ -2325,15 +2854,18 @@ export default function VideoEditor() {
             projectId={project?.id}
             transitions={transitions}
             onTransitionClick={() => {
-              setActiveTab('transitions')
+              setActiveTab('effects')
+              setEffectsSubTab('transitions')
             }}
             introEffect={introEffect}
             outroEffect={outroEffect}
             onIntroEffectClick={() => {
-              setActiveTab('transitions')
+              setActiveTab('effects')
+              setEffectsSubTab('transitions')
             }}
             onOutroEffectClick={() => {
-              setActiveTab('transitions')
+              setActiveTab('effects')
+              setEffectsSubTab('transitions')
             }}
             bgmTracks={bgmTracks}
             onBGMChange={setBgmTracks}
@@ -2344,31 +2876,39 @@ export default function VideoEditor() {
             beatSyncPoints={analysisBeatSyncPoints}
             speechRegions={speechRegions}
             scenes={analysisScenes}
+            onAssetDrop={handleAssetDropOnTimeline}
+            expandGroup={activeTab === 'media' ? 'video' : activeTab === 'text' ? 'text' : activeTab === 'audio' ? 'audio' : activeTab === 'effects' ? 'video' : null}
           />
         </div>
       )}
 
       {/* Export Dialog */}
       {project && (
-        <ExportDialog
-          projectId={project.id}
-          isOpen={showExportDialog}
-          onClose={() => setShowExportDialog(false)}
-        />
+        <Suspense fallback={null}>
+          <ExportDialog
+            projectId={project.id}
+            isOpen={showExportDialog}
+            onClose={() => setShowExportDialog(false)}
+          />
+        </Suspense>
       )}
 
       {/* Keyboard Shortcuts Help */}
-      <KeyboardShortcutsHelp
-        isOpen={showShortcutsHelp}
-        onClose={() => setShowShortcutsHelp(false)}
-      />
+      <Suspense fallback={null}>
+        <KeyboardShortcutsHelp
+          isOpen={showShortcutsHelp}
+          onClose={() => setShowShortcutsHelp(false)}
+        />
+      </Suspense>
 
       {/* Review/Feedback Modal */}
-      <ReviewModal
-        isOpen={showReviewModal}
-        onClose={() => setShowReviewModal(false)}
-        onSubmit={() => setShowReviewModal(false)}
-      />
+      <Suspense fallback={null}>
+        <ReviewModal
+          isOpen={showReviewModal}
+          onClose={() => setShowReviewModal(false)}
+          onSubmit={() => setShowReviewModal(false)}
+        />
+      </Suspense>
     </div>
   )
 }

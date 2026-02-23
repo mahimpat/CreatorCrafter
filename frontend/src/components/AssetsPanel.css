@@ -26,6 +26,36 @@
   color: var(--text-primary);
 }
 
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.upload-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.upload-btn:hover:not(:disabled) {
+  background: var(--accent-hover, #039be5);
+}
+
+.upload-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .refresh-btn {
   padding: 6px;
   background: var(--bg-tertiary);
@@ -216,4 +246,14 @@
 .asset-actions .action-btn.delete:hover {
   background: rgba(239, 68, 68, 0.1);
   color: var(--error);
+}
+
+/* Draggable assets */
+.asset-item.draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.asset-item.draggable:active {
+  cursor: grabbing;
 }

@@ -235,6 +235,7 @@ async def generate_sfx(
         duration=request.duration,
         output_path=output_path,
         output_filename=output_filename,
+        start_time=request.start_time,
     )
 
     return {

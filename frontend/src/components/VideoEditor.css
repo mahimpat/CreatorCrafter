@@ -1,3 +1,21 @@
+/* Lazy-load spinner */
+.panel-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.5));
+}
+
+.panel-loading .spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Modern Video Editor Styles */
 .video-editor {
   display: flex;
@@ -165,6 +183,19 @@
   border-color: var(--border-light);
 }
 
+.auto-saved-indicator {
+  font-size: 11px;
+  color: #22c55e;
+  opacity: 0.8;
+  animation: autoSaveFade 3s ease-out forwards;
+}
+
+@keyframes autoSaveFade {
+  0% { opacity: 0.9; }
+  70% { opacity: 0.9; }
+  100% { opacity: 0.4; }
+}
+
 .export-btn {
   display: flex;
   align-items: center;
@@ -190,6 +221,72 @@
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+/* ===== OVERFLOW MENU ===== */
+.overflow-menu-container {
+  position: relative;
+}
+
+.overflow-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.overflow-trigger:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+
+.overflow-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 200px;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  z-index: 100;
+}
+
+.overflow-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.overflow-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.overflow-menu-item.active {
+  color: var(--accent-purple);
 }
 
 /* ===== MAIN CONTENT ===== */
@@ -3433,28 +3530,26 @@
 
 .tab-buttons {
   display: flex;
-  padding: 8px;
-  gap: 4px;
+  flex-wrap: wrap;
+  padding: 6px;
+  gap: 3px;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
-  overflow-x: auto;
-}
-
-.tab-buttons::-webkit-scrollbar {
-  height: 0;
 }
 
 .tab-buttons button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 14px;
+  padding: 8px 16px;
+  min-height: 40px;
   background: transparent;
   border: none;
-  border-radius: var(--radius-md);
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   color: var(--text-secondary);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
   transition: all var(--transition-fast);
@@ -3466,9 +3561,9 @@
 }
 
 .tab-buttons button.active {
-  background: var(--bg-primary);
   color: var(--accent-purple);
-  box-shadow: var(--shadow-sm);
+  border-bottom-color: var(--accent-purple);
+  background: transparent;
 }
 
 .tab-content {
@@ -3489,6 +3584,59 @@
 /* TransitionsEditor handles its own layout and padding */
 .tab-content > .transitions-editor {
   padding: 0;
+}
+
+/* ===== EMPTY STATE ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  flex: 1;
+}
+
+.empty-state svg {
+  opacity: 0.4;
+}
+
+.empty-state p {
+  font-size: 14px;
+  margin: 0;
+}
+
+/* ===== SUB-TAB TOGGLE ===== */
+.sub-tab-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 8px 16px 0;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+}
+
+.sub-tab-toggle button {
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.sub-tab-toggle button:hover {
+  color: var(--text-secondary);
+}
+
+.sub-tab-toggle button.active {
+  color: var(--accent-purple);
+  border-bottom-color: var(--accent-purple);
 }
 
 /* ===== TIMELINE SECTION ===== */
@@ -3756,4 +3904,97 @@
 .preload-indicator svg {
   width: 12px;
   height: 12px;
+}
+
+/* ===== RESPONSIVE BREAKPOINTS ===== */
+@media (max-width: 1200px) {
+  .side-panel {
+    width: 300px;
+    min-width: 300px;
+  }
+
+  .video-editor.mode-automatic .side-panel {
+    flex: 0 0 340px;
+    width: 340px;
+    min-width: 340px;
+    max-width: 340px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .side-panel {
+    position: absolute;
+    right: 0;
+    top: 64px;
+    bottom: 0;
+    z-index: 40;
+    width: 340px;
+    min-width: 340px;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+  }
+
+  .left-sidebar.open {
+    width: 220px;
+    min-width: 220px;
+  }
+
+  .video-section {
+    padding: 12px;
+    gap: 10px;
+  }
+}
+
+@media (max-width: 768px) {
+  .left-sidebar {
+    display: none !important;
+  }
+
+  .side-panel {
+    position: absolute;
+    right: 0;
+    top: 64px;
+    bottom: 0;
+    z-index: 40;
+    width: 100%;
+    min-width: 100%;
+    box-shadow: none;
+  }
+
+  .video-section {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .editor-header {
+    padding: 8px 12px;
+    min-height: 56px;
+  }
+
+  .header-actions {
+    gap: 6px;
+  }
+
+  .save-btn,
+  .export-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .analyze-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .timeline-section {
+    height: 240px;
+    min-height: 160px;
+  }
+}
+
+/* ===== REDUCED MOTION ===== */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

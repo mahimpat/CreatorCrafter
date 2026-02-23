@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
 
+    # Ollama for local LLM-based SFX suggestions (free, no API key needed)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "qwen3:0.6b"
+
     # Use semantic matching for SFX (requires sentence-transformers)
     USE_SEMANTIC_SFX_MATCHING: bool = True
 

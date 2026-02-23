@@ -48,6 +48,7 @@ class SFXTrackInfo:
     start_time: float  # seconds from start of timeline
     duration: float  # seconds
     volume: float = 1.0
+    speed: float = 1.0
 
 
 @dataclass
@@ -880,8 +881,9 @@ class VideoStitcher:
                 input_idx = sfx_start_idx + i
                 delay_ms = int(sfx.start_time * 1000)
                 label = f"sfxd{i}"
+                speed_filter = f"atempo={sfx.speed}," if sfx.speed != 1.0 else ""
                 all_filters.append(
-                    f"[{input_idx}:a]adelay={delay_ms}|{delay_ms},"
+                    f"[{input_idx}:a]{speed_filter}adelay={delay_ms}|{delay_ms},"
                     f"volume={sfx.volume}[{label}]"
                 )
                 sfx_labels.append(label)
@@ -932,10 +934,10 @@ class VideoStitcher:
         if duration1 is None or duration2 is None:
             return False, "Could not get video durations"
 
-        xfade = self.get_xfade_transition(transition_type)
+        xfade_type, custom_expr = self.get_xfade_transition(transition_type)
         offset = duration1 - transition_duration
 
-        if xfade is None or transition_type == 'cut':
+        if xfade_type is None or transition_type == 'cut':
             # Simple concatenation
             cmd = [
                 'ffmpeg', '-y',
@@ -948,14 +950,28 @@ class VideoStitcher:
                 '-c:a', 'aac', '-b:a', '192k',
                 output_path
             ]
-        else:
-            # With xfade transition
+        elif custom_expr:
+            # With custom xfade expression
             cmd = [
                 'ffmpeg', '-y',
                 '-i', clip1_path,
                 '-i', clip2_path,
                 '-filter_complex',
-                f'[0:v][1:v]xfade=transition={xfade}:duration={transition_duration}:offset={offset}[v];'
+                f"[0:v][1:v]xfade=transition=custom:duration={transition_duration}:offset={offset}:expr='{custom_expr}'[v];"
+                f'[0:a][1:a]acrossfade=d={transition_duration}[a]',
+                '-map', '[v]', '-map', '[a]',
+                '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
+                '-c:a', 'aac', '-b:a', '192k',
+                output_path
+            ]
+        else:
+            # With built-in xfade transition
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', clip1_path,
+                '-i', clip2_path,
+                '-filter_complex',
+                f'[0:v][1:v]xfade=transition={xfade_type}:duration={transition_duration}:offset={offset}[v];'
                 f'[0:a][1:a]acrossfade=d={transition_duration}[a]',
                 '-map', '[v]', '-map', '[a]',
                 '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
@@ -969,6 +985,165 @@ class VideoStitcher:
             if result.returncode != 0:
                 return False, f"FFmpeg error: {result.stderr[-500:]}"
             return True, output_path
+        except Exception as e:
+            return False, str(e)
+
+    def _has_audio_stream(self, video_path: str) -> bool:
+        """Check if a video file has an audio stream."""
+        try:
+            result = subprocess.run(
+                [
+                    'ffprobe', '-v', 'error',
+                    '-select_streams', 'a',
+                    '-show_entries', 'stream=codec_type',
+                    '-of', 'csv=p=0',
+                    video_path
+                ],
+                capture_output=True, text=True, timeout=10
+            )
+            return bool(result.stdout.strip())
+        except:
+            return False
+
+    def render_transition_preview(
+        self,
+        clip1_path: str,
+        clip1_duration: float,
+        clip1_start_trim: float,
+        clip1_end_trim: float,
+        clip2_path: str,
+        clip2_duration: float,
+        clip2_start_trim: float,
+        clip2_end_trim: float,
+        transition_type: str,
+        transition_duration: float,
+        output_path: str,
+        parameters: Optional[Dict] = None,
+    ) -> Tuple[bool, str]:
+        """
+        Render only the transition segment between two clips.
+
+        Extracts the last transition_duration seconds of clip1 and the first
+        transition_duration seconds of clip2, then applies FFmpeg xfade.
+
+        Returns:
+            Tuple of (success, output_path_or_error)
+        """
+        if transition_type == 'cut':
+            return False, "Cut transitions don't need pre-rendering"
+
+        # Calculate extraction points
+        clip1_effective_end = clip1_duration - clip1_end_trim
+        clip1_extract_start = max(clip1_start_trim, clip1_effective_end - transition_duration)
+        clip1_extract_duration = clip1_effective_end - clip1_extract_start
+
+        clip2_extract_start = clip2_start_trim
+        clip2_effective_duration = clip2_duration - clip2_end_trim - clip2_start_trim
+        clip2_extract_duration = min(transition_duration, clip2_effective_duration)
+
+        # Validate durations
+        if clip1_extract_duration <= 0 or clip2_extract_duration <= 0:
+            return False, "Clips too short for this transition duration"
+
+        xfade_type, custom_expr = self.get_xfade_transition(transition_type)
+        if xfade_type is None:
+            return False, f"Unknown transition type: {transition_type}"
+
+        # xfade offset: where in the combined timeline the transition starts
+        offset = max(0, clip1_extract_duration - transition_duration)
+
+        # Check which clips have audio streams
+        clip1_has_audio = self._has_audio_stream(clip1_path)
+        clip2_has_audio = self._has_audio_stream(clip2_path)
+
+        # Build FFmpeg command
+        cmd = ['ffmpeg', '-y']
+
+        # Input 0: clip1 segment
+        cmd.extend([
+            '-ss', str(clip1_extract_start),
+            '-t', str(clip1_extract_duration),
+            '-i', clip1_path,
+        ])
+
+        # Input 1: clip2 segment
+        cmd.extend([
+            '-ss', str(clip2_extract_start),
+            '-t', str(clip2_extract_duration),
+            '-i', clip2_path,
+        ])
+
+        # Build xfade filter (with scale2ref to handle different resolutions)
+        if custom_expr:
+            easing = (parameters or {}).get('easing', 'linear')
+            easing_expr = self._get_easing_expr(easing)
+            if easing_expr != 'P':
+                expr_with_easing = custom_expr.replace('P', easing_expr)
+            else:
+                expr_with_easing = custom_expr
+            video_filter = (
+                f"[0:v]setpts=PTS-STARTPTS,fps=30,format=yuv420p[v0];"
+                f"[1:v]setpts=PTS-STARTPTS,fps=30,format=yuv420p[v1pre];"
+                f"[v1pre][v0]scale2ref[v1][v0r];"
+                f"[v0r][v1]xfade=transition=custom:"
+                f"duration={transition_duration}:offset={offset}:"
+                f"expr='{expr_with_easing}'[v]"
+            )
+        else:
+            video_filter = (
+                f"[0:v]setpts=PTS-STARTPTS,fps=30,format=yuv420p[v0];"
+                f"[1:v]setpts=PTS-STARTPTS,fps=30,format=yuv420p[v1pre];"
+                f"[v1pre][v0]scale2ref[v1][v0r];"
+                f"[v0r][v1]xfade=transition={xfade_type}:"
+                f"duration={transition_duration}:offset={offset}[v]"
+            )
+
+        # Build audio filter — handle missing audio streams
+        filter_parts = [video_filter]
+        if clip1_has_audio and clip2_has_audio:
+            filter_parts.append(f"[0:a][1:a]acrossfade=d={transition_duration}[a]")
+            audio_map = '[a]'
+        elif clip1_has_audio:
+            # Only clip1 has audio — use it directly
+            audio_map = '0:a'
+        elif clip2_has_audio:
+            # Only clip2 has audio — use it directly
+            audio_map = '1:a'
+        else:
+            # No audio in either clip — generate silence
+            filter_parts.append(
+                f"anullsrc=channel_layout=stereo:sample_rate=44100[a]"
+            )
+            audio_map = '[a]'
+
+        filter_complex = ";".join(filter_parts)
+
+        cmd.extend(['-filter_complex', filter_complex])
+        cmd.extend(['-map', '[v]', '-map', audio_map])
+        cmd.extend([
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            '-shortest',
+            '-movflags', '+faststart',
+            output_path
+        ])
+
+        try:
+            print(f"[TransitionRender] FFmpeg command: {' '.join(cmd)}")
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120
+            )
+            if result.returncode != 0:
+                print(f"[TransitionRender] FFmpeg stderr: {result.stderr}")
+                return False, f"FFmpeg error: {result.stderr[-500:]}"
+            return True, output_path
+        except subprocess.TimeoutExpired:
+            return False, "Transition rendering timed out"
+        except FileNotFoundError:
+            return False, "FFmpeg not found"
         except Exception as e:
             return False, str(e)
 

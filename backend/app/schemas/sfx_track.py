@@ -10,7 +10,8 @@ class SFXTrackCreate(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
     start_time: float = Field(..., ge=0)
     duration: float = Field(..., gt=0)
-    volume: Optional[float] = Field(1.0, ge=0, le=1)
+    volume: Optional[float] = Field(1.0, ge=0, le=3.0)
+    speed: Optional[float] = Field(1.0, ge=0.25, le=4.0)
     prompt: Optional[str] = Field(None, max_length=500)
 
 
@@ -18,7 +19,8 @@ class SFXTrackUpdate(BaseModel):
     """Schema for updating an SFX track."""
     start_time: Optional[float] = Field(None, ge=0)
     duration: Optional[float] = Field(None, gt=0)
-    volume: Optional[float] = Field(None, ge=0, le=1)
+    volume: Optional[float] = Field(None, ge=0, le=3.0)
+    speed: Optional[float] = Field(None, ge=0.25, le=4.0)
 
 
 class SFXTrackResponse(BaseModel):
@@ -29,6 +31,7 @@ class SFXTrackResponse(BaseModel):
     start_time: float
     duration: float
     volume: float
+    speed: float
     prompt: Optional[str]
 
     class Config:

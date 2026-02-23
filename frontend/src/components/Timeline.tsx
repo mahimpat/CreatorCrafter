@@ -5,7 +5,7 @@ import {
   Film, Volume2, VolumeX, MessageSquare, Type, Eye, EyeOff, Lock, Unlock, Music,
   Trash2, ZoomIn, ZoomOut, Scissors, Copy, Play, Square,
   SkipBack, SkipForward, ArrowRightLeft, ChevronsLeft, ChevronsRight,
-  AlertTriangle, Disc3, Camera
+  AlertTriangle, Disc3, Camera, ChevronDown, ChevronRight
 } from 'lucide-react'
 import AudioWaveform from './AudioWaveform'
 import { useToast } from './Toast'
@@ -61,6 +61,10 @@ interface TimelineProps {
   beatSyncPoints?: number[]
   speechRegions?: SpeechRegion[]
   scenes?: AnalysisScene[]
+  // Drag-and-drop from AssetsPanel
+  onAssetDrop?: (asset: { filename: string; asset_type: string; url: string }, targetTrack: 'video' | 'sfx', startTime: number) => void
+  // Collapsible track groups
+  expandGroup?: 'video' | 'audio' | 'text' | null
 }
 
 interface TrackVisibility {
@@ -99,6 +103,8 @@ export default function Timeline({
   beatSyncPoints: _beatSyncPoints = [],
   speechRegions = [],
   scenes = [],
+  onAssetDrop,
+  expandGroup,
 }: TimelineProps) {
   const { showError } = useToast()
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -124,7 +130,24 @@ export default function Timeline({
 
   const [zoom, setZoom] = useState(1)
   const [dragState, setDragState] = useState<DragState | null>(null)
-  const [selection, setSelection] = useState<Selection | null>(null)
+  const [selections, setSelections] = useState<Selection[]>([])
+  const selection = selections.length > 0 ? selections[selections.length - 1] : null
+
+  const isSelected = useCallback((id: number, type: Selection['type']) => {
+    return selections.some(s => s.id === id && s.type === type)
+  }, [selections])
+
+  const toggleSelection = useCallback((id: number, type: Selection['type'], additive: boolean) => {
+    if (additive) {
+      setSelections(prev => {
+        const exists = prev.some(s => s.id === id && s.type === type)
+        if (exists) return prev.filter(s => !(s.id === id && s.type === type))
+        return [...prev, { id, type }]
+      })
+    } else {
+      setSelections([{ id, type }])
+    }
+  }, [])
   const [snapEnabled, setSnapEnabled] = useState(true)
   // Clipboard for copy/paste (future feature)
   const [, setClipboard] = useState<{ type: string; data: unknown } | null>(null)
@@ -133,6 +156,9 @@ export default function Timeline({
   })
   const [trackLock, setTrackLock] = useState<TrackLock>({
     video: false, audio: false, sfx: false, bgm: false, subtitles: false, overlays: false
+  })
+  const [expandedGroups, setExpandedGroups] = useState<{ video: boolean; audio: boolean; text: boolean }>({
+    video: true, audio: true, text: true
   })
   // Clip reorder drag state
   const [clipDragState, setClipDragState] = useState<{
@@ -148,6 +174,12 @@ export default function Timeline({
     itemId: number | null
     isOverTrash: boolean
   }>({ isDragging: false, itemType: null, itemId: null, isOverTrash: false })
+
+  // Asset drop state (drag from AssetsPanel)
+  const [assetDropTarget, setAssetDropTarget] = useState<{
+    track: 'video' | 'sfx' | null
+    position: number | null
+  }>({ track: null, position: null })
 
   // Muted clips state - track which clips have their audio muted
   const [mutedClips, setMutedClips] = useState<Set<number>>(new Set())
@@ -313,7 +345,7 @@ export default function Timeline({
     const x = e.clientX - rect.left + (scrollRef.current?.scrollLeft || 0)
     const newTime = Math.max(0, Math.min(safeDuration, x / pixelsPerSecond))
     setCurrentTime(newTime)
-    setSelection(null) // Deselect when clicking empty area
+    setSelections([]) // Deselect when clicking empty area
   }
 
   // Calculate clip timeline position
@@ -343,6 +375,16 @@ export default function Timeline({
     }
     return null
   }, [sortedClips, currentTime, getClipEffectiveDuration])
+
+  // Check if split is possible at current playhead position
+  const canSplit = useMemo(() => {
+    if (sortedClips.length === 0) return false
+    const clipInfo = getClipAtPlayhead()
+    if (!clipInfo) return false
+    const clipDuration = getClipEffectiveDuration(clipInfo.clip)
+    const splitTime = currentTime - clipInfo.position
+    return splitTime > 0.1 && splitTime < clipDuration - 0.1
+  }, [sortedClips, currentTime, getClipAtPlayhead, getClipEffectiveDuration])
 
   // Split clip at current playhead position into two separate clips
   const handleSplitAtPlayhead = async () => {
@@ -482,7 +524,7 @@ export default function Timeline({
       await projectsApi.deleteClip(projectId, clipId)
       const res = await projectsApi.listClips(projectId)
       onClipsChange?.(res.data)
-      setSelection(null)
+      setSelections([])
     } catch (error) {
       console.error('Failed to delete clip:', error)
     }
@@ -730,7 +772,7 @@ export default function Timeline({
         deleteTextOverlay(id)
       }
 
-      setSelection(null)
+      setSelections([])
     } catch (error) {
       console.error('Failed to delete item:', error)
     }
@@ -740,6 +782,58 @@ export default function Timeline({
 
   const handleItemDragEnd = () => {
     setTrashDragState({ isDragging: false, itemType: null, itemId: null, isOverTrash: false })
+  }
+
+  // Asset drop handlers (drag from AssetsPanel onto Timeline tracks)
+  const isAssetDrag = (e: React.DragEvent): boolean => {
+    return e.dataTransfer.types.includes('application/x-asset-drop')
+  }
+
+  // Only allow audio assets on SFX track, video assets on video track
+  const isAssetAllowedOnTrack = (e: React.DragEvent, track: 'video' | 'sfx'): boolean => {
+    // During dragOver we can't read getData(), but we stash asset_type in a second type entry
+    // Check the custom type hints set in onDragStart
+    if (track === 'sfx') return e.dataTransfer.types.includes('x-asset/audio')
+    if (track === 'video') return e.dataTransfer.types.includes('x-asset/video')
+    return false
+  }
+
+  const handleAssetDragOver = (e: React.DragEvent, track: 'video' | 'sfx') => {
+    if (!isAssetDrag(e)) return
+    if (!isAssetAllowedOnTrack(e, track)) return
+    if ((track === 'sfx' && trackLock.sfx) || (track === 'video' && trackLock.video)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    const trackRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const position = e.clientX - trackRect.left
+    setAssetDropTarget({ track, position })
+  }
+
+  const handleAssetDragLeave = (e: React.DragEvent) => {
+    if (!isAssetDrag(e)) return
+    const relatedTarget = e.relatedTarget as HTMLElement
+    if (relatedTarget && (e.currentTarget as HTMLElement).contains(relatedTarget)) return
+    setAssetDropTarget({ track: null, position: null })
+  }
+
+  const handleAssetDrop = (e: React.DragEvent, track: 'video' | 'sfx') => {
+    if (!isAssetDrag(e)) return
+    if (!isAssetAllowedOnTrack(e, track)) return
+    e.preventDefault()
+    e.stopPropagation()
+    const dataStr = e.dataTransfer.getData('application/x-asset-drop')
+    if (!dataStr) return
+    try {
+      const asset = JSON.parse(dataStr)
+      const scrollLeft = scrollRef.current?.scrollLeft || 0
+      const trackRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      const x = e.clientX - trackRect.left + scrollLeft
+      const startTime = Math.max(0, Math.min(safeDuration, x / pixelsPerSecond))
+      onAssetDrop?.(asset, track, startTime)
+    } catch (err) {
+      console.error('Failed to parse asset drop data:', err)
+    }
+    setAssetDropTarget({ track: null, position: null })
   }
 
   // Item drag handlers (for subtitles, sfx, overlays)
@@ -788,7 +882,7 @@ export default function Timeline({
       originalTrimStart,
       originalTrimEnd
     })
-    setSelection({ id, type })
+    toggleSelection(id, type, false)
   }
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -887,6 +981,17 @@ export default function Timeline({
     }
   }, [dragState, handleMouseMove, handleMouseUp])
 
+  // Context-aware track group expansion from parent
+  useEffect(() => {
+    if (expandGroup) {
+      setExpandedGroups(prev => ({ ...prev, [expandGroup]: true }))
+    }
+  }, [expandGroup])
+
+  const toggleGroup = useCallback((group: 'video' | 'audio' | 'text') => {
+    setExpandedGroups(prev => ({ ...prev, [group]: !prev[group] }))
+  }, [])
+
   // Sync vertical scroll between track labels and tracks container
   // Re-run when track visibility changes (which can cause conditional rendering of refs)
   useEffect(() => {
@@ -918,14 +1023,16 @@ export default function Timeline({
       const isTextInput = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA'
       if (isTextInput) return
 
-      // Delete selected item
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selection) {
+      // Delete selected items (supports multi-select)
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selections.length > 0) {
         e.preventDefault()
-        if (selection.type === 'subtitle') deleteSubtitle(selection.id)
-        else if (selection.type === 'sfx') deleteSFXTrack(selection.id)
-        else if (selection.type === 'overlay') deleteTextOverlay(selection.id)
-        else if (selection.type === 'clip') handleDeleteClip(selection.id)
-        setSelection(null)
+        for (const sel of selections) {
+          if (sel.type === 'subtitle') deleteSubtitle(sel.id)
+          else if (sel.type === 'sfx') deleteSFXTrack(sel.id)
+          else if (sel.type === 'overlay') deleteTextOverlay(sel.id)
+          else if (sel.type === 'clip') handleDeleteClip(sel.id)
+        }
+        setSelections([])
       }
 
       // Split at playhead (S key)
@@ -992,7 +1099,7 @@ export default function Timeline({
 
       // Escape to deselect
       if (e.key === 'Escape') {
-        setSelection(null)
+        setSelections([])
       }
     }
 
@@ -1020,7 +1127,7 @@ export default function Timeline({
     label: string,
     className: string
   ) => {
-    const isSelected = selection?.id === id && selection?.type === type
+    const itemSelected = isSelected(id, type)
     const isDragging = dragState?.id === id && dragState?.type === type
     const isBeingDraggedToTrash = trashDragState.itemId === id && trashDragState.itemType === type
     const left = startTime * pixelsPerSecond
@@ -1029,12 +1136,13 @@ export default function Timeline({
     return (
       <div
         key={`${type}-${id}`}
-        className={`track-item ${className} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isBeingDraggedToTrash ? 'dragging-to-trash' : ''}`}
+        className={`track-item ${className} ${itemSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isBeingDraggedToTrash ? 'dragging-to-trash' : ''}`}
         style={{ left: `${left}px`, width: `${width}px` }}
         draggable
         onDragStart={(e) => handleItemDragStart(e, id, type)}
         onDragEnd={handleItemDragEnd}
         onMouseDown={(e) => handleItemMouseDown(e, id, type, 'move')}
+        onClick={(e) => { e.stopPropagation(); toggleSelection(id, type, e.shiftKey || e.ctrlKey || e.metaKey) }}
         title={`${label} (${formatTime(startTime)} - ${formatTime(endTime)}) - Drag to trash to delete`}
       >
         {/* Resize handle - start */}
@@ -1063,16 +1171,21 @@ export default function Timeline({
       <div className="timeline-header">
         <div className="timeline-header-left">
           <span className="tracks-label">Tracks</span>
-          {selection && (
+          {selections.length > 0 && (
             <div className="selection-info">
-              <span className="selected-type">{selection.type}</span>
+              <span className="selected-type">
+                {selections.length === 1 ? selection!.type : `${selections.length} items`}
+              </span>
               <button
                 className="delete-btn"
                 onClick={() => {
-                  if (selection.type === 'subtitle') deleteSubtitle(selection.id)
-                  else if (selection.type === 'sfx') deleteSFXTrack(selection.id)
-                  else if (selection.type === 'overlay') deleteTextOverlay(selection.id)
-                  setSelection(null)
+                  for (const sel of selections) {
+                    if (sel.type === 'subtitle') deleteSubtitle(sel.id)
+                    else if (sel.type === 'sfx') deleteSFXTrack(sel.id)
+                    else if (sel.type === 'overlay') deleteTextOverlay(sel.id)
+                    else if (sel.type === 'clip') handleDeleteClip(sel.id)
+                  }
+                  setSelections([])
                 }}
                 title="Delete selected (Del)"
               >
@@ -1087,6 +1200,41 @@ export default function Timeline({
             <span className="separator">/</span>
             <span className="total">{formatTime(safeDuration)}</span>
           </div>
+          {/* SFX volume & speed controls - shown when SFX selected */}
+          {selection?.type === 'sfx' && (() => {
+            const sfx = sfxTracks.find(s => s.id === selection.id)
+            if (!sfx) return null
+            return (
+              <div className="sfx-controls-bar">
+                <div className="sfx-control" title={`Volume: ${Math.round(sfx.volume * 100)}%`}>
+                  <Volume2 size={12} />
+                  <input
+                    type="range"
+                    min="0"
+                    max="3"
+                    step="0.05"
+                    value={sfx.volume}
+                    onChange={(e) => updateSFXTrack(sfx.id, { volume: parseFloat(e.target.value) })}
+                    className="sfx-slider"
+                  />
+                  <span className="sfx-value">{Math.round(sfx.volume * 100)}%</span>
+                </div>
+                <div className="sfx-control" title={`Speed: ${sfx.speed ?? 1}x`}>
+                  <span className="sfx-speed-icon">x</span>
+                  <input
+                    type="range"
+                    min="0.25"
+                    max="4"
+                    step="0.25"
+                    value={sfx.speed ?? 1}
+                    onChange={(e) => updateSFXTrack(sfx.id, { speed: parseFloat(e.target.value) })}
+                    className="sfx-slider"
+                  />
+                  <span className="sfx-value">{sfx.speed ?? 1}x</span>
+                </div>
+              </div>
+            )
+          })()}
           <div className="timeline-tools">
             {/* Navigation */}
             <div className="tool-group">
@@ -1129,10 +1277,10 @@ export default function Timeline({
                 <ChevronsLeft size={14} />
               </button>
               <button
-                className="tool-btn"
+                className={`tool-btn${canSplit ? ' split-ready' : ''}`}
                 onClick={handleSplitAtPlayhead}
-                disabled={sortedClips.length === 0}
-                title="Split at playhead (S)"
+                disabled={!canSplit}
+                title={canSplit ? 'Split at playhead (S)' : 'Move playhead into a clip to split'}
                 aria-label="Split at playhead"
               >
                 <Scissors size={14} />
@@ -1158,7 +1306,7 @@ export default function Timeline({
                     else if (selection.type === 'sfx') deleteSFXTrack(selection.id)
                     else if (selection.type === 'overlay') deleteTextOverlay(selection.id)
                     else if (selection.type === 'clip') handleDeleteClip(selection.id)
-                    setSelection(null)
+                    setSelections([])
                   }
                 }}
                 onDragOver={handleTrashDragOver}
@@ -1212,137 +1360,119 @@ export default function Timeline({
         <div className="timeline-sidebar">
           <div className="ruler-spacer" />
           <div className="track-labels" ref={trackLabelsRef}>
-            {/* Video Track Label */}
-            <div className={`track-label ${!trackVisibility.video ? 'hidden-track' : ''}`}>
-              <span className="track-icon"><Film size={16} /></span>
-              <span className="track-name">Video</span>
-              <div className="track-buttons">
-                <button
-                  className={`track-btn ${!trackVisibility.video ? 'off' : ''}`}
-                  onClick={() => toggleVisibility('video')}
-                  title="Toggle visibility"
-                >
-                  {trackVisibility.video ? <Eye size={12} /> : <EyeOff size={12} />}
-                </button>
-                <button
-                  className={`track-btn ${trackLock.video ? 'locked' : ''}`}
-                  onClick={() => toggleLock('video')}
-                  title="Toggle lock"
-                >
-                  {trackLock.video ? <Lock size={12} /> : <Unlock size={12} />}
-                </button>
-              </div>
+            {/* === Video Group === */}
+            <div
+              className="track-group-header"
+              onClick={() => toggleGroup('video')}
+              aria-expanded={expandedGroups.video}
+            >
+              {expandedGroups.video ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              <span>Video</span>
             </div>
+            {expandedGroups.video && (
+              <>
+                <div className={`track-label ${!trackVisibility.video ? 'hidden-track' : ''}`}>
+                  <span className="track-icon"><Film size={14} /></span>
+                  <span className="track-name">Clips</span>
+                  <div className="track-buttons">
+                    <button className={`track-btn ${!trackVisibility.video ? 'off' : ''}`} onClick={() => toggleVisibility('video')} title="Toggle visibility" aria-label="Toggle video visibility">
+                      {trackVisibility.video ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button className={`track-btn ${trackLock.video ? 'locked' : ''}`} onClick={() => toggleLock('video')} title="Toggle lock" aria-label="Toggle video lock">
+                      {trackLock.video ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                  </div>
+                </div>
+                <div className={`track-label ${!trackVisibility.audio ? 'hidden-track' : ''}`}>
+                  <span className="track-icon"><Volume2 size={14} /></span>
+                  <span className="track-name">Clip Audio</span>
+                  <div className="track-buttons">
+                    <button className={`track-btn ${!trackVisibility.audio ? 'off' : ''}`} onClick={() => toggleVisibility('audio')} title="Toggle visibility" aria-label="Toggle clip audio visibility">
+                      {trackVisibility.audio ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button className={`track-btn ${trackLock.audio ? 'locked' : ''}`} onClick={() => toggleLock('audio')} title="Toggle lock" aria-label="Toggle clip audio lock">
+                      {trackLock.audio ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
-            {/* Clip Audio Track Label */}
-            <div className={`track-label ${!trackVisibility.audio ? 'hidden-track' : ''}`}>
-              <span className="track-icon"><Volume2 size={16} /></span>
-              <span className="track-name">Clip Audio</span>
-              <div className="track-buttons">
-                <button
-                  className={`track-btn ${!trackVisibility.audio ? 'off' : ''}`}
-                  onClick={() => toggleVisibility('audio')}
-                  title="Toggle visibility"
-                >
-                  {trackVisibility.audio ? <Eye size={12} /> : <EyeOff size={12} />}
-                </button>
-                <button
-                  className={`track-btn ${trackLock.audio ? 'locked' : ''}`}
-                  onClick={() => toggleLock('audio')}
-                  title="Toggle lock"
-                >
-                  {trackLock.audio ? <Lock size={12} /> : <Unlock size={12} />}
-                </button>
-              </div>
+            {/* === Audio Group === */}
+            <div
+              className="track-group-header"
+              onClick={() => toggleGroup('audio')}
+              aria-expanded={expandedGroups.audio}
+            >
+              {expandedGroups.audio ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              <span>Audio</span>
             </div>
+            {expandedGroups.audio && (
+              <>
+                <div className={`track-label ${!trackVisibility.sfx ? 'hidden-track' : ''}`}>
+                  <span className="track-icon"><Music size={14} /></span>
+                  <span className="track-name">SFX</span>
+                  <div className="track-buttons">
+                    <button className={`track-btn ${!trackVisibility.sfx ? 'off' : ''}`} onClick={() => toggleVisibility('sfx')} title="Toggle visibility" aria-label="Toggle SFX visibility">
+                      {trackVisibility.sfx ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button className={`track-btn ${trackLock.sfx ? 'locked' : ''}`} onClick={() => toggleLock('sfx')} title="Toggle lock" aria-label="Toggle SFX lock">
+                      {trackLock.sfx ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                  </div>
+                </div>
+                <div className={`track-label ${!trackVisibility.bgm ? 'hidden-track' : ''}`}>
+                  <span className="track-icon"><Music size={14} /></span>
+                  <span className="track-name">BGM</span>
+                  <div className="track-buttons">
+                    <button className={`track-btn ${!trackVisibility.bgm ? 'off' : ''}`} onClick={() => toggleVisibility('bgm')} title="Toggle visibility" aria-label="Toggle BGM visibility">
+                      {trackVisibility.bgm ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button className={`track-btn ${trackLock.bgm ? 'locked' : ''}`} onClick={() => toggleLock('bgm')} title="Toggle lock" aria-label="Toggle BGM lock">
+                      {trackLock.bgm ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
-            {/* SFX Track Label */}
-            <div className={`track-label ${!trackVisibility.sfx ? 'hidden-track' : ''}`}>
-              <span className="track-icon"><Music size={16} /></span>
-              <span className="track-name">SFX</span>
-              <div className="track-buttons">
-                <button
-                  className={`track-btn ${!trackVisibility.sfx ? 'off' : ''}`}
-                  onClick={() => toggleVisibility('sfx')}
-                  title="Toggle visibility"
-                >
-                  {trackVisibility.sfx ? <Eye size={12} /> : <EyeOff size={12} />}
-                </button>
-                <button
-                  className={`track-btn ${trackLock.sfx ? 'locked' : ''}`}
-                  onClick={() => toggleLock('sfx')}
-                  title="Toggle lock"
-                >
-                  {trackLock.sfx ? <Lock size={12} /> : <Unlock size={12} />}
-                </button>
-              </div>
+            {/* === Text Group === */}
+            <div
+              className="track-group-header"
+              onClick={() => toggleGroup('text')}
+              aria-expanded={expandedGroups.text}
+            >
+              {expandedGroups.text ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              <span>Text</span>
             </div>
-
-            {/* BGM Track Label */}
-            <div className={`track-label ${!trackVisibility.bgm ? 'hidden-track' : ''}`}>
-              <span className="track-icon"><Music size={16} /></span>
-              <span className="track-name">BGM</span>
-              <div className="track-buttons">
-                <button
-                  className={`track-btn ${!trackVisibility.bgm ? 'off' : ''}`}
-                  onClick={() => toggleVisibility('bgm')}
-                  title="Toggle visibility"
-                >
-                  {trackVisibility.bgm ? <Eye size={12} /> : <EyeOff size={12} />}
-                </button>
-                <button
-                  className={`track-btn ${trackLock.bgm ? 'locked' : ''}`}
-                  onClick={() => toggleLock('bgm')}
-                  title="Toggle lock"
-                >
-                  {trackLock.bgm ? <Lock size={12} /> : <Unlock size={12} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Subtitles Track Label */}
-            <div className={`track-label ${!trackVisibility.subtitles ? 'hidden-track' : ''}`}>
-              <span className="track-icon"><MessageSquare size={16} /></span>
-              <span className="track-name">Subtitles</span>
-              <div className="track-buttons">
-                <button
-                  className={`track-btn ${!trackVisibility.subtitles ? 'off' : ''}`}
-                  onClick={() => toggleVisibility('subtitles')}
-                  title="Toggle visibility"
-                >
-                  {trackVisibility.subtitles ? <Eye size={12} /> : <EyeOff size={12} />}
-                </button>
-                <button
-                  className={`track-btn ${trackLock.subtitles ? 'locked' : ''}`}
-                  onClick={() => toggleLock('subtitles')}
-                  title="Toggle lock"
-                >
-                  {trackLock.subtitles ? <Lock size={12} /> : <Unlock size={12} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Text Overlays Track Label */}
-            <div className={`track-label ${!trackVisibility.overlays ? 'hidden-track' : ''}`}>
-              <span className="track-icon"><Type size={16} /></span>
-              <span className="track-name">Text</span>
-              <div className="track-buttons">
-                <button
-                  className={`track-btn ${!trackVisibility.overlays ? 'off' : ''}`}
-                  onClick={() => toggleVisibility('overlays')}
-                  title="Toggle visibility"
-                >
-                  {trackVisibility.overlays ? <Eye size={12} /> : <EyeOff size={12} />}
-                </button>
-                <button
-                  className={`track-btn ${trackLock.overlays ? 'locked' : ''}`}
-                  onClick={() => toggleLock('overlays')}
-                  title="Toggle lock"
-                >
-                  {trackLock.overlays ? <Lock size={12} /> : <Unlock size={12} />}
-                </button>
-              </div>
-            </div>
+            {expandedGroups.text && (
+              <>
+                <div className={`track-label ${!trackVisibility.subtitles ? 'hidden-track' : ''}`}>
+                  <span className="track-icon"><MessageSquare size={14} /></span>
+                  <span className="track-name">Subtitles</span>
+                  <div className="track-buttons">
+                    <button className={`track-btn ${!trackVisibility.subtitles ? 'off' : ''}`} onClick={() => toggleVisibility('subtitles')} title="Toggle visibility" aria-label="Toggle subtitles visibility">
+                      {trackVisibility.subtitles ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button className={`track-btn ${trackLock.subtitles ? 'locked' : ''}`} onClick={() => toggleLock('subtitles')} title="Toggle lock" aria-label="Toggle subtitles lock">
+                      {trackLock.subtitles ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                  </div>
+                </div>
+                <div className={`track-label ${!trackVisibility.overlays ? 'hidden-track' : ''}`}>
+                  <span className="track-icon"><Type size={14} /></span>
+                  <span className="track-name">Overlays</span>
+                  <div className="track-buttons">
+                    <button className={`track-btn ${!trackVisibility.overlays ? 'off' : ''}`} onClick={() => toggleVisibility('overlays')} title="Toggle visibility" aria-label="Toggle overlays visibility">
+                      {trackVisibility.overlays ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button className={`track-btn ${trackLock.overlays ? 'locked' : ''}`} onClick={() => toggleLock('overlays')} title="Toggle lock" aria-label="Toggle overlays lock">
+                      {trackLock.overlays ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -1375,15 +1505,24 @@ export default function Timeline({
             >
               <div className="playhead-line" style={{ left: `${playheadPosition}px` }} />
 
-              {/* Video Track */}
-              {trackVisibility.video && (
-                <div className={`track video ${trackLock.video ? 'locked' : ''}`}>
+              {/* === Video Group === */}
+              <div className="track-group-spacer" />
+              {expandedGroups.video && trackVisibility.video && (
+                <div
+                  className={`track video ${trackLock.video ? 'locked' : ''} ${assetDropTarget.track === 'video' ? 'asset-drop-target' : ''}`}
+                  onDragOver={(e) => handleAssetDragOver(e, 'video')}
+                  onDragLeave={handleAssetDragLeave}
+                  onDrop={(e) => handleAssetDrop(e, 'video')}
+                >
+                  {assetDropTarget.track === 'video' && assetDropTarget.position !== null && (
+                    <div className="asset-drop-indicator" style={{ left: `${assetDropTarget.position}px` }} />
+                  )}
                   {sortedClips.length > 0 ? (
                     // Render multiple clips
                     sortedClips.map((clip, index) => {
                       const clipPosition = getClipTimelinePosition(clip)
                       const clipDuration = getClipEffectiveDuration(clip)
-                      const isSelected = selection?.id === clip.id && selection?.type === 'clip'
+                      const clipSelected = isSelected(clip.id, 'clip')
                       const isDragging = dragState?.id === clip.id && dragState?.type === 'clip'
                       const isBeingDragged = clipDragState.draggedId === clip.id
                       const isDragOver = clipDragState.dragOverId === clip.id
@@ -1392,10 +1531,15 @@ export default function Timeline({
                       return (
                         <div
                           key={clip.id}
-                          className={`video-clip multi-clip ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isBeingDragged ? 'clip-dragging' : ''} ${isDragOver ? `drag-over drag-over-${dragOverPosition}` : ''}`}
+                          className={`video-clip multi-clip ${clipSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isBeingDragged ? 'clip-dragging' : ''} ${isDragOver ? `drag-over drag-over-${dragOverPosition}` : ''}`}
                           style={{
                             left: `${clipPosition * pixelsPerSecond}px`,
                             width: `${clipDuration * pixelsPerSecond}px`,
+                            ...(clip.thumbnail_filename ? {
+                              backgroundImage: `url(/api/files/${projectId}/stream/thumbnails/${clip.thumbnail_filename}?token=${encodeURIComponent(localStorage.getItem('access_token') || '')})`,
+                              backgroundSize: 'cover',
+                              backgroundPosition: 'center',
+                            } : {}),
                           }}
                           draggable={!trackLock.video}
                           onDragStart={(e) => handleClipDragStart(e, clip.id)}
@@ -1405,7 +1549,7 @@ export default function Timeline({
                           onDragEnd={handleClipDragEnd}
                           onClick={(e) => {
                             e.stopPropagation()
-                            setSelection({ id: clip.id, type: 'clip' })
+                            toggleSelection(clip.id, 'clip', e.shiftKey || e.ctrlKey || e.metaKey)
                           }}
                           title={`${clip.original_name || `Clip ${index + 1}`} (${formatTime(clipDuration)}) - Drag to reorder`}
                         >
@@ -1549,9 +1693,8 @@ export default function Timeline({
                 </div>
               )}
 
-              {/* Audio/SFX Track */}
               {/* Clip Audio Track */}
-              {trackVisibility.audio && (
+              {expandedGroups.video && trackVisibility.audio && (
                 <div className={`track audio clip-audio ${trackLock.audio ? 'locked' : ''}`}>
                   {/* Clip Audio Waveforms */}
                   {sortedClips.map((clip, index) => {
@@ -1607,9 +1750,18 @@ export default function Timeline({
                 </div>
               )}
 
-              {/* SFX Track */}
-              {trackVisibility.sfx && (
-                <div className={`track sfx ${trackLock.sfx ? 'locked' : ''}`}>
+              {/* === Audio Group === */}
+              <div className="track-group-spacer" />
+              {expandedGroups.audio && trackVisibility.sfx && (
+                <div
+                  className={`track sfx ${trackLock.sfx ? 'locked' : ''} ${assetDropTarget.track === 'sfx' ? 'asset-drop-target' : ''}`}
+                  onDragOver={(e) => handleAssetDragOver(e, 'sfx')}
+                  onDragLeave={handleAssetDragLeave}
+                  onDrop={(e) => handleAssetDrop(e, 'sfx')}
+                >
+                  {assetDropTarget.track === 'sfx' && assetDropTarget.position !== null && (
+                    <div className="asset-drop-indicator" style={{ left: `${assetDropTarget.position}px` }} />
+                  )}
                   {sfxTracks.map(sfx => {
                     const hasConflict = audioConflicts.has(sfx.id)
                     return (
@@ -1650,14 +1802,14 @@ export default function Timeline({
               )}
 
               {/* BGM Track */}
-              {trackVisibility.bgm && (
+              {expandedGroups.audio && trackVisibility.bgm && (
                 <div className={`track bgm ${trackLock.bgm ? 'locked' : ''}`}>
                   {bgmTracks.map(bgm => {
                     const isBeingDraggedToTrash = trashDragState.itemId === bgm.id && trashDragState.itemType === 'bgm'
                     return (
                       <div
                         key={`bgm-${bgm.id}`}
-                        className={`track-item bgm-item ${selection?.id === bgm.id && selection?.type === 'bgm' ? 'selected' : ''} ${isBeingDraggedToTrash ? 'dragging-to-trash' : ''}`}
+                        className={`track-item bgm-item ${isSelected(bgm.id, 'bgm') ? 'selected' : ''} ${isBeingDraggedToTrash ? 'dragging-to-trash' : ''}`}
                         style={{
                           left: `${(bgm.start_time || 0) * pixelsPerSecond}px`,
                           width: `${(bgm.duration || 60) * pixelsPerSecond}px`,
@@ -1683,8 +1835,9 @@ export default function Timeline({
                 </div>
               )}
 
-              {/* Subtitles Track */}
-              {trackVisibility.subtitles && (
+              {/* === Text Group === */}
+              <div className="track-group-spacer" />
+              {expandedGroups.text && trackVisibility.subtitles && (
                 <div className={`track subtitles ${trackLock.subtitles ? 'locked' : ''}`}>
                   {subtitles.map(subtitle =>
                     renderTrackItem(
@@ -1701,7 +1854,7 @@ export default function Timeline({
               )}
 
               {/* Text Overlays Track */}
-              {trackVisibility.overlays && (
+              {expandedGroups.text && trackVisibility.overlays && (
                 <div className={`track overlays ${trackLock.overlays ? 'locked' : ''}`}>
                   {textOverlays.map(overlay =>
                     renderTrackItem(

@@ -189,6 +189,9 @@ class Transition(Base):
     ai_suggested = Column(Integer, default=0)  # 1 if AI suggested this transition
     confidence = Column(Float, nullable=True)  # AI confidence score
 
+    # Pre-rendered transition video file (stored in transitions/ dir)
+    rendered_filename = Column(String(255), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

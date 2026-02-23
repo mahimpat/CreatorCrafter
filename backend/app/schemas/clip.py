@@ -47,6 +47,7 @@ class VideoClipResponse(BaseModel):
     fps: Optional[float]
     clip_metadata: Optional[Dict[str, Any]]
     analysis: Optional[Dict[str, Any]]
+    thumbnail_filename: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

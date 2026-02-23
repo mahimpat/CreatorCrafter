@@ -46,6 +46,7 @@ export interface SFXTrack {
   start_time: number
   duration: number
   volume: number
+  speed: number
   prompt: string | null
 }
 
@@ -291,6 +292,7 @@ export interface VideoClip {
   fps: number | null
   clip_metadata: Record<string, unknown> | null
   analysis: Record<string, unknown> | null
+  thumbnail_filename: string | null
   created_at: string
   updated_at: string
 }
@@ -305,6 +307,7 @@ export interface Transition {
   parameters: Record<string, unknown> | null
   ai_suggested: number
   confidence: number | null
+  rendered_filename: string | null
   created_at: string
   updated_at: string
 }
@@ -399,6 +402,8 @@ export const projectsApi = {
     ),
   convertSourceToClip: (projectId: number) =>
     apiClient.post<VideoClip>(`/projects/${projectId}/clips/convert-source`),
+  createClipFromAsset: (projectId: number, assetFilename: string) =>
+    apiClient.post<VideoClip>(`/projects/${projectId}/clips/from-asset`, { asset_filename: assetFilename }),
   reorderClips: (projectId: number, clipOrders: Array<{ id: number; timeline_order: number }>) =>
     apiClient.put<VideoClip[]>(`/projects/${projectId}/clips/reorder`, { clip_orders: clipOrders }),
   stitchClips: (projectId: number, options?: {
@@ -418,12 +423,14 @@ export const projectsApi = {
   // Transitions
   listTransitions: (projectId: number) =>
     apiClient.get<Transition[]>(`/projects/${projectId}/transitions`),
-  createTransition: (projectId: number, data: Omit<Transition, 'id' | 'project_id' | 'ai_suggested' | 'confidence' | 'created_at' | 'updated_at'>) =>
+  createTransition: (projectId: number, data: Omit<Transition, 'id' | 'project_id' | 'ai_suggested' | 'confidence' | 'rendered_filename' | 'created_at' | 'updated_at'>) =>
     apiClient.post<Transition>(`/projects/${projectId}/transitions`, data),
   updateTransition: (projectId: number, transitionId: number, data: Partial<Transition>) =>
     apiClient.put<Transition>(`/projects/${projectId}/transitions/${transitionId}`, data),
   deleteTransition: (projectId: number, transitionId: number) =>
     apiClient.delete(`/projects/${projectId}/transitions/${transitionId}`),
+  renderTransition: (projectId: number, transitionId: number) =>
+    apiClient.post<Transition>(`/projects/${projectId}/transitions/${transitionId}/render`),
 
   // Background Audio
   listBGM: (projectId: number) =>

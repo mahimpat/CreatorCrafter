@@ -38,6 +38,9 @@ class VideoClip(Base):
     fps = Column(Float, nullable=True)
     clip_metadata = Column(JSON, nullable=True)  # Full FFprobe metadata
 
+    # Thumbnail
+    thumbnail_filename = Column(String(255), nullable=True)
+
     # AI Analysis for this clip
     analysis = Column(JSON, nullable=True)  # BLIP analysis, scene detection, etc.
 

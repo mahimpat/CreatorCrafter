@@ -34,6 +34,59 @@ from app.config import settings
 router = APIRouter()
 
 
+def generate_thumbnail(video_path: str, output_path: str, timestamp: float = None) -> bool:
+    """Generate a thumbnail from a video file at the given timestamp (or midpoint)."""
+    try:
+        if timestamp is None:
+            # Get duration and use midpoint
+            probe = subprocess.run(
+                ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', video_path],
+                capture_output=True, text=True
+            )
+            if probe.returncode == 0:
+                fmt = json.loads(probe.stdout).get('format', {})
+                dur = float(fmt.get('duration', 0))
+                timestamp = dur / 2 if dur > 0 else 0
+            else:
+                timestamp = 0
+
+        result = subprocess.run(
+            [
+                'ffmpeg', '-y', '-ss', str(timestamp),
+                '-i', video_path,
+                '-vframes', '1', '-vf', 'scale=160:-1',
+                '-q:v', '5', output_path
+            ],
+            capture_output=True, text=True, timeout=15
+        )
+        return result.returncode == 0
+    except Exception as e:
+        print(f"Thumbnail generation failed: {e}")
+        return False
+
+
+def create_clip_thumbnail(clip: VideoClip, user_id: int, project_id: int, db: Session):
+    """Generate and store a thumbnail for a clip."""
+    import uuid
+    clip_path = file_service.get_file_path(user_id, project_id, "clips", clip.filename)
+    if not os.path.exists(clip_path):
+        return
+
+    thumbs_dir = os.path.dirname(
+        file_service.get_file_path(user_id, project_id, "thumbnails", "dummy")
+    )
+    os.makedirs(thumbs_dir, exist_ok=True)
+
+    thumb_name = f"thumb_{clip.id}_{uuid.uuid4().hex[:6]}.jpg"
+    thumb_path = os.path.join(thumbs_dir, thumb_name)
+
+    # Use midpoint of the visible portion
+    timestamp = clip.start_trim + (clip.effective_duration / 2) if clip.duration else None
+    if generate_thumbnail(clip_path, thumb_path, timestamp):
+        clip.thumbnail_filename = thumb_name
+        db.commit()
+
+
 def get_video_metadata(file_path: str) -> dict:
     """Extract video metadata using FFprobe."""
     try:
@@ -166,6 +219,90 @@ async def convert_source_to_clip(
     db.commit()
     db.refresh(clip)
 
+    create_clip_thumbnail(clip, current_user.id, project_id, db)
+
+    return clip
+
+
+@router.post("/{project_id}/clips/from-asset", response_model=VideoClipResponse)
+async def create_clip_from_asset(
+    project_id: int,
+    body: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a clip from an existing source asset file."""
+    import shutil
+
+    asset_filename = body.get("asset_filename")
+    if not asset_filename:
+        raise HTTPException(status_code=400, detail="asset_filename is required")
+
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.owner_id == current_user.id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    source_path = file_service.get_file_path(
+        current_user.id, project_id, "source", asset_filename
+    )
+    if not os.path.exists(source_path):
+        raise HTTPException(status_code=404, detail="Asset file not found")
+
+    clips_dir = os.path.dirname(
+        file_service.get_file_path(current_user.id, project_id, "clips", "dummy")
+    )
+    os.makedirs(clips_dir, exist_ok=True)
+
+    clip_path = os.path.join(clips_dir, asset_filename)
+    if not os.path.exists(clip_path):
+        shutil.copy2(source_path, clip_path)
+
+    metadata = get_video_metadata(clip_path)
+    duration = None
+    width = None
+    height = None
+    fps = None
+
+    if 'streams' in metadata:
+        for stream in metadata['streams']:
+            if stream.get('codec_type') == 'video':
+                duration = float(stream.get('duration', 0))
+                width = stream.get('width')
+                height = stream.get('height')
+                fps_str = stream.get('r_frame_rate', '0/1')
+                if '/' in fps_str:
+                    num, denom = fps_str.split('/')
+                    fps = float(num) / float(denom) if float(denom) != 0 else None
+                break
+
+    if not duration and 'format' in metadata:
+        duration = float(metadata['format'].get('duration', 0))
+
+    clip_count = db.query(VideoClip).filter(
+        VideoClip.project_id == project_id
+    ).count()
+
+    clip = VideoClip(
+        project_id=project_id,
+        filename=asset_filename,
+        original_name=asset_filename,
+        original_order=clip_count,
+        timeline_order=clip_count,
+        duration=duration,
+        width=width,
+        height=height,
+        fps=fps,
+        clip_metadata=metadata
+    )
+    db.add(clip)
+    db.commit()
+    db.refresh(clip)
+
+    create_clip_thumbnail(clip, current_user.id, project_id, db)
+
     return clip
 
 
@@ -241,6 +378,8 @@ async def upload_clip(
     db.add(clip)
     db.commit()
     db.refresh(clip)
+
+    create_clip_thumbnail(clip, current_user.id, project_id, db)
 
     return clip
 
@@ -405,6 +544,8 @@ async def duplicate_clip(
     db.commit()
     db.refresh(new_clip)
 
+    create_clip_thumbnail(new_clip, current_user.id, project_id, db)
+
     return new_clip
 
 
@@ -484,6 +625,10 @@ async def split_clip(
     db.commit()
     db.refresh(original_clip)
     db.refresh(new_clip)
+
+    # Generate thumbnails for both halves
+    create_clip_thumbnail(original_clip, current_user.id, project_id, db)
+    create_clip_thumbnail(new_clip, current_user.id, project_id, db)
 
     return {
         "original_clip": original_clip,
@@ -628,7 +773,8 @@ async def stitch_clips(
                         path=sfx_path,
                         start_time=sfx.start_time,
                         duration=sfx.duration,
-                        volume=sfx.volume or 1.0
+                        volume=sfx.volume or 1.0,
+                        speed=sfx.speed or 1.0
                     ))
 
     # Gather BGM if requested

@@ -51,3 +51,25 @@ def init_db():
         VideoClip, Transition, BackgroundAudio
     )
     Base.metadata.create_all(bind=engine)
+
+    # Migrate existing tables: add rendered_filename to transitions if missing
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    if "transitions" in insp.get_table_names():
+        columns = [c["name"] for c in insp.get_columns("transitions")]
+        if "rendered_filename" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE transitions ADD COLUMN rendered_filename VARCHAR(255)"
+                ))
+                conn.commit()
+
+    # Migrate video_clips: add thumbnail_filename column
+    if "video_clips" in insp.get_table_names():
+        columns = [c["name"] for c in insp.get_columns("video_clips")]
+        if "thumbnail_filename" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE video_clips ADD COLUMN thumbnail_filename VARCHAR(255)"
+                ))
+                conn.commit()

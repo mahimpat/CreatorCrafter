@@ -35,8 +35,11 @@ def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
         import whisper
+        import torch
         from app.config import settings
-        _whisper_model = whisper.load_model(settings.WHISPER_MODEL)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        _whisper_model = whisper.load_model(settings.WHISPER_MODEL, device=device)
+        print(f"Whisper model loaded on {device}", file=sys.stderr)
     return _whisper_model
 
 
@@ -111,6 +114,21 @@ def get_llm_client():
             print("openai package not installed", file=sys.stderr)
         except Exception as e:
             print(f"Failed to init OpenAI: {e}", file=sys.stderr)
+
+    # Try Ollama (local LLM - no API key needed)
+    if settings.OLLAMA_BASE_URL:
+        try:
+            import ollama as ollama_lib
+            # Quick connectivity check
+            client = ollama_lib.Client(host=settings.OLLAMA_BASE_URL)
+            client.list()  # Verify connection
+            _llm_client = ('ollama', client)
+            print(f"Using Ollama ({settings.OLLAMA_MODEL}) for audio description generation", file=sys.stderr)
+            return _llm_client
+        except ImportError:
+            print("ollama package not installed", file=sys.stderr)
+        except Exception as e:
+            print(f"Failed to connect to Ollama at {settings.OLLAMA_BASE_URL}: {e}", file=sys.stderr)
 
     return None
 
@@ -4328,6 +4346,21 @@ Output ONLY the sound description, nothing else."""
             )
             return response.choices[0].message.content.strip()
 
+        elif client_type == 'ollama':
+            from app.config import settings
+            response = client.chat(
+                model=settings.OLLAMA_MODEL,
+                messages=[{"role": "user", "content": prompt + "\n/no_think"}],
+                options={"num_predict": 200, "temperature": 0.7},
+            )
+            result = response.message.content.strip()
+            # qwen3 may include <think>...</think> reasoning tags — strip them
+            import re
+            result = re.sub(r'<think>[\s\S]*?</think>', '', result).strip()
+            # Also handle unclosed <think> blocks (truncated output)
+            result = re.sub(r'<think>[\s\S]*$', '', result).strip()
+            return result if result else None
+
     except Exception as e:
         print(f"LLM audio description generation failed: {e}", file=sys.stderr)
         return None
@@ -4415,6 +4448,11 @@ def transcribe_audio(
             confidence = probs[detected_lang]
 
             print(f"Detected language: {detected_lang} (confidence: {confidence:.2%})", file=sys.stderr)
+
+            # If confidence is low, fall back to English to avoid garbage output
+            if confidence < 0.5:
+                print(f"Low confidence ({confidence:.2%}) for '{detected_lang}', falling back to English", file=sys.stderr)
+                detected_lang = 'en'
 
             # Map common language codes to names for logging
             lang_names = {

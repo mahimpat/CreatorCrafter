@@ -52,6 +52,7 @@ class FileService:
         (project_path / "source").mkdir(parents=True, exist_ok=True)
         (project_path / "sfx").mkdir(parents=True, exist_ok=True)
         (project_path / "exports").mkdir(parents=True, exist_ok=True)
+        (project_path / "transitions").mkdir(parents=True, exist_ok=True)
 
     async def save_uploaded_file(
         self,

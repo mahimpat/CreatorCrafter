@@ -189,6 +189,7 @@ class TransitionResponse(BaseModel):
     parameters: Optional[Dict[str, Any]]
     ai_suggested: int
     confidence: Optional[float]
+    rendered_filename: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

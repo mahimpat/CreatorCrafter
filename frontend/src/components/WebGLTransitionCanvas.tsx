@@ -2,6 +2,7 @@
  * WebGLTransitionCanvas Component
  *
  * Renders professional WebGL-based video transitions using gl-transitions shaders.
+ * Uses a snapshot canvas as the "from" source (no dual-video needed).
  * Positioned as an overlay above the video player, visible only during transitions.
  */
 
@@ -10,8 +11,8 @@ import { useWebGLTransition, TransitionConfig } from '../hooks/useWebGLTransitio
 import './WebGLTransitionCanvas.css';
 
 export interface WebGLTransitionCanvasProps {
-  /** Reference to the "from" video element (current clip) */
-  fromVideoRef: React.RefObject<HTMLVideoElement>;
+  /** Reference to the "from" source — a canvas snapshot of the outgoing clip */
+  fromRef: React.RefObject<HTMLCanvasElement | HTMLVideoElement>;
   /** Reference to the "to" video element (next clip) */
   toVideoRef: React.RefObject<HTMLVideoElement>;
   /** Active transition configuration, null when no transition */
@@ -20,16 +21,19 @@ export interface WebGLTransitionCanvasProps {
   onTransitionComplete?: () => void;
   /** Callback for transition progress updates */
   onTransitionProgress?: (progress: number) => void;
+  /** Callback when WebGL transition fails (shader compilation etc.) */
+  onTransitionError?: (error: string) => void;
   /** Additional CSS class name */
   className?: string;
 }
 
 export function WebGLTransitionCanvas({
-  fromVideoRef,
+  fromRef,
   toVideoRef,
   transition,
   onTransitionComplete,
   onTransitionProgress,
+  onTransitionError,
   className = '',
 }: WebGLTransitionCanvasProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,51 +45,26 @@ export function WebGLTransitionCanvas({
     isSupported,
   } = useWebGLTransition({
     canvasRef,
-    fromVideoRef,
+    fromRef,
     toVideoRef,
     onComplete: onTransitionComplete,
     onProgress: onTransitionProgress,
+    onError: onTransitionError,
   });
 
   // Start transition when config changes
   useEffect(() => {
     if (transition && isSupported) {
       startTransition(transition);
-    } else if (!transition && isTransitioning) {
+    } else if (!transition) {
       stopTransition();
     }
-  }, [transition, isSupported, startTransition, stopTransition, isTransitioning]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transition, isSupported]);
 
-  // Match canvas size to video dimensions
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const video = fromVideoRef.current;
-
-    if (!canvas || !video) return;
-
-    const updateSize = () => {
-      if (video.videoWidth && video.videoHeight) {
-        // Set internal canvas resolution
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-      }
-    };
-
-    // Update on video metadata load
-    video.addEventListener('loadedmetadata', updateSize);
-    // Initial update
-    updateSize();
-
-    return () => {
-      video.removeEventListener('loadedmetadata', updateSize);
-    };
-  }, [fromVideoRef]);
-
-  // Show canvas only during active transitions
-  const isVisible = isTransitioning || (transition !== null && isSupported);
+  const isVisible = isTransitioning;
 
   if (!isSupported) {
-    // Return null if WebGL not supported - fallback to CSS transitions
     return <></>;
   }
 
@@ -99,6 +78,7 @@ export function WebGLTransitionCanvas({
         left: 0,
         width: '100%',
         height: '100%',
+        objectFit: 'contain',
         opacity: isVisible ? 1 : 0,
         pointerEvents: 'none',
         zIndex: 26,
